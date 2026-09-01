@@ -1,0 +1,18 @@
+{
+  "description": "Enforce Testgen command and run-policy boundaries.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Edit|Grep|Read|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/validate-bash.cjs"],
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
