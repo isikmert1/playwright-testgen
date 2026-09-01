@@ -1,0 +1,4 @@
+This project builds on CLI and agent-workflow patterns from Microsoft Playwright.
+
+Microsoft does not endorse this project, and no Microsoft or Playwright source
+code is vendored here.
