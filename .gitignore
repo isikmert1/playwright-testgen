@@ -1,0 +1,13 @@
+node_modules/
+.cache/
+.eslintcache
+.prettiercache
+.claude/settings.local.json
+*.log
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.DS_Store
+Thumbs.db
