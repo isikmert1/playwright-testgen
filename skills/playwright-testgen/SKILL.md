@@ -45,8 +45,12 @@ Keep writes single-threaded. After preflight, Main delegates the Author stage to
 Author grounds the scenario, explores the running application, writes and lints
 the spec, emits its handoff, and stops without running the test. A human then
 chooses `run`, `skip`, or `adjust`; never auto-advance. `skip` ends with the spec
-unverified, `adjust` returns the scenario to Author, and only `run` lets Healer
-execute, diagnose, make bounded repairs, and report its trace.
+unverified, `adjust` returns the scenario to Author, and only `run` lets Main
+delegate a fresh-context `playwright-testgen:playwright-test-healer` with the
+run ID, target repository, exact approved spec, original criteria, validated
+handoff, and known runner, route, auth, environment, and data facts. Healer
+executes, diagnoses, makes bounded repairs, and reports its trace; Main never
+performs Healer work.
 
 ## Reference loading
 

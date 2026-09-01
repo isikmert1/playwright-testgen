@@ -43,14 +43,19 @@ write, or debug.
    questions.
 5. The human chooses exactly one checkpoint action:
    - `run`: available only after lint succeeds; freeze the reviewed candidate
-     and give it to a fresh-context Healer.
+     and delegate `playwright-testgen:playwright-test-healer` in fresh context
+     with explicit approval, the run ID, target repository, exact approved spec
+     path, original criteria, validated handoff, and known project, config,
+     route, auth, environment, and test-data facts. Never pass Author's
+     reasoning transcript.
    - `skip`: end as `generated-unverified` and say exactly, "Explored live;
      spec never executed."
    - `adjust`: return the original scenario, current spec, and exact human
      feedback to Author; repeat lint, handoff, and checkpoint.
-6. Healer reads the approved spec, original criteria, and validated handoff. It
-   executes, classifies any failure, performs only permitted repairs, emits a
-   trace, and stops at the healing limits.
+6. Healer verifies the delegated scope, reads the approved spec, original
+   criteria, and validated handoff, then executes only that spec. It classifies
+   each failure, performs only permitted repairs, emits a trace, and stops at
+   the healing limits.
 7. Main reports the outcome and applies `cleanup-contract.md` on every exit.
 
 Never auto-advance through the checkpoint. When lint fails, offer only `adjust`
