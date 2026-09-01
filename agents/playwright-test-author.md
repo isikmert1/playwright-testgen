@@ -66,11 +66,24 @@ observable outcome, stop with the missing fact instead of guessing.
 
 Run every browser command through the target repository's local executable:
 translate official examples from `playwright-cli ...` to
-`npm exec --no -- playwright-cli ...`. Use a named session derived only from
-the supplied run ID, navigate only within the supplied target host, and inspect
-meaningful state changes and assertion points rather than snapshotting every
-action. An external authentication redirect, missing required data, or repeated
+`npm exec --no -- playwright-cli ...`. Run them as
+`cd .playwright-cli/testgen/<run_id> && PWTEST_CLI_GLOBAL_CONFIG=. npm exec --no -- playwright-cli ...`
+so automatic output stays in run-owned scratch and automatic home/repository
+CLI config-file loading is suppressed. Never create a CLI config inside the run
+directory. The hook also rejects inherited `PLAYWRIGHT_MCP_*` configuration and
+`PLAYWRIGHT_CLI_SESSION`; return that prerequisite to Main rather than working
+around it. Use
+`-s=<run_id>` as the named session, navigate only within the supplied target
+origins in the run-owned command policy, and inspect meaningful state changes
+and assertion points rather than snapshotting every action. After every action
+that may navigate, verify the reported page URL before another interaction. An
+external authentication redirect, missing required data, or repeated
 exploration with no new evidence is a blocker.
+
+When Main approved an existing authentication state, load only its exact
+`allowed_state_paths` argument through `state-load`. Never inspect, copy,
+generate, or substitute storage-state content. Without an approved path, use
+the target's normal unauthenticated flow or return the authentication blocker.
 
 Source explains intended behavior; the live application proves rendered
 mechanics. When the product contradicts a criterion, keep the criterion as the
