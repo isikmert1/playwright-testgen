@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "playwright-testgen",
+  "displayName": "Playwright Testgen",
+  "description": "Generates Playwright end-to-end tests grounded in a running app and rejects vacuous tests.",
+  "author": {
+    "name": "isikmert"
+  },
+  "repository": "https://github.com/isikmert1/playwright-testgen",
+  "license": "Apache-2.0"
+}
