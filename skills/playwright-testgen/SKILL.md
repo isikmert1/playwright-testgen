@@ -13,18 +13,40 @@ application proves what actually renders.
 
 Run the workflow inside the target repository. That repository must already
 provide its required Playwright runtime, including `playwright`,
-`@playwright/test`, and `@playwright/cli`. Do not install, vendor, or resolve
-those packages from this plugin repository. If a required local package is
-missing, stop and report the target-repository prerequisite.
+`@playwright/test`, and `@playwright/cli`. Never install or resolve those
+packages from this plugin repository.
+
+Main runs this read-only preflight from the target package directory before
+every generation, even when a `/setup` profile exists:
+
+```sh
+node -e "for (const id of ['playwright/package.json','@playwright/test/package.json','@playwright/cli/package.json']) require.resolve(id)"
+npm exec --no -- playwright-cli --help
+```
+
+The help output must identify an installed, current official `playwright-cli`
+skill. If any package or the skill is missing or outdated, stop before Author.
+When `/setup` is available, it owns guided detection and approved remediation;
+its prior result never replaces this runtime preflight. Until `/setup` ships,
+Main offers one explicit manual choice for the skill:
+
+- project-local: `npm exec --no -- playwright-cli install --skills`
+- user-global: `npm exec --no -- playwright-cli install --skills=agents -g`
+
+Never run either installation without user approval. Author never installs or
+updates packages or skills. The official skill owns CLI command mechanics only.
+This skill owns criteria, orchestration, checkpoints, handoffs, and healing,
+and wins when the workflows differ.
 
 ## Core flow
 
-Keep writes single-threaded. Author grounds the scenario, explores the running
-application, writes and lints the spec, emits its handoff, and stops without
-running the test. A human then chooses `run`, `skip`, or `adjust`; never
-auto-advance. `skip` ends with the spec unverified, `adjust` returns the
-scenario to Author, and only `run` lets Healer execute, diagnose, make bounded
-repairs, and report its trace.
+Keep writes single-threaded. After preflight, Main delegates the Author stage to
+`playwright-testgen:playwright-test-author`; Main never performs Author work.
+Author grounds the scenario, explores the running application, writes and lints
+the spec, emits its handoff, and stops without running the test. A human then
+chooses `run`, `skip`, or `adjust`; never auto-advance. `skip` ends with the spec
+unverified, `adjust` returns the scenario to Author, and only `run` lets Healer
+execute, diagnose, make bounded repairs, and report its trace.
 
 ## Reference loading
 

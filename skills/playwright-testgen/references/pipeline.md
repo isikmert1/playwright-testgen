@@ -8,6 +8,7 @@ dispositions. The workflow handles exactly one written scenario at a time.
 | Work                                                              | Owner                      |
 | ----------------------------------------------------------------- | -------------------------- |
 | Coordinate the run and present decisions                          | Main session               |
+| Validate target runtime prerequisites before generation           | Main session               |
 | Ground the scenario and explore the live app                      | Author                     |
 | Write and lint the candidate spec                                 | Author                     |
 | Approve, skip, or redirect the candidate                          | Human                      |
@@ -22,27 +23,35 @@ write, or debug.
 
 ## Ordered flow
 
-1. Main receives one written scenario, preserves its acceptance criteria,
-   identifies the target repository and proposed spec path, and creates the
-   run ID under `artifact-contract.md` before Author starts.
-2. Author grounds in relevant source and nearby tests, explores the running app
-   with Playwright CLI, verifies its locator choices, self-checks, writes one
-   spec, lints every touched test file, emits the Author handoff, and stops.
-   Author never runs the spec.
-3. Main validates the handoff and presents the candidate path, covered
+1. Main runs the read-only runtime preflight from `SKILL.md`. A `/setup`
+   profile never replaces this check. Missing or outdated prerequisites stop
+   the flow before Author and route to `/setup` when available; generation
+   never installs them.
+2. Main receives one written scenario, preserves its acceptance criteria,
+   assigns stable local criterion identifiers and a non-sensitive scenario
+   reference, identifies the target repository and proposed spec path, and
+   creates the run ID under `artifact-contract.md` before Author starts.
+3. Main delegates the Author stage to
+   `playwright-testgen:playwright-test-author` with the run ID, original
+   criteria, target repository, proposed spec path, and known route, auth, and
+   data facts. Author grounds in relevant source and nearby tests, explores the
+   running app with Playwright CLI, verifies its locator choices, self-checks,
+   writes one spec, lints every touched test file, emits the Author handoff, and
+   stops. Author never runs the spec.
+4. Main validates the handoff and presents the candidate path, covered
    criteria, meaningful assertions, lint result, assumptions, and open
    questions.
-4. The human chooses exactly one checkpoint action:
+5. The human chooses exactly one checkpoint action:
    - `run`: available only after lint succeeds; freeze the reviewed candidate
      and give it to a fresh-context Healer.
    - `skip`: end as `generated-unverified` and say exactly, "Explored live;
      spec never executed."
    - `adjust`: return the original scenario, current spec, and exact human
      feedback to Author; repeat lint, handoff, and checkpoint.
-5. Healer reads the approved spec, original criteria, and validated handoff. It
+6. Healer reads the approved spec, original criteria, and validated handoff. It
    executes, classifies any failure, performs only permitted repairs, emits a
    trace, and stops at the healing limits.
-6. Main reports the outcome and applies `cleanup-contract.md` on every exit.
+7. Main reports the outcome and applies `cleanup-contract.md` on every exit.
 
 Never auto-advance through the checkpoint. When lint fails, offer only `adjust`
 or `skip`; do not run, change configuration, or weaken the spec.
