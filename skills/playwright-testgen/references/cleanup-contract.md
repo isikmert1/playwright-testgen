@@ -5,9 +5,15 @@ resource when it is created so each exit can release only run-owned resources.
 
 ## Run-owned resources
 
-- Use a named Playwright CLI session derived from the supplied `run_id`.
+- Use a named Playwright CLI session derived from the supplied `run_id` when
+  the workflow opens the session. For `--debug=cli`, attach only to the exact
+  runner-emitted session and associate that session with the `run_id`; never
+  derive or rename its identifier.
 - Direct every workflow-controlled snapshot, download, trace, and debug file to
   `.playwright-cli/testgen/<run-id>/` in the target repository.
+- Run attached Playwright CLI inspection commands with that validated run
+  directory as their working directory so auto-generated CLI output remains a
+  child of run-owned scratch.
 - Track the background test process started for `--debug=cli`.
 - Track test-owned product data separately; its teardown follows
   `test-policy.md` and the target repository's fixtures.
