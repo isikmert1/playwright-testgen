@@ -22,9 +22,10 @@ Use the first rung that can be verified:
 1. Role plus accessible name, such as `getByRole`.
 2. Associated label, placeholder, or visible text.
 3. The target repository's existing test-id convention, but only when grounded
-   evidence identifies it. It may be `data-testid`, `data-test`, `data-cy`, or
-   a bare custom attribute. Use configured `testIdAttribute` or a narrowly
-   scoped `page.locator()` when `getByTestId()` does not match that convention.
+   evidence identifies it. It may be `data-testid`, `data-test`, `data-cy`,
+   `test-id`, or another bare custom attribute. Use configured
+   `testIdAttribute` or a narrowly scoped `page.locator()` when
+   `getByTestId()` does not match that convention.
 4. Scoped CSS inside a verified semantic container.
 5. `.first()`, `.nth()`, or `.last()` only as a last resort. Add a why-comment
    at the call site stating what scoping and filtering were tried and why no
@@ -35,13 +36,15 @@ Never skip a stronger verified rung because a weaker selector is shorter.
 ## Convention detection
 
 A known convention comes from a repository profile. Without one, Author gets
-one count-only repository grep for `data-testid`, `data-test`, and `data-cy`.
-Report counts by spelling, do not open the matches for further investigation,
-and choose a convention only when the result is conclusive. A bare custom
-attribute is eligible only when normal grounding already found an explicit
-Playwright `testIdAttribute` configuration; do not spend another read to hunt
-for one. Record the selected convention or an explicit no-result outcome in
-the handoff.
+one count-only grep over repository-tracked source, test, and Playwright config
+files for the exact attribute names `data-testid`, `data-test`, `data-cy`, and
+`test-id`. Do not count `data-test` inside `data-testid`. Report counts by
+spelling, do not open the matches for further investigation, and choose a
+convention only when the result is conclusive. A bare custom attribute is
+eligible only when normal grounding already found an explicit Playwright
+`testIdAttribute` configuration; do not spend another read to hunt for one.
+Record the selected convention or an explicit no-result outcome in the
+handoff.
 
 No conclusive result is valid: skip rung 3 and continue to scoped CSS. Never
 invent a convention.
