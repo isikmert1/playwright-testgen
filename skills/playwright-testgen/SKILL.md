@@ -65,4 +65,5 @@ create a second routing layer.
 - [failure-taxonomy.md](references/failure-taxonomy.md) — Read this when a run fails, before assigning its cause, remedy, or next owner.
 - [healing-protocol.md](references/healing-protocol.md) — Read this when Healer is authorized to run or debug a spec, and before repairing a failure.
 - [artifact-contract.md](references/artifact-contract.md) — Read this before starting Author to create the run ID, and when creating, validating, or consuming an Author handoff or Healer trace.
+- [mutation-check.md](references/mutation-check.md) — Read this when a controlled fixture or explicitly approved repository adapter is available for product-behavior mutation verification.
 - [cleanup-contract.md](references/cleanup-contract.md) — Read this when browser sessions or scratch artifacts may be created, and before any exit path.

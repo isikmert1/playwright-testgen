@@ -70,6 +70,12 @@ or debug.
    Author and Healer must never edit it; preserve it through Healer and never
    treat it as a handoff artifact.
 
+   When a controlled fixture or explicitly approved repository adapter makes
+   mutation verification available, Main captures the `pre-author` boundary
+   with the exact command in `artifact-contract.md`. Do this after the policy
+   exists and before delegating Author. If capture fails, stop before Author;
+   never continue with an incomplete repository-state baseline.
+
 3. Main delegates the Author stage to
    `playwright-testgen:playwright-test-author` with the run ID, original
    criteria, target repository, proposed spec path, and known route, auth, and
@@ -90,6 +96,10 @@ or debug.
      route, auth, environment, and test-data facts. Before delegation, Main
      confirms `approved_spec` still names the reviewed file and records any
      exact approved project/config arguments in `allowed_runner_options`.
+     When the run has a pre-Author change manifest, capture its `checkpoint`
+     boundary after this human approval and before Healer delegation. A failed
+     capture returns the repository-state conflict to the human and blocks the
+     run.
      Never pass Author's reasoning transcript.
      Before delegation, Main writes the exact two-byte draft `{}` at
      `.playwright-cli/testgen/<run_id>/healer-trace.json` and passes that path.
@@ -105,7 +115,9 @@ or debug.
    each failure, performs only permitted repairs, replaces the declared trace
    draft with the complete artifact, validates
    `.playwright-cli/testgen/<run_id>/healer-trace.json`, and stops at the
-   healing limits.
+   healing limits. When the run has a change manifest, Main validates the trace
+   and captures `post-healer` before any mutation check. A failed capture is a
+   repository-state verification error, never a successful test result.
 7. Main reports the outcome and applies `cleanup-contract.md` on every exit.
 
 Never auto-advance through the checkpoint. When lint fails, offer only `adjust`
