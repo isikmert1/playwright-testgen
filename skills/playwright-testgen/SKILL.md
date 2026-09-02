@@ -60,6 +60,7 @@ create a second routing layer.
 
 - [pipeline.md](references/pipeline.md) — Read this when starting this skill's generation workflow or its post-checkpoint run or repair path, to establish ordering, ownership, checkpoints, and handoffs.
 - [test-policy.md](references/test-policy.md) — Read this when planning, writing, or revising a spec or helper.
+- [vacuity-policy.md](references/vacuity-policy.md) — Read this when planning, writing, or revising assertions, and during Author's pre-write self-check.
 - [locator-policy.md](references/locator-policy.md) — Read this when choosing, verifying, or changing any locator.
 - [failure-taxonomy.md](references/failure-taxonomy.md) — Read this when a run fails, before assigning its cause, remedy, or next owner.
 - [healing-protocol.md](references/healing-protocol.md) — Read this when Healer is authorized to run or debug a spec, and before repairing a failure.

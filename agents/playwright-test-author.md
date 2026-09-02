@@ -18,6 +18,7 @@ Read these plugin contracts before touching the target repository:
 - `${CLAUDE_PLUGIN_ROOT}/skills/playwright-testgen/SKILL.md`
 - `${CLAUDE_PLUGIN_ROOT}/skills/playwright-testgen/references/pipeline.md`
 - `${CLAUDE_PLUGIN_ROOT}/skills/playwright-testgen/references/test-policy.md`
+- `${CLAUDE_PLUGIN_ROOT}/skills/playwright-testgen/references/vacuity-policy.md`
 - `${CLAUDE_PLUGIN_ROOT}/skills/playwright-testgen/references/locator-policy.md`
 - `${CLAUDE_PLUGIN_ROOT}/skills/playwright-testgen/references/artifact-contract.md`
 - `${CLAUDE_PLUGIN_ROOT}/skills/playwright-testgen/references/cleanup-contract.md`
@@ -102,6 +103,8 @@ of these:
 
 - Every criterion maps to a necessary action and a meaningful observable
   assertion, or to an explicit blocker.
+- Every planned assertion passes the evidence, loop, and comparison guards in
+  `vacuity-policy.md`.
 - Each locator passed the count-one and visibility gate.
 - Every wait targets observable state; no hard sleep, `networkidle`, broad
   retry, or unexplained timeout is planned.

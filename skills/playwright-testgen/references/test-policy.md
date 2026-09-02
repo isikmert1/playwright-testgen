@@ -33,8 +33,8 @@ win.
 - Use `test.step()` only for meaningful user-flow phases, not every click.
 - Keep the behavior under test and its meaningful assertions visible in the
   spec; helpers may prepare or navigate but must not hide the scenario.
-- Assertions name concrete values, state, routes, or side effects. Do not treat
-  "completed without throwing" as success.
+- Apply `vacuity-policy.md` to every planned assertion. A criterion is not
+  covered unless its assertion can fail when the required behavior is absent.
 - Author lints every touched spec and helper with the repository's existing
   command, records the result, and never executes the spec.
 
