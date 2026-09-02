@@ -330,7 +330,19 @@ test('rejects a schema that no longer matches the bundled contract', () => {
       for (const directory of ['hooks', 'schemas', 'scripts'])
         mkdirSync(path.join(plugin, directory));
       for (const [source, destination] of [
-        ['hooks/validate-bash.cjs', 'hooks/validate-bash.cjs'],
+        ['hooks/run-policy.cjs', 'hooks/run-policy.cjs'],
+        [
+          'scripts/artifact-validation-common.cjs',
+          'scripts/artifact-validation-common.cjs',
+        ],
+        [
+          'scripts/validate-author-handoff.cjs',
+          'scripts/validate-author-handoff.cjs',
+        ],
+        [
+          'scripts/validate-healer-trace.cjs',
+          'scripts/validate-healer-trace.cjs',
+        ],
         [
           'scripts/validate-testgen-artifact.cjs',
           'scripts/validate-testgen-artifact.cjs',
