@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "playwright-testgen/author-handoff.v1",
+  "title": "Author handoff v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "run_id",
+    "scenario_ref",
+    "spec_path",
+    "criteria",
+    "locators",
+    "test_id_convention",
+    "test_id_additions",
+    "lint",
+    "test_data_strategy",
+    "touched_paths",
+    "assumptions",
+    "open_questions"
+  ],
+  "properties": {
+    "schema_version": { "const": "author-handoff.v1" },
+    "run_id": { "type": "string", "pattern": "^tg-[a-f0-9]{24}$" },
+    "scenario_ref": { "type": "string", "minLength": 1, "maxLength": 160 },
+    "spec_path": { "type": "string", "minLength": 1, "maxLength": 240 },
+    "criteria": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "assertion_location", "outcome"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1, "maxLength": 80 },
+          "assertion_location": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240
+          },
+          "outcome": { "type": "string", "minLength": 1, "maxLength": 200 }
+        }
+      }
+    },
+    "locators": {
+      "type": "array",
+      "maxItems": 40,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["purpose", "locator", "strategy", "live_count", "visible"],
+        "properties": {
+          "purpose": { "type": "string", "minLength": 1, "maxLength": 160 },
+          "locator": { "type": "string", "minLength": 1, "maxLength": 240 },
+          "strategy": {
+            "enum": ["role", "label", "text", "test-id", "css", "positional"]
+          },
+          "live_count": { "type": "integer", "const": 1 },
+          "visible": { "const": true }
+        }
+      }
+    },
+    "test_id_convention": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^(?:none-found|[A-Za-z_][A-Za-z0-9_.:-]{0,63})$"
+    },
+    "test_id_additions": {
+      "type": "array",
+      "maxItems": 10,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "attribute", "purpose"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1, "maxLength": 240 },
+          "attribute": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "pattern": "^(?!none-found$)[A-Za-z_][A-Za-z0-9_.:-]{0,63}$"
+          },
+          "purpose": { "type": "string", "minLength": 1, "maxLength": 160 }
+        }
+      }
+    },
+    "lint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command", "status", "diagnostics"],
+      "properties": {
+        "command": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "status": { "enum": ["pass", "fixed", "failed", "command-failed"] },
+        "diagnostics": {
+          "type": "array",
+          "maxItems": 10,
+          "items": { "type": "string", "minLength": 1, "maxLength": 200 }
+        }
+      }
+    },
+    "test_data_strategy": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 160
+    },
+    "touched_paths": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 20,
+      "items": { "type": "string", "minLength": 1, "maxLength": 240 }
+    },
+    "assumptions": {
+      "type": "array",
+      "maxItems": 10,
+      "items": { "type": "string", "minLength": 1, "maxLength": 200 }
+    },
+    "open_questions": {
+      "type": "array",
+      "maxItems": 10,
+      "items": { "type": "string", "minLength": 1, "maxLength": 200 }
+    }
+  }
+}

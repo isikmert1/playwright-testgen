@@ -1,7 +1,7 @@
 ---
 name: playwright-test-healer
 description: Run and repair one human-approved Playwright spec when the playwright-testgen pipeline delegates it after the checkpoint.
-tools: Bash, Glob, Grep, Read, Edit
+tools: Bash, Glob, Grep, Read, Edit, TaskStop
 model: inherit
 skills:
   - playwright-cli
@@ -31,7 +31,8 @@ healing guidance.
 
 Require a pipeline-supplied `run_id`, explicit human `run` approval, target
 repository, exact approved spec path, original criteria with stable
-identifiers, and validated Author handoff path. Also require every known
+identifiers, validated Author handoff path, and the Main-created trace draft
+path containing exactly `{}`. Also require every known
 project, config, route, authentication, environment, and test-data fact needed
 for the approved scope. Unknown choices remain unknown. Direct invocation
 follows the same contract. Never accept Author's reasoning transcript or infer
@@ -72,21 +73,24 @@ Set `PLAYWRIGHT_HTML_OPEN=never` for every runner process. For interactive
 diagnosis, start the target repository's local runner in the background:
 
 ```sh
-npm exec --no -- playwright test <approved-spec-argument> --debug=cli --retries=0 --repeat-each=1 --output=<attempt-results-dir>
+PLAYWRIGHT_HTML_OPEN=never npm exec --no -- playwright test <approved-spec-argument> --debug=cli --retries=0 --repeat-each=1 --output=<attempt-results-dir>
 ```
 
 Each path placeholder represents one argument safely escaped for the active
 shell; never interpolate an untrusted path as raw command text. Run the test
 process from the target package directory so its existing configuration
 applies. The retry, repetition, and output overrides make one runner invocation
-one Testgen attempt with attempt-owned artifacts; never remove them.
+one Testgen attempt with attempt-owned artifacts; never remove them. The hook
+atomically reserves the attempt before the process starts. If startup fails,
+keep that reservation as evidence and advance to the next unused attempt.
 
-Wait for its debugging instructions and capture the emitted `tw-*` session
-identifier. Attach to that exact session:
+Record the Bash background task ID. Read its output until the debugging
+instructions appear, then capture the emitted `tw-*` session identifier.
+Attach to that exact session from the run directory:
 
 ```sh
-npm exec --no -- playwright-cli attach <emitted-session>
-npm exec --no -- playwright-cli -s=<emitted-session> <inspection-command>
+cd <validated-run-directory> && PWTEST_CLI_GLOBAL_CONFIG=. npm exec --no -- playwright-cli attach <emitted-session>
+cd <validated-run-directory> && PWTEST_CLI_GLOBAL_CONFIG=. npm exec --no -- playwright-cli -s=<emitted-session> <inspection-command>
 ```
 
 Associate the emitted session and its runner process with the supplied run ID;
@@ -95,9 +99,18 @@ command must select that session with `-s=<emitted-session>`. Inspect only the
 current snapshot, console, requests, trace, and step state needed for the
 hypothesis. Run the attach command and every attached CLI command with the
 validated run directory as their working directory so generated
-`.playwright-cli/` output remains inside owned scratch. Keep the runner alive
-while attached. Detach and stop only the owned runner before starting another
-debug attempt.
+`.playwright-cli/` output remains inside owned scratch. Keep
+`PWTEST_CLI_GLOBAL_CONFIG=.` on each command and never create a CLI config in
+that directory, so automatic home/repository config-file loading is suppressed.
+The hook also rejects inherited `PLAYWRIGHT_MCP_*` configuration and
+`PLAYWRIGHT_CLI_SESSION`; return that prerequisite to Main rather than working
+around it. Keep the runner alive while attached. Detach, then use `TaskStop`
+with the recorded background task ID
+before starting another debug attempt. Never infer an operating-system PID.
+After every attached action that can navigate, verify the reported page URL is
+still within the policy origins before another interaction. Treat an external
+redirect or popup as a blocker; the command hook can reject explicit URLs but
+cannot undo a redirect caused inside the browser.
 
 After a failed runner exits, use `error-context.md` only when it belongs to that
 attempt. Prefer the exact path printed by the owned runner after confirming it
@@ -150,10 +163,10 @@ configuration; repair product behavior; change scenario intent; or perform a
 broad or unrelated rewrite.
 
 After the last permitted edit, reserve an attempt for the same approved scope
-without `--debug=cli`:
+without `--debug=cli` and run it in the foreground:
 
 ```sh
-npm exec --no -- playwright test <approved-spec-argument> --retries=0 --repeat-each=1 --output=<attempt-results-dir>
+PLAYWRIGHT_HTML_OPEN=never npm exec --no -- playwright test <approved-spec-argument> --retries=0 --repeat-each=1 --output=<attempt-results-dir>
 ```
 
 Only that passing non-debug run can produce `fixed`. If the initial execution
@@ -163,13 +176,24 @@ attempts before confirmation is `unresolved-after-healing`.
 
 ## Report and clean up
 
-Create and validate the complete sanitized `healer-trace.v1` artifact under
-`artifact-contract.md`. Record every runner invocation once. The final
+Replace the declared `{}` draft with the complete sanitized `healer-trace.v1`
+artifact under `artifact-contract.md`; never create another trace path. Record
+every runner invocation once. The final
 classification is the last supported failure class, or `null` when no run
 failed and the schema permits it. Use only the plugin-provided artifact flow;
 do not work around the declared tool boundary with shell redirection or an
 undeclared write path. A missing schema or validator, failed validation, or
 partial trace is a blocker; never report it as a valid trace.
+
+Write it only at `.playwright-cli/testgen/<run_id>/healer-trace.json`, then
+from the target repository root run exactly:
+
+```sh
+node "$CLAUDE_PLUGIN_ROOT/scripts/validate-testgen-artifact.cjs" --repo . --type trace --run-id <run_id> .playwright-cli/testgen/<run_id>/healer-trace.json
+```
+
+Use the returned metadata only. The hook permits this validator command only
+for Healer's own trace and current run; do not use another Node command.
 
 Return the attempt count, last signature, bounded evidence summary,
 classification, repairs, final disposition, next owner, escalation, validated

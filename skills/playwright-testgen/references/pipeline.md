@@ -18,8 +18,9 @@ dispositions. The workflow handles exactly one written scenario at a time.
 
 Writes stay sequential. Author is the only pre-checkpoint spec writer. Healer
 may edit the approved spec only within `healing-protocol.md`; it never performs
-a broad rewrite. The main session coordinates and reports but does not explore,
-write, or debug.
+a broad rewrite. The main session coordinates, writes only transient run
+policy/artifacts, and reports; it does not explore, write product or test files,
+or debug.
 
 ## Ordered flow
 
@@ -30,7 +31,38 @@ write, or debug.
 2. Main receives one written scenario, preserves its acceptance criteria,
    assigns stable local criterion identifiers and a non-sensitive scenario
    reference, identifies the target repository and proposed spec path, and
-   creates the run ID under `artifact-contract.md` before Author starts.
+   creates the run ID with
+   `node "$CLAUDE_PLUGIN_ROOT/scripts/create-testgen-run-id.cjs"` under
+   `artifact-contract.md` before Author starts. Main
+   also writes `.playwright-cli/testgen/<run_id>/command-policy.json` with only
+   this shape:
+
+   ```json
+   {
+     "approved_spec": "tests/account.spec.ts",
+     "allowed_runner_options": [],
+     "allowed_state_paths": [],
+     "format_version": 1,
+     "run_id": "tg-<24hex>",
+     "allowed_origins": ["https://app.example.test"]
+   }
+   ```
+
+   The origin above is illustrative; it is never a default. `approved_spec` is
+   the proposed repository-relative spec path. Each allowed origin is an exact
+   HTTP(S) scheme, host, and port without a path or credentials. Include only
+   origins explicitly supplied for the target application. If none is known,
+   stop and ask rather than starting Author.
+   `allowed_runner_options` is initially empty and may contain only exact
+   `--project=<name>` or `--config=<path>` arguments explicitly selected by
+   Main. `allowed_state_paths` contains only existing target-repository storage
+   state files explicitly supplied or approved for this scenario, expressed as
+   exact paths relative to the run directory; keep it empty otherwise. Agents
+   may pass an approved path to `state-load` but never read or copy its content.
+   This transient Main-owned policy binds the shared PreToolUse hook to the run.
+   Author and Healer must never edit it; preserve it through Healer and never
+   treat it as a handoff artifact.
+
 3. Main delegates the Author stage to
    `playwright-testgen:playwright-test-author` with the run ID, original
    criteria, target repository, proposed spec path, and known route, auth, and
@@ -38,7 +70,9 @@ write, or debug.
    running app with Playwright CLI, verifies its locator choices, self-checks,
    writes one spec, lints every touched test file, emits the Author handoff, and
    stops. Author never runs the spec.
-4. Main validates the handoff and presents the candidate path, covered
+4. Main validates `.playwright-cli/testgen/<run_id>/handoff.json` before
+   reporting it, using the exact validator command in `artifact-contract.md`,
+   and presents the candidate path, covered
    criteria, meaningful assertions, lint result, assumptions, and open
    questions.
 5. The human chooses exactly one checkpoint action:
@@ -46,16 +80,25 @@ write, or debug.
      and delegate `playwright-testgen:playwright-test-healer` in fresh context
      with explicit approval, the run ID, target repository, exact approved spec
      path, original criteria, validated handoff, and known project, config,
-     route, auth, environment, and test-data facts. Never pass Author's
-     reasoning transcript.
+     route, auth, environment, and test-data facts. Before delegation, Main
+     confirms `approved_spec` still names the reviewed file and records any
+     exact approved project/config arguments in `allowed_runner_options`.
+     Never pass Author's reasoning transcript.
+     Before delegation, Main writes the exact two-byte draft `{}` at
+     `.playwright-cli/testgen/<run_id>/healer-trace.json` and passes that path.
+     This Main-owned placeholder gives Healer's `Edit`-only mutation boundary a
+     declared trace file; it is not an artifact and no consumer may read or
+     report it until Healer replaces it and validation succeeds.
    - `skip`: end as `generated-unverified` and say exactly, "Explored live;
      spec never executed."
    - `adjust`: return the original scenario, current spec, and exact human
      feedback to Author; repeat lint, handoff, and checkpoint.
 6. Healer verifies the delegated scope, reads the approved spec, original
    criteria, and validated handoff, then executes only that spec. It classifies
-   each failure, performs only permitted repairs, emits a trace, and stops at
-   the healing limits.
+   each failure, performs only permitted repairs, replaces the declared trace
+   draft with the complete artifact, validates
+   `.playwright-cli/testgen/<run_id>/healer-trace.json`, and stops at the
+   healing limits.
 7. Main reports the outcome and applies `cleanup-contract.md` on every exit.
 
 Never auto-advance through the checkpoint. When lint fails, offer only `adjust`
