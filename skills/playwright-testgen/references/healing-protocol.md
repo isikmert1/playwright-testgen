@@ -4,6 +4,13 @@ Healer runs only after the human chooses `run`. It starts from clean context and
 reads the approved spec, original criteria, and validated Author handoff—not
 Author's reasoning transcript.
 
+## Contents
+
+- [Preconditions](#preconditions)
+- [Bounded loop](#bounded-loop)
+- [Repair boundaries](#repair-boundaries)
+- [Reporting and cleanup](#reporting-and-cleanup)
+
 ## Preconditions
 
 - Confirm the target repository already resolves `playwright`,

@@ -1,6 +1,7 @@
 ---
 name: playwright-testgen
 description: Use when turning one written scenario into a grounded Playwright end-to-end spec, or running and repairing a spec produced by that workflow.
+license: Apache-2.0
 ---
 
 # Playwright Testgen

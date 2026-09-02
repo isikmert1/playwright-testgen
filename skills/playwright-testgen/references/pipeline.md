@@ -3,6 +3,13 @@
 This file owns role boundaries, ordering, the human checkpoint, and final
 dispositions. The workflow handles exactly one written scenario at a time.
 
+## Contents
+
+- [Ownership](#ownership)
+- [Ordered flow](#ordered-flow)
+- [Final dispositions](#final-dispositions)
+- [Handoff boundary](#handoff-boundary)
+
 ## Ownership
 
 | Work                                                              | Owner                      |
