@@ -2,7 +2,7 @@
   "name": "playwright-testgen",
   "version": "0.0.0",
   "private": true,
-  "description": "Generates Playwright end-to-end tests grounded in a running app and rejects vacuous tests.",
+  "description": "Claude Code plugin for grounded Playwright test generation and repair using the official Playwright CLI.",
   "license": "Apache-2.0",
   "scripts": {
     "format": "prettier --write .",

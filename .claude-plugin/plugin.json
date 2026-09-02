@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "playwright-testgen",
   "displayName": "Playwright Testgen",
-  "description": "Generates Playwright end-to-end tests grounded in a running app and rejects vacuous tests.",
+  "description": "Claude Code plugin for grounded Playwright test generation and repair using the official Playwright CLI.",
   "author": {
     "name": "isikmert"
   },
