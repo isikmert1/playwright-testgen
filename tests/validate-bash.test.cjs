@@ -741,6 +741,28 @@ test('denies governed agents from writing the run change manifest', () => {
   });
 });
 
+test('denies governed agents from writing the run vacuity report', () => {
+  withTargetRepository(({ runDirectory, targetRepository }) => {
+    const reportPath = path.join(runDirectory, 'vacuity-report.json');
+    writeFileSync(reportPath, '{}');
+
+    for (const agentType of [
+      'playwright-test-author',
+      'playwright-test-healer',
+    ]) {
+      const result = runToolHook(
+        targetRepository,
+        'Write',
+        { content: '{}', file_path: reportPath },
+        agentType,
+      );
+
+      assert.equal(result.permissionDecision, 'deny');
+      assert.match(result.permissionDecisionReason, /Main-owned/iu);
+    }
+  });
+});
+
 test(
   'protects owned policy paths with Windows case-insensitive spelling',
   { skip: process.platform !== 'win32' },

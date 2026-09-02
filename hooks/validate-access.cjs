@@ -133,7 +133,11 @@ function validateFileAccess(payload) {
     );
   }
 
-  const mainOwnedFiles = ['command-policy.json', 'change-manifest.json'];
+  const mainOwnedFiles = [
+    'command-policy.json',
+    'change-manifest.json',
+    'vacuity-report.json',
+  ];
   const namesRunOwned = mainOwnedFiles.some(
     (filename) =>
       (samePath(path.basename(lexical), filename) &&
@@ -143,7 +147,7 @@ function validateFileAccess(payload) {
   );
   if (namesRunOwned) {
     return deny(
-      'This run control file is Main-owned and immutable to Author and Healer. Return the update to Main instead of editing it.',
+      'This run artifact is Main-owned and immutable to Author and Healer. Return the update to Main instead of editing it.',
     );
   }
 
@@ -163,7 +167,7 @@ function validateFileAccess(payload) {
     });
     if (aliasesMainOwned) {
       return deny(
-        'This run control file is Main-owned and immutable to Author and Healer. Return the update to Main instead of editing it.',
+        'This run artifact is Main-owned and immutable to Author and Healer. Return the update to Main instead of editing it.',
       );
     }
   }

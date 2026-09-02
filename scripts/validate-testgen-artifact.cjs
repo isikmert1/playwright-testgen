@@ -21,6 +21,12 @@ const {
 } = require('./validate-author-handoff.cjs');
 const { validateTrace } = require('./validate-healer-trace.cjs');
 
+const ARTIFACT_FILENAMES = {
+  handoff: 'handoff.json',
+  trace: 'healer-trace.json',
+  vacuity: 'vacuity-report.json',
+};
+
 function main() {
   let options;
   try {
@@ -57,8 +63,7 @@ function main() {
     report(false, options.type, ['artifact-unavailable']);
     return;
   }
-  const filename =
-    options.type === 'handoff' ? 'handoff.json' : 'healer-trace.json';
+  const filename = ARTIFACT_FILENAMES[options.type];
   const expectedPath = path.join(
     repository,
     '.playwright-cli',
@@ -123,8 +128,20 @@ function main() {
       runPolicy,
       options.runId,
     );
-    if (handoffCriteria == null) errors.push('trace-handoff-unavailable');
-    validateTrace(artifact, repository, handoffCriteria, errors);
+    if (handoffCriteria == null)
+      errors.push(
+        options.type === 'trace'
+          ? 'trace-handoff-unavailable'
+          : 'report-handoff-unavailable',
+      );
+    if (options.type === 'trace')
+      validateTrace(artifact, repository, handoffCriteria, errors);
+    else {
+      const {
+        validateVacuityReport,
+      } = require('./validate-vacuity-report.cjs');
+      validateVacuityReport(artifact, repository, handoffCriteria, errors);
+    }
   }
   if (errors.length > 0) {
     report(false, options.type, errors);

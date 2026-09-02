@@ -106,5 +106,7 @@ part of the trusted adapter definition.
   timeout, or cleanup was invalid.
 
 An unrelated red mutant is `verification-error`, never `killed`. These are
-mechanism results; the persisted vacuity report and its pipeline decision are
-owned by the reporting gate.
+mechanism results. Main records them separately from assertion sensitivity in
+the `vacuity-report.v1` contract defined by `artifact-contract.md`;
+`verification-error` becomes the report's bounded behavior `error`. The report
+and its disposition remain owned by Main.

@@ -96,6 +96,39 @@ function trace(run = runId) {
   };
 }
 
+function vacuityReport(run = runId) {
+  return {
+    schema_version: 'vacuity-report.v1',
+    run_id: run,
+    spec_path: 'tests/account.spec.ts',
+    behavior: {
+      status: 'killed',
+      mutation: {
+        adapter_id: 'account-fixture',
+        mutation_id: 'disable-save',
+        criterion_id: 'criterion-1',
+        definition_digest: 'a'.repeat(64),
+        affected_paths: ['src/account.js'],
+      },
+      baseline: 'pass',
+      mutant: 'fail',
+      reason: null,
+      error: null,
+      isolation: 'disposable-worktree',
+      cleanup: 'removed',
+    },
+    assertion_sensitivity: {
+      status: 'not-run',
+      baseline: null,
+      mutant: null,
+      error: null,
+      isolation: 'not-run',
+      cleanup: 'not-run',
+    },
+    disposition: 'verified-non-vacuous',
+  };
+}
+
 function productFindingAttempt() {
   return {
     number: 1,
@@ -155,6 +188,12 @@ function writeArtifact(repository, run, name, artifact) {
   return relative;
 }
 
+function writeVacuityReport(repository, value) {
+  mkdirSync(path.join(repository, 'src'), { recursive: true });
+  writeFileSync(path.join(repository, 'src', 'account.js'), '');
+  return writeArtifact(repository, runId, 'vacuity-report.json', value);
+}
+
 function validate(repository, type, run, artifact) {
   return runScript(validatorPath, [
     '--repo',
@@ -210,6 +249,129 @@ test('accepts a valid fixed Healer trace in its run-owned location', () => {
 
     assert.equal(result.status, 0, result.stderr);
     assert.equal(JSON.parse(result.stdout).valid, true);
+  });
+});
+
+test('accepts a behavior-killed vacuity report for the approved spec', () => {
+  withRepository((repository) => {
+    const artifact = writeVacuityReport(repository, vacuityReport());
+    const result = validate(repository, 'vacuity', runId, artifact);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), {
+      valid: true,
+      type: 'vacuity',
+      run_id: runId,
+      artifact_path: artifact,
+    });
+  });
+});
+
+test('accepts assertion-only evidence without claiming behavior verification', () => {
+  withRepository((repository) => {
+    const value = vacuityReport();
+    value.behavior = {
+      status: 'unavailable',
+      mutation: null,
+      baseline: null,
+      mutant: null,
+      reason: 'adapter-absent',
+      error: null,
+      isolation: 'not-run',
+      cleanup: 'not-run',
+    };
+    value.assertion_sensitivity = {
+      status: 'killed',
+      baseline: 'pass',
+      mutant: 'fail',
+      error: null,
+      isolation: 'disposable-copy',
+      cleanup: 'removed',
+    };
+    value.disposition = 'assertion-sensitive-only';
+    const artifact = writeVacuityReport(repository, value);
+
+    const result = validate(repository, 'vacuity', runId, artifact);
+
+    assert.equal(result.status, 0, result.stderr);
+  });
+});
+
+test('rejects a vacuity disposition that overstates its evidence', () => {
+  withRepository((repository) => {
+    const value = vacuityReport();
+    value.behavior.status = 'survived';
+    value.behavior.mutant = 'pass';
+    const artifact = writeVacuityReport(repository, value);
+
+    const result = validate(repository, 'vacuity', runId, artifact);
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /report-disposition-mismatch/iu);
+  });
+});
+
+test('keeps conclusive behavior evidence authoritative over a secondary error', () => {
+  withRepository((repository) => {
+    for (const [status, mutant, disposition] of [
+      ['killed', 'fail', 'verified-non-vacuous'],
+      ['survived', 'pass', 'rejected-vacuous'],
+    ]) {
+      const value = vacuityReport();
+      value.behavior.status = status;
+      value.behavior.mutant = mutant;
+      value.assertion_sensitivity = {
+        status: 'error',
+        baseline: null,
+        mutant: null,
+        error: 'assertion-check-failed',
+        isolation: 'not-run',
+        cleanup: 'not-run',
+      };
+      value.disposition = disposition;
+      const artifact = writeVacuityReport(repository, value);
+
+      const result = validate(repository, 'vacuity', runId, artifact);
+
+      assert.equal(result.status, 0, `${disposition}: ${result.stderr}`);
+    }
+  });
+});
+
+test('limits unavailable reports to explicit coverage gaps', () => {
+  withRepository((repository) => {
+    const value = vacuityReport();
+    value.behavior = {
+      status: 'unavailable',
+      mutation: null,
+      baseline: null,
+      mutant: null,
+      reason: 'runner-failed',
+      error: null,
+      isolation: 'not-run',
+      cleanup: 'not-run',
+    };
+    value.assertion_sensitivity.status = 'not-run';
+    value.disposition = 'mutation-not-verified';
+    const artifact = writeVacuityReport(repository, value);
+
+    const result = validate(repository, 'vacuity', runId, artifact);
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /report-invalid-unavailable-reason/iu);
+  });
+});
+
+test('binds a selected mutation to an approved criterion', () => {
+  withRepository((repository) => {
+    const value = vacuityReport();
+    value.behavior.mutation.criterion_id = 'criterion-other';
+    const artifact = writeVacuityReport(repository, value);
+
+    const result = validate(repository, 'vacuity', runId, artifact);
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /report-unknown-criterion/iu);
   });
 });
 

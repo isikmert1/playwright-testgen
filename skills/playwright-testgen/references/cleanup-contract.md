@@ -17,6 +17,9 @@ resource when it is created so each exit can release only run-owned resources.
   `change-manifest.json` defined by `artifact-contract.md`. Retain it through
   the post-Healer mutation check so the active checkout and disposable checkout
   can be compared without storing file content.
+- Main owns `vacuity-report.json`. Write and validate it only when a fixed
+  result reaches the post-Healer vacuity gate, retain it until its disposition
+  is accepted, then remove it with the run directory.
 - Direct every workflow-controlled snapshot, download, trace, and debug file to
   `.playwright-cli/testgen/<run-id>/` in the target repository.
 - Run attached Playwright CLI inspection commands with that validated run
@@ -72,9 +75,9 @@ Raw snapshots, screenshots, videos, trace archives, DOM dumps, downloads, and
 runner logs controlled by this workflow are transient and belong in the run
 directory. When the target runner creates configured output elsewhere, report
 its repository-relative path and leave it target-owned rather than deleting
-outside the validated boundary. The validated handoff and trace may remain only
-while the run is active or paused for a human decision. Remove them after the
-final disposition has been reported and accepted.
+outside the validated boundary. The validated handoff, trace, and vacuity
+report may remain only while the run is active or paused for a human decision.
+Remove them after the final disposition has been reported and accepted.
 
 ## Exit behavior
 
@@ -85,9 +88,12 @@ final disposition has been reported and accepted.
   change-manifest boundary, candidate, and handoff for the Author revision.
 - **`skip`** — Close any accidentally live session, remove run scratch, and
   retain the generated spec as explicitly unverified.
-- **Healer reports `fixed` or a final nonfixed result** — Stop the owned runner,
-  close or detach the session, retain the sanitized run artifacts through any
-  approved mutation check, report the final result, then remove run scratch
+- **Healer reports `fixed`** — Stop the owned runner, close or detach the
+  session, retain the sanitized run artifacts through any approved mutation
+  check, write and validate the vacuity report, report its disposition, then
+  remove run scratch after acceptance.
+- **Healer reports a final nonfixed result** — Stop the owned runner, close or
+  detach the session, report Healer's final disposition, then remove run scratch
   after acceptance.
 - **Waiting for user input** — Stop the runner and close or detach immediately;
   retain only the sanitized validated JSON needed to resume.
