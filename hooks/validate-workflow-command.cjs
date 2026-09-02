@@ -572,6 +572,14 @@ function validateCleanup(cwd, args) {
       ? null
       : normalizePath(path.relative(loaded.policy.runDirectory, target));
   if (
+    relative === '' &&
+    existsSync(path.join(loaded.policy.runDirectory, 'change-manifest.json'))
+  ) {
+    return deny(
+      'The run contains Main-owned mutation state. Remove only the generated exploration or attempt child now; Main removes the full run directory after mutation verification.',
+    );
+  }
+  if (
     target == null ||
     ![
       '',

@@ -665,6 +665,23 @@ test('allows removal of only the exact run directory', () => {
   });
 });
 
+test('preserves Main-owned run state until mutation verification finishes', () => {
+  withTargetRepository(({ runDirectory, targetRepository }) => {
+    writeFileSync(path.join(runDirectory, 'change-manifest.json'), '{}');
+    const exactRun = `.playwright-cli/testgen/${runId}`;
+
+    const result = runHook(targetRepository, `rm -rf -- ${exactRun}`);
+
+    assert.equal(result.permissionDecision, 'deny');
+    assert.match(result.permissionDecisionReason, /Main-owned/iu);
+    assert.equal(
+      runHook(targetRepository, `rm -rf -- ${exactRun}/.playwright-cli`)
+        .permissionDecision,
+      'allow',
+    );
+  });
+});
+
 test('does not govern unrelated agents', () => {
   withTargetRepository(({ targetRepository }) => {
     const result = runHook(targetRepository, 'git status', 'code-reviewer');
@@ -688,6 +705,39 @@ test('denies agent edits to the run command policy', () => {
       result.permissionDecisionReason,
       /return the update to Main/iu,
     );
+  });
+});
+
+test('denies governed agents from writing the run change manifest', () => {
+  withTargetRepository(({ runDirectory, targetRepository }) => {
+    const manifestPath = path.join(runDirectory, 'change-manifest.json');
+    writeFileSync(manifestPath, '{}');
+
+    for (const agentType of [
+      'playwright-test-author',
+      'playwright-test-healer',
+    ]) {
+      const result = runToolHook(
+        targetRepository,
+        'Write',
+        { content: '{}', file_path: manifestPath },
+        agentType,
+      );
+
+      assert.equal(result.permissionDecision, 'deny');
+      assert.match(result.permissionDecisionReason, /Main-owned/iu);
+    }
+
+    const aliasPath = path.join(targetRepository, 'manifest-link.json');
+    linkSync(manifestPath, aliasPath);
+    const aliasResult = runToolHook(targetRepository, 'Edit', {
+      file_path: aliasPath,
+      new_string: 'changed',
+      old_string: '{}',
+      replace_all: false,
+    });
+    assert.equal(aliasResult.permissionDecision, 'deny');
+    assert.match(aliasResult.permissionDecisionReason, /Main-owned/iu);
   });
 });
 
