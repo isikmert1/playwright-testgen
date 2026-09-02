@@ -137,7 +137,15 @@ Write and validate the complete `author-handoff.v1` artifact under
 partial handoff is a blocker. Return the spec path, criterion-to-assertion
 summary, lint result, assumptions, open questions, touched paths, and validated
 handoff path. Do not include a reasoning transcript or prohibited artifact
-content.
+content. Write it only at `.playwright-cli/testgen/<run_id>/handoff.json`, then
+from the target repository root run exactly:
+
+```sh
+node "$CLAUDE_PLUGIN_ROOT/scripts/validate-testgen-artifact.cjs" --repo . --type handoff --run-id <run_id> .playwright-cli/testgen/<run_id>/handoff.json
+```
+
+Use the returned metadata only. The hook permits this validator command only
+for Author's own handoff and current run; do not use another Node command.
 
 Apply `cleanup-contract.md` on every exit. At the checkpoint, close the owned
 CLI session, remove raw exploration evidence, retain only the validated

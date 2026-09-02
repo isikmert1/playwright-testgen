@@ -31,7 +31,8 @@ healing guidance.
 
 Require a pipeline-supplied `run_id`, explicit human `run` approval, target
 repository, exact approved spec path, original criteria with stable
-identifiers, and validated Author handoff path. Also require every known
+identifiers, validated Author handoff path, and the Main-created trace draft
+path containing exactly `{}`. Also require every known
 project, config, route, authentication, environment, and test-data fact needed
 for the approved scope. Unknown choices remain unknown. Direct invocation
 follows the same contract. Never accept Author's reasoning transcript or infer
@@ -175,13 +176,24 @@ attempts before confirmation is `unresolved-after-healing`.
 
 ## Report and clean up
 
-Create and validate the complete sanitized `healer-trace.v1` artifact under
-`artifact-contract.md`. Record every runner invocation once. The final
+Replace the declared `{}` draft with the complete sanitized `healer-trace.v1`
+artifact under `artifact-contract.md`; never create another trace path. Record
+every runner invocation once. The final
 classification is the last supported failure class, or `null` when no run
 failed and the schema permits it. Use only the plugin-provided artifact flow;
 do not work around the declared tool boundary with shell redirection or an
 undeclared write path. A missing schema or validator, failed validation, or
 partial trace is a blocker; never report it as a valid trace.
+
+Write it only at `.playwright-cli/testgen/<run_id>/healer-trace.json`, then
+from the target repository root run exactly:
+
+```sh
+node "$CLAUDE_PLUGIN_ROOT/scripts/validate-testgen-artifact.cjs" --repo . --type trace --run-id <run_id> .playwright-cli/testgen/<run_id>/healer-trace.json
+```
+
+Use the returned metadata only. The hook permits this validator command only
+for Healer's own trace and current run; do not use another Node command.
 
 Return the attempt count, last signature, bounded evidence summary,
 classification, repairs, final disposition, next owner, escalation, validated

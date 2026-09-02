@@ -934,3 +934,111 @@ test('denies an unapproved executable and names the local npm alternative', () =
     );
   });
 });
+
+test('allows only the matching role to validate its exact run artifact', () => {
+  withTargetRepository(({ targetRepository }) => {
+    const pluginRoot = repositoryRoot;
+    const validator =
+      '"$CLAUDE_PLUGIN_ROOT/scripts/validate-testgen-artifact.cjs"';
+    const command = `node ${validator} --repo . --type handoff --run-id ${runId} .playwright-cli/testgen/${runId}/handoff.json`;
+    const allowed = runToolHook(
+      targetRepository,
+      'Bash',
+      { command },
+      'playwright-test-author',
+      { CLAUDE_PLUGIN_ROOT: pluginRoot },
+    );
+
+    assert.equal(allowed.permissionDecision, 'allow');
+
+    const healerCommand = `node ${validator} --repo . --type trace --run-id ${runId} .playwright-cli/testgen/${runId}/healer-trace.json`;
+    const healerAllowed = runToolHook(
+      targetRepository,
+      'Bash',
+      { command: healerCommand },
+      'playwright-test-healer',
+      { CLAUDE_PLUGIN_ROOT: pluginRoot },
+    );
+
+    assert.equal(healerAllowed.permissionDecision, 'allow');
+  });
+});
+
+test('denies validator role or artifact-type mismatches', () => {
+  withTargetRepository(({ targetRepository }) => {
+    const validator =
+      '"$CLAUDE_PLUGIN_ROOT/scripts/validate-testgen-artifact.cjs"';
+    for (const [agentType, type, filename] of [
+      ['playwright-test-author', 'trace', 'healer-trace.json'],
+      ['playwright-test-healer', 'handoff', 'handoff.json'],
+    ]) {
+      const result = runToolHook(
+        targetRepository,
+        'Bash',
+        {
+          command: `node ${validator} --repo . --type ${type} --run-id ${runId} .playwright-cli/testgen/${runId}/${filename}`,
+        },
+        agentType,
+        { CLAUDE_PLUGIN_ROOT: repositoryRoot },
+      );
+
+      assert.equal(result.permissionDecision, 'deny');
+      assert.match(result.permissionDecisionReason, /artifact type/iu);
+    }
+  });
+});
+
+test('denies arbitrary Node commands for governed roles', () => {
+  withTargetRepository(({ targetRepository }) => {
+    const result = runHook(targetRepository, 'node -e "process.exit(0)"');
+
+    assert.equal(result.permissionDecision, 'deny');
+    assert.match(
+      result.permissionDecisionReason,
+      /plugin artifact validator/iu,
+    );
+  });
+});
+
+test('binds artifact mutations to the role that owns each artifact', () => {
+  withTargetRepository(({ runDirectory, targetRepository }) => {
+    const handoffPath = path.join(runDirectory, 'handoff.json');
+    const tracePath = path.join(runDirectory, 'healer-trace.json');
+    writeFileSync(handoffPath, '{}');
+    writeFileSync(tracePath, '{}');
+
+    for (const [agentType, filePath] of [
+      ['playwright-test-healer', handoffPath],
+      ['playwright-test-author', tracePath],
+    ]) {
+      const result = runToolHook(
+        targetRepository,
+        'Edit',
+        { file_path: filePath },
+        agentType,
+      );
+
+      assert.equal(result.permissionDecision, 'deny');
+      assert.match(result.permissionDecisionReason, /role-owned artifact/iu);
+    }
+
+    assert.deepEqual(
+      runToolHook(
+        targetRepository,
+        'Write',
+        { file_path: handoffPath },
+        'playwright-test-author',
+      ),
+      {},
+    );
+    assert.deepEqual(
+      runToolHook(
+        targetRepository,
+        'Edit',
+        { file_path: tracePath },
+        'playwright-test-healer',
+      ),
+      {},
+    );
+  });
+});

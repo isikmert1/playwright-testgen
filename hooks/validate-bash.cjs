@@ -388,11 +388,31 @@ function hasUnsupportedShellSyntax(command) {
   return quote != null;
 }
 
+function pluginValidatorPath() {
+  const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+  if (typeof pluginRoot !== 'string' || pluginRoot.length === 0) return null;
+  const validator = path.resolve(
+    pluginRoot,
+    'scripts',
+    'validate-testgen-artifact.cjs',
+  );
+  try {
+    return statSync(validator).isFile() ? validator : null;
+  } catch {
+    return null;
+  }
+}
+
 function parseCommand(command, cwd) {
+  const validator = pluginValidatorPath();
   let tokens;
   try {
     tokens = parse(command, (name) =>
-      name === '' ? '$' : { expansion: name },
+      name === 'CLAUDE_PLUGIN_ROOT' && validator != null
+        ? path.dirname(path.dirname(validator))
+        : name === ''
+          ? '$'
+          : { expansion: name },
     );
   } catch {
     return {
@@ -972,6 +992,60 @@ function validateCleanup(cwd, args) {
   );
 }
 
+function validateArtifactValidator(cwd, args, agentType) {
+  const expectedType = agentType.endsWith('playwright-test-author')
+    ? 'handoff'
+    : 'trace';
+  const expectedFilename =
+    expectedType === 'handoff' ? 'handoff.json' : 'healer-trace.json';
+  const validator = pluginValidatorPath();
+  if (
+    validator == null ||
+    args.length !== 8 ||
+    !samePath(path.resolve(args[0] ?? ''), validator) ||
+    args[1] !== '--repo' ||
+    args[2] !== '.' ||
+    args[3] !== '--type' ||
+    args[5] !== '--run-id' ||
+    !RUN_ID.test(args[6] ?? '')
+  ) {
+    return deny(
+      'Only the plugin artifact validator is allowed through Node. Validate the exact role-owned artifact with its documented command.',
+    );
+  }
+  if (args[4] !== expectedType) {
+    return deny(
+      `The artifact type does not match this role. ${expectedType} is the only validator type allowed for this agent.`,
+    );
+  }
+  const loaded = requirePolicy(cwd, args[6]);
+  if (loaded.result != null) return loaded.result;
+  if (!samePath(cwd, loaded.policy.repositoryRoot)) {
+    return deny(
+      'Artifact validation must run from the target repository root. Use the documented validator command with --repo . after writing the run-owned artifact.',
+    );
+  }
+  const expectedArtifact = path.join(
+    loaded.policy.runDirectory,
+    expectedFilename,
+  );
+  const suppliedArtifact = resolveOwnedPath(cwd, args[7] ?? '', loaded.policy);
+  if (
+    suppliedArtifact == null ||
+    !samePath(suppliedArtifact, expectedArtifact) ||
+    normalizePath(args[7]) !==
+      `.playwright-cli/testgen/${args[6]}/${expectedFilename}`
+  ) {
+    return deny(
+      'Artifact validation must use the exact current run artifact path. Use the role-owned handoff.json or healer-trace.json under .playwright-cli/testgen/<run_id>/.',
+    );
+  }
+  return decision(
+    'allow',
+    'Plugin artifact validation is scoped to this role and exact current run artifact.',
+  );
+}
+
 function policiesAbove(cwd) {
   const policies = [];
   const seen = new Set();
@@ -1026,7 +1100,17 @@ function validateFileAccess(payload) {
   try {
     canonical = realpathSync(absolute);
   } catch {
-    // A new file has no canonical path yet; its resolved path is sufficient.
+    let ancestor = path.dirname(absolute);
+    while (!existsSync(ancestor) && path.dirname(ancestor) !== ancestor)
+      ancestor = path.dirname(ancestor);
+    try {
+      canonical = path.resolve(
+        realpathSync(ancestor),
+        path.relative(ancestor, absolute),
+      );
+    } catch {
+      // The normal tool sandbox handles paths with no resolvable ancestor.
+    }
   }
 
   const normalized = normalizePath(canonical);
@@ -1046,6 +1130,30 @@ function validateFileAccess(payload) {
   }
 
   if (payload.tool_name === 'Read') return {};
+
+  for (const policy of policiesNear(payload.cwd, absolute, canonical)) {
+    for (const [filename, owner] of [
+      ['handoff.json', 'playwright-test-author'],
+      ['healer-trace.json', 'playwright-test-healer'],
+    ]) {
+      const expected = path.join(policy.runDirectory, filename);
+      const canonicalExpected = path.join(
+        policy.canonicalRunDirectory,
+        filename,
+      );
+      const exact =
+        samePath(absolute, expected) &&
+        (!existsSync(absolute) || samePath(canonical, canonicalExpected));
+      const aliasesArtifact =
+        exact || sameFile(expected, absolute) || sameFile(expected, canonical);
+      if (!aliasesArtifact) continue;
+      if (!exact || !payload.agent_type.endsWith(owner)) {
+        return deny(
+          'This run artifact belongs to the other role or an aliased path. Mutate only the exact role-owned artifact: Author owns handoff.json and Healer owns healer-trace.json.',
+        );
+      }
+    }
+  }
 
   if (
     (runIdFromOwnedPath(lexical) != null &&
@@ -1184,6 +1292,10 @@ function evaluate(payload) {
     );
   }
 
+  if (executable === 'node' && split.assignments.length === 0) {
+    return validateArtifactValidator(parsed.cwd, args, payload.agent_type);
+  }
+
   if (executable === 'realpath' && split.assignments.length === 0) {
     return validateRealpath(parsed.cwd, args);
   }
@@ -1258,4 +1370,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { evaluate };
+module.exports = { evaluate, loadPolicy };
