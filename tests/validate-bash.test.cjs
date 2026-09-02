@@ -3,6 +3,7 @@ const {
   mkdirSync,
   mkdtempSync,
   linkSync,
+  readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -81,6 +82,40 @@ function runToolHook(
 function runHook(cwd, command, agentType = 'playwright-test-author') {
   return runToolHook(cwd, 'Bash', { command }, agentType);
 }
+
+test('denies malformed hook input instead of failing open', () => {
+  const result = spawnSync(process.execPath, [hookPath], {
+    encoding: 'utf8',
+    input: '{',
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr, '');
+
+  const output = JSON.parse(result.stdout).hookSpecificOutput;
+  assert.equal(output.hookEventName, 'PreToolUse');
+  assert.equal(output.permissionDecision, 'deny');
+  assert.match(
+    output.permissionDecisionReason,
+    /validation could not complete/iu,
+  );
+});
+
+test('allows main-thread calls without an agent type to remain ungoverned', () => {
+  const result = spawnSync(process.execPath, [hookPath], {
+    encoding: 'utf8',
+    input: JSON.stringify({
+      cwd: repositoryRoot,
+      hook_event_name: 'PreToolUse',
+      tool_input: { command: 'git status' },
+      tool_name: 'Bash',
+    }),
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr, '');
+  assert.deepEqual(JSON.parse(result.stdout), {});
+});
 
 function runCliHook(cwd, command, agentType = 'playwright-test-author') {
   return runHook(
@@ -916,6 +951,33 @@ test('asks before running a target repository script', () => {
     assert.match(
       result.permissionDecisionReason,
       /target repository's existing scoped lint or formatter/iu,
+    );
+  });
+});
+
+test('allows only the canonical read-only package preflight', () => {
+  withTargetRepository(({ targetRepository }) => {
+    const documentedPreflights = readFileSync(
+      path.join(repositoryRoot, 'skills', 'playwright-testgen', 'SKILL.md'),
+      'utf8',
+    ).match(/^node -e ".+"$/gmu);
+
+    assert.equal(documentedPreflights?.length, 1);
+    const [preflight] = documentedPreflights;
+
+    assert.equal(
+      runHook(targetRepository, preflight).permissionDecision,
+      'allow',
+    );
+    assert.equal(
+      runHook(
+        targetRepository,
+        preflight.replace(
+          'require.resolve(id)',
+          "require.resolve(id); require('node:fs')",
+        ),
+      ).permissionDecision,
+      'deny',
     );
   });
 });
