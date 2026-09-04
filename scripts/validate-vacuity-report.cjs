@@ -2,6 +2,7 @@ const path = require('node:path');
 const {
   comparableRepoPath,
   isFile,
+  isIdentifier,
   isObject,
   isRepoPath,
   isText,
@@ -9,7 +10,6 @@ const {
   requireFields,
   validatePath,
 } = require('./artifact-validation-common.cjs');
-const { isIdentifier } = require('./mutation-adapter.cjs');
 
 const OUTCOMES = new Set([null, 'pass', 'fail', 'error']);
 const BEHAVIOR_STATUSES = new Set([

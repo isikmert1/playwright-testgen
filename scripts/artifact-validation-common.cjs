@@ -3,16 +3,17 @@ const { readFileSync, realpathSync, statSync } = require('node:fs');
 const path = require('node:path');
 
 const RUN_ID = /^tg-[a-f0-9]{24}$/u;
+const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$/u;
 const SCHEMAS = {
   handoff: {
     filename: 'author-handoff.v1.schema.json',
     version: 'author-handoff.v1',
-    hash: '5cc69a16d0240e293c93393d6e9ae24603a072491da745f41ffdc7e1d7f52d60',
+    hash: '7021f22a0d03e831ef272f797e60573020959d79e6edd1b38b2890d26a9b1ac4',
   },
   trace: {
     filename: 'healer-trace.v1.schema.json',
     version: 'healer-trace.v1',
-    hash: '7e96ee2d29342047991f6ee835f63cd2677f8d0630f11bc049d278b74b06763b',
+    hash: '66b4eb06580a63dd3f5aa3367d718a46afdef54295cfd9fdfd7f5a4706e2320f',
   },
   vacuity: {
     filename: 'vacuity-report.v1.schema.json',
@@ -121,6 +122,10 @@ function isText(value, maximum) {
     value.length <= maximum &&
     !/[\r\n]/u.test(value)
   );
+}
+
+function isIdentifier(value) {
+  return typeof value === 'string' && ID.test(value);
 }
 
 function isFile(value) {
@@ -273,6 +278,7 @@ module.exports = {
   containsProhibited,
   isAttributeName,
   isFile,
+  isIdentifier,
   isInside,
   isObject,
   isRepoPath,

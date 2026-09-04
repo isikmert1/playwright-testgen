@@ -62,9 +62,9 @@ Resolve the exact run directory and verify it is a child of
 never delete `.playwright-cli/`, the target repository, generated specs, or
 other durable files. From the target repository, the bounded command is
 `rm -rf -- .playwright-cli/testgen/<run-id>`; do not omit the run ID or replace
-the path with a glob. While `change-manifest.json` exists, the hook reserves
-full run-directory removal for Main after mutation verification; governed
-agents may remove only the generated children described below.
+the path with a glob. Full run-directory removal belongs to Main after the
+result is accepted. Governed agents may remove only the generated children
+described below.
 
 When an active run must retain its handoff or policy, remove raw browser output
 only through exact run children: `.playwright-cli` for Author exploration, or

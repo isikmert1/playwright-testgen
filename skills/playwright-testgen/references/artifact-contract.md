@@ -103,7 +103,9 @@ Use schema version `author-handoff.v1`. It carries only what a clean-context
 Healer needs:
 
 - `run_id`, a non-sensitive `scenario_ref`, and `spec_path`;
-- criterion identifiers mapped to assertion locations and observable outcomes;
+- criterion identifiers matching
+  `^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$`, mapped to assertion locations and
+  observable outcomes;
 - locator decisions with purpose, locator, strategy, live count, and visibility
   result;
 - detected test-id convention or an explicit no-result outcome;
@@ -116,13 +118,14 @@ passes those separately at the checkpoint.
 
 The exact artifact path is
 `.playwright-cli/testgen/<run_id>/handoff.json`. `test_id_convention` is the
-actual grounded attribute name, such as `data-testid`, `test-id`, or a configured
-bare custom attribute; use the explicit `none-found` when detection is
-inconclusive. Every test-id addition must use that exact convention and its path
-must appear in `touched_paths`. Criterion assertion locations name a contained
-declared repository path and line. Lint status may be `pass`, `fixed`, `failed`,
-or `command-failed`; failed lint blocks `run` but still permits the pipeline's
-`adjust` or `skip` checkpoint.
+actual grounded attribute name, such as `data-testid`, `test-id`, or a
+configured bare custom attribute; use the explicit `none-found` when detection
+is inconclusive. `touched_paths` contains the approved spec and only unique
+regular repository files. Every test-id addition must use that exact convention,
+name a regular file in `touched_paths`, and not duplicate another addition.
+Criterion assertion locations name a contained declared repository path and
+line. Lint status may be `pass`, `fixed`, `failed`, or `command-failed`; failed
+lint blocks `run` but still permits the pipeline's `adjust` or `skip` checkpoint.
 
 ## Healer trace
 
@@ -139,8 +142,9 @@ Use schema version `healer-trace.v1`. Record:
 The exact artifact path is
 `.playwright-cli/testgen/<run_id>/healer-trace.json`. Include a separate top-level
 `repairs` collection of repairable attempt numbers, affected repository-relative
-paths, and concise reasons; an attempt's `action` remains a concise local action
-summary. A `fixed` trace must end with a passing non-debug confirmation attempt.
+regular-file paths, and concise reasons; paths are unique within each repair.
+An attempt's `action` remains a concise local action summary. A `fixed` trace
+must end with a passing non-debug confirmation attempt.
 `final_classification` is the last failed or blocked attempt's classification
 even when a later confirmation passes; it is `null` only when no attempt failed
 or blocked. For `product-behavior-wrong`, the classified attempt records a

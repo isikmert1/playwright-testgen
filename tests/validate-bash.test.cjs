@@ -642,12 +642,14 @@ test('allows canonical inspection of a current-attempt artifact', () => {
   });
 });
 
-test('allows removal of only the exact run directory', () => {
+test('reserves full run removal for Main', () => {
   withTargetRepository(({ targetRepository }) => {
     const exactRun = `.playwright-cli/testgen/${runId}`;
-    assert.equal(
-      runHook(targetRepository, `rm -rf -- ${exactRun}`).permissionDecision,
-      'allow',
+    const exact = runHook(targetRepository, `rm -rf -- ${exactRun}`);
+    assert.equal(exact.permissionDecision, 'deny');
+    assert.match(
+      exact.permissionDecisionReason,
+      /Main removes the full run directory/iu,
     );
 
     const parent = runHook(
@@ -657,23 +659,6 @@ test('allows removal of only the exact run directory', () => {
     assert.equal(parent.permissionDecision, 'deny');
     assert.match(parent.permissionDecisionReason, /exact run directory/iu);
 
-    assert.equal(
-      runHook(targetRepository, `rm -rf -- ${exactRun}/.playwright-cli`)
-        .permissionDecision,
-      'allow',
-    );
-  });
-});
-
-test('preserves Main-owned run state until mutation verification finishes', () => {
-  withTargetRepository(({ runDirectory, targetRepository }) => {
-    writeFileSync(path.join(runDirectory, 'change-manifest.json'), '{}');
-    const exactRun = `.playwright-cli/testgen/${runId}`;
-
-    const result = runHook(targetRepository, `rm -rf -- ${exactRun}`);
-
-    assert.equal(result.permissionDecision, 'deny');
-    assert.match(result.permissionDecisionReason, /Main-owned/iu);
     assert.equal(
       runHook(targetRepository, `rm -rf -- ${exactRun}/.playwright-cli`)
         .permissionDecision,

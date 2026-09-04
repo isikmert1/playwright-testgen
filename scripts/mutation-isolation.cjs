@@ -19,12 +19,12 @@ const {
   snapshotMap,
   validateArtifact,
 } = require('./change-manifest.cjs');
+const { definitionDigest, parseAdapter } = require('./mutation-adapter.cjs');
 const {
-  definitionDigest,
   isIdentifier,
-  parseAdapter,
-} = require('./mutation-adapter.cjs');
-const { isInside, portable } = require('./artifact-validation-common.cjs');
+  isInside,
+  portable,
+} = require('./artifact-validation-common.cjs');
 const { MutationCheckError } = require('./mutation-check-error.cjs');
 const {
   captureSnapshot,

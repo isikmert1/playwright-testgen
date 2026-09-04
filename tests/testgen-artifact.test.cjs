@@ -96,6 +96,30 @@ function trace(run = runId) {
   };
 }
 
+function repairedTrace(paths) {
+  const artifact = trace();
+  artifact.attempts.unshift({
+    number: 1,
+    kind: 'debug-run',
+    hypothesis: 'the saved locator no longer matches the control',
+    failure_signature: 'save-button-not-found',
+    evidence_summary: 'one renamed Save changes control was visible',
+    classification: 'selector-drift',
+    action: 'updated the approved spec locator',
+    outcome: 'fail',
+  });
+  artifact.attempts[1].number = 2;
+  artifact.repairs = [
+    {
+      attempt_number: 1,
+      paths,
+      reason: 'matched the renamed visible control',
+    },
+  ];
+  artifact.final_classification = 'selector-drift';
+  return artifact;
+}
+
 function vacuityReport(run = runId) {
   return {
     schema_version: 'vacuity-report.v1',
@@ -205,6 +229,13 @@ function validate(repository, type, run, artifact) {
     run,
     artifact,
   ]);
+}
+
+function assertRejected(repository, type, name, artifact, error) {
+  const artifactPath = writeArtifact(repository, runId, name, artifact);
+  const result = validate(repository, type, runId, artifactPath);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, error);
 }
 
 test('creates unique canonical Testgen run IDs', () => {
@@ -486,6 +517,134 @@ test('rejects a malformed Author handoff', () => {
 
     assert.equal(result.status, 1);
     assert.equal(JSON.parse(result.stderr).valid, false);
+  });
+});
+
+test('rejects criterion IDs that downstream artifacts cannot use', () => {
+  withRepository((repository) => {
+    const artifact = handoff();
+    artifact.criteria[0].id = 'criterion one';
+    assertRejected(
+      repository,
+      'handoff',
+      'handoff.json',
+      artifact,
+      /handoff-invalid-criterion-id/iu,
+    );
+  });
+});
+
+test('requires the approved spec in Author touched paths', () => {
+  withRepository((repository) => {
+    writeFileSync(path.join(repository, 'notes.md'), 'notes');
+    const artifact = handoff();
+    artifact.touched_paths = ['notes.md'];
+    assertRejected(
+      repository,
+      'handoff',
+      'handoff.json',
+      artifact,
+      /handoff-spec-not-touched/iu,
+    );
+  });
+});
+
+test('rejects duplicate Author touched paths', () => {
+  withRepository((repository) => {
+    const artifact = handoff();
+    artifact.touched_paths.push('tests/account.spec.ts');
+    assertRejected(
+      repository,
+      'handoff',
+      'handoff.json',
+      artifact,
+      /handoff-duplicate-touched-path/iu,
+    );
+  });
+});
+
+test('requires Author touched paths to be regular files', () => {
+  withRepository((repository) => {
+    const artifact = handoff();
+    artifact.touched_paths.push('tests');
+    assertRejected(
+      repository,
+      'handoff',
+      'handoff.json',
+      artifact,
+      /handoff-touched-not-file/iu,
+    );
+  });
+});
+
+test('rejects duplicate test-id additions', () => {
+  withRepository((repository) => {
+    const artifact = handoff();
+    artifact.test_id_convention = 'data-testid';
+    const addition = {
+      path: 'tests/account.spec.ts',
+      attribute: 'data-testid',
+      purpose: 'identify the save control',
+    };
+    artifact.test_id_additions = [addition, { ...addition }];
+    assertRejected(
+      repository,
+      'handoff',
+      'handoff.json',
+      artifact,
+      /handoff-duplicate-test-id-addition/iu,
+    );
+  });
+});
+
+test('requires test-id addition paths to be regular files', () => {
+  withRepository((repository) => {
+    const artifact = handoff();
+    artifact.test_id_convention = 'data-testid';
+    artifact.test_id_additions = [
+      {
+        path: 'tests',
+        attribute: 'data-testid',
+        purpose: 'identify the save control',
+      },
+    ];
+    artifact.touched_paths.push('tests');
+    assertRejected(
+      repository,
+      'handoff',
+      'handoff.json',
+      artifact,
+      /handoff-test-id-addition-not-file/iu,
+    );
+  });
+});
+
+test('rejects duplicate Healer repair paths', () => {
+  withRepository((repository) => {
+    const artifact = repairedTrace([
+      'tests/account.spec.ts',
+      'tests/account.spec.ts',
+    ]);
+    assertRejected(
+      repository,
+      'trace',
+      'healer-trace.json',
+      artifact,
+      /trace-duplicate-repair-path/iu,
+    );
+  });
+});
+
+test('requires Healer repair paths to be regular files', () => {
+  withRepository((repository) => {
+    const artifact = repairedTrace(['tests']);
+    assertRejected(
+      repository,
+      'trace',
+      'healer-trace.json',
+      artifact,
+      /trace-repair-not-file/iu,
+    );
   });
 });
 
