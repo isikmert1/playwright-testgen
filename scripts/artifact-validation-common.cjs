@@ -1,5 +1,5 @@
 const { createHash } = require('node:crypto');
-const { readFileSync, realpathSync, statSync } = require('node:fs');
+const { lstatSync, readFileSync, realpathSync } = require('node:fs');
 const path = require('node:path');
 
 const RUN_ID = /^tg-[a-f0-9]{24}$/u;
@@ -130,7 +130,7 @@ function isIdentifier(value) {
 
 function isFile(value) {
   try {
-    return statSync(value).isFile();
+    return lstatSync(value).isFile();
   } catch {
     return false;
   }

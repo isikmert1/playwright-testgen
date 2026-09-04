@@ -77,8 +77,14 @@ function validateMutation(value, repository, handoffCriteria, errors) {
     new Set(paths.map(comparableRepoPath)).size !== paths.length
   )
     errors.push('report-invalid-affected-paths');
-  for (const affectedPath of paths)
+  for (const affectedPath of paths) {
     validatePath(affectedPath, repository, errors, 'report-affected-path');
+    if (
+      isRepoPath(affectedPath) &&
+      !isFile(path.resolve(repository, affectedPath))
+    )
+      errors.push('report-affected-path-not-file');
+  }
 }
 
 function validateBehavior(value, repository, handoffCriteria, errors) {

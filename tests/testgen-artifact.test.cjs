@@ -461,6 +461,35 @@ test('binds a selected mutation to an approved criterion', () => {
   });
 });
 
+test('requires mutation affected paths to be regular files', () => {
+  withRepository((repository) => {
+    const value = vacuityReport();
+    value.behavior.mutation.affected_paths = ['src'];
+    const artifact = writeVacuityReport(repository, value);
+
+    const result = validate(repository, 'vacuity', runId, artifact);
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /report-affected-path-not-file/iu);
+  });
+});
+
+test('rejects symlinks as mutation affected paths', () => {
+  withRepository((repository) => {
+    const value = vacuityReport();
+    writeVacuityReport(repository, value);
+    const linkedPath = path.join(repository, 'src', 'linked-account.js');
+    symlinkSync(path.join(repository, 'src', 'account.js'), linkedPath, 'file');
+    value.behavior.mutation.affected_paths = ['src/linked-account.js'];
+    const artifact = writeVacuityReport(repository, value);
+
+    const result = validate(repository, 'vacuity', runId, artifact);
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /report-affected-path-not-file/iu);
+  });
+});
+
 test('accepts the target repository test filename and test-id convention', () => {
   withRepository((repository) => {
     const specPath = 'e2e/account-flow.e2e.ts';
@@ -476,6 +505,29 @@ test('accepts the target repository test filename and test-id convention', () =>
     const result = validate(repository, 'handoff', runId, artifact);
 
     assert.equal(result.status, 0, result.stderr);
+  });
+});
+
+test('rejects a symlink as the approved spec', () => {
+  withRepository((repository) => {
+    const specPath = 'tests/linked-account.spec.ts';
+    symlinkSync(
+      path.join(repository, 'tests', 'account.spec.ts'),
+      path.join(repository, specPath),
+      'file',
+    );
+    writePolicy(repository, specPath);
+    const value = handoff();
+    value.spec_path = specPath;
+    value.criteria[0].assertion_location = `${specPath}:18`;
+    value.touched_paths = [specPath];
+    assertRejected(
+      repository,
+      'handoff',
+      'handoff.json',
+      value,
+      /handoff-spec-unavailable/iu,
+    );
   });
 });
 
@@ -577,6 +629,24 @@ test('requires Author touched paths to be regular files', () => {
   });
 });
 
+test('rejects internal symlinks in Author touched paths', () => {
+  withRepository((repository) => {
+    const target = path.join(repository, 'tests', 'source.ts');
+    const linked = path.join(repository, 'tests', 'linked-source.ts');
+    writeFileSync(target, 'export const value = true;');
+    symlinkSync(target, linked, 'file');
+    const artifact = handoff();
+    artifact.touched_paths.push('tests/linked-source.ts');
+    assertRejected(
+      repository,
+      'handoff',
+      'handoff.json',
+      artifact,
+      /handoff-touched-not-file/iu,
+    );
+  });
+});
+
 test('rejects duplicate test-id additions', () => {
   withRepository((repository) => {
     const artifact = handoff();
@@ -619,6 +689,32 @@ test('requires test-id addition paths to be regular files', () => {
   });
 });
 
+test('rejects internal symlinks as test-id addition paths', () => {
+  withRepository((repository) => {
+    const target = path.join(repository, 'tests', 'source.ts');
+    const linked = path.join(repository, 'tests', 'linked-source.ts');
+    writeFileSync(target, 'export const value = true;');
+    symlinkSync(target, linked, 'file');
+    const artifact = handoff();
+    artifact.test_id_convention = 'data-testid';
+    artifact.test_id_additions = [
+      {
+        path: 'tests/linked-source.ts',
+        attribute: 'data-testid',
+        purpose: 'identify the save control',
+      },
+    ];
+    artifact.touched_paths.push('tests/linked-source.ts');
+    assertRejected(
+      repository,
+      'handoff',
+      'handoff.json',
+      artifact,
+      /handoff-test-id-addition-not-file/iu,
+    );
+  });
+});
+
 test('rejects duplicate Healer repair paths', () => {
   withRepository((repository) => {
     const artifact = repairedTrace([
@@ -638,6 +734,23 @@ test('rejects duplicate Healer repair paths', () => {
 test('requires Healer repair paths to be regular files', () => {
   withRepository((repository) => {
     const artifact = repairedTrace(['tests']);
+    assertRejected(
+      repository,
+      'trace',
+      'healer-trace.json',
+      artifact,
+      /trace-repair-not-file/iu,
+    );
+  });
+});
+
+test('rejects internal symlinks as Healer repair paths', () => {
+  withRepository((repository) => {
+    const target = path.join(repository, 'tests', 'source.ts');
+    const linked = path.join(repository, 'tests', 'linked-source.ts');
+    writeFileSync(target, 'export const value = true;');
+    symlinkSync(target, linked, 'file');
+    const artifact = repairedTrace(['tests/linked-source.ts']);
     assertRejected(
       repository,
       'trace',
