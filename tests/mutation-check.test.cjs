@@ -298,6 +298,8 @@ function verify(repository, adapterPath, definitionDigest) {
     runId,
     '--adapter',
     path.relative(repository, adapterPath),
+    '--mutation-id',
+    'disable-save',
     '--criterion-id',
     'criterion-1',
     '--approval-digest',
@@ -599,8 +601,12 @@ test('returns unavailable when the adapter has no criterion mutation', () => {
     const adapterPath = writeAdapter(repository, {
       mutation: { criterion_id: 'criterion-other' },
     });
-    const definitionDigest = commitAdapter(repository, adapterPath);
-    capturePassingRun(repository, runDirectory);
+    commitAdapter(repository, adapterPath);
+    writeApprovedCandidate(repository, runDirectory);
+    writeFileSync(
+      path.join(runDirectory, 'healer-trace.json'),
+      JSON.stringify(passingTrace()),
+    );
 
     const result = run(repository, [
       'verify',
@@ -612,8 +618,6 @@ test('returns unavailable when the adapter has no criterion mutation', () => {
       path.relative(repository, adapterPath),
       '--criterion-id',
       'criterion-1',
-      '--approval-digest',
-      definitionDigest,
     ]);
 
     assert.equal(result.status, 0, result.stderr);
@@ -625,6 +629,66 @@ test('returns unavailable when the adapter has no criterion mutation', () => {
       criterion_id: 'criterion-1',
       reason: 'criterion-unmapped',
     });
+  });
+});
+
+test('requires an exact approved selection for a mapped mutation', () => {
+  withRepository(({ repository, runDirectory }) => {
+    const adapterPath = writeAdapter(repository);
+    commitAdapter(repository, adapterPath);
+    writeApprovedCandidate(repository, runDirectory);
+    writeFileSync(
+      path.join(runDirectory, 'healer-trace.json'),
+      JSON.stringify(passingTrace()),
+    );
+
+    const result = run(repository, [
+      'verify',
+      '--repo',
+      '.',
+      '--run-id',
+      runId,
+      '--adapter',
+      path.relative(repository, adapterPath),
+      '--criterion-id',
+      'criterion-1',
+    ]);
+
+    assert.equal(result.status, 1);
+    const output = JSON.parse(result.stdout);
+    assert.equal(output.status, 'verification-error');
+    assert.equal(output.error, 'mutation-approval-required');
+  });
+});
+
+test('rejects a selected mutation mapped to another criterion', () => {
+  withRepository(({ repository, runDirectory }) => {
+    const adapterPath = writeAdapter(repository, {
+      mutation: { criterion_id: 'criterion-other' },
+    });
+    const definitionDigest = commitAdapter(repository, adapterPath);
+    capturePassingRun(repository, runDirectory);
+
+    const result = run(repository, [
+      'verify',
+      '--repo',
+      '.',
+      '--run-id',
+      runId,
+      '--adapter',
+      path.relative(repository, adapterPath),
+      '--mutation-id',
+      'disable-save',
+      '--criterion-id',
+      'criterion-1',
+      '--approval-digest',
+      definitionDigest,
+    ]);
+
+    assert.equal(result.status, 1);
+    const output = JSON.parse(result.stdout);
+    assert.equal(output.status, 'verification-error');
+    assert.equal(output.error, 'mutation-criterion-mismatch');
   });
 });
 
@@ -979,6 +1043,8 @@ test('rejects a mutation criterion absent from the approved handoff', () => {
       runId,
       '--adapter',
       path.relative(repository, adapterPath),
+      '--mutation-id',
+      'disable-save',
       '--criterion-id',
       'criterion-other',
       '--approval-digest',

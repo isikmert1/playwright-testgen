@@ -254,6 +254,7 @@ function verifyMutation(
   repositoryInput,
   runId,
   adapterInput,
+  mutationId,
   criterionId,
   approvalDigest,
 ) {
@@ -265,27 +266,25 @@ function verifyMutation(
   if (!handoff.criteria.some(({ id }) => id === criterionId))
     fail('criterion-not-approved');
   if (adapterInput == null) {
+    if (mutationId != null || approvalDigest != null)
+      fail('adapter-selection-invalid');
     return {
       status: 'unavailable',
       criterion_id: criterionId,
       reason: 'adapter-absent',
     };
   }
-  const { manifest } = loadManifest(policy, runId);
-  if (manifest.boundaries.post_healer === null)
-    fail('change-manifest-incomplete');
-  if (currentHead(repository) !== manifest.head)
-    fail('repository-head-changed');
-  const activeBefore = captureSnapshot(repository, runId);
-  if (!snapshotsMatch(activeBefore, manifest.boundaries.post_healer))
-    fail('post-healer-state-mismatch');
-
+  if (mutationId != null && !isIdentifier(mutationId))
+    fail('mutation-id-invalid');
   const parsed = parseAdapter(repository, adapterInput);
-  requireHeadFile(repository, manifest.head, parsed.adapterFile.relative, true);
+  const adapterHead = currentHead(repository);
+  requireHeadFile(repository, adapterHead, parsed.adapterFile.relative, true);
   const mutation = parsed.mutations.find(
     (candidate) => candidate.criterion_id === criterionId,
   );
   if (mutation == null) {
+    if (mutationId != null || approvalDigest != null)
+      fail('mutation-criterion-mismatch');
     return {
       status: 'unavailable',
       adapter_id: parsed.adapter.adapter_id,
@@ -293,6 +292,16 @@ function verifyMutation(
       reason: 'criterion-unmapped',
     };
   }
+  if (mutationId == null || approvalDigest == null)
+    fail('mutation-approval-required');
+  if (mutation.mutation_id !== mutationId) fail('mutation-criterion-mismatch');
+  const { manifest } = loadManifest(policy, runId);
+  if (manifest.boundaries.post_healer === null)
+    fail('change-manifest-incomplete');
+  if (adapterHead !== manifest.head) fail('repository-head-changed');
+  const activeBefore = captureSnapshot(repository, runId);
+  if (!snapshotsMatch(activeBefore, manifest.boundaries.post_healer))
+    fail('post-healer-state-mismatch');
   const approvedSpecPath = comparablePath(
     portable(path.relative(repository, policy.approvedSpec)),
   );

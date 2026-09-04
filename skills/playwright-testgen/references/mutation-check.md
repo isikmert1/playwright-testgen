@@ -72,12 +72,18 @@ trace and a criterion retained in the validated handoff. With an approved
 adapter, run this after all three change-manifest boundaries are valid:
 
 ```sh
-node "$CLAUDE_PLUGIN_ROOT/scripts/mutation-check.cjs" verify --repo . --run-id <run_id> --adapter <manifest> --criterion-id <criterion_id> --approval-digest <sha256>
+node "$CLAUDE_PLUGIN_ROOT/scripts/mutation-check.cjs" verify --repo . --run-id <run_id> --adapter <manifest> --mutation-id <mutation_id> --criterion-id <criterion_id> --approval-digest <sha256>
 ```
 
-When no approved adapter exists, no change manifest is required. Omit
-`--adapter` and `--approval-digest`; after validating the fixed trace and
-criterion, the same command returns `unavailable` with reason
+The mutation ID, criterion ID, and digest must bind the same approved entry. If
+an approved adapter has no entry for the required criterion, use the same
+command without `--mutation-id` and `--approval-digest`; no change manifest is
+required, and it returns `unavailable` with reason `criterion-unmapped`. If the
+adapter does map the criterion, those omitted arguments are an approval error,
+not permission to execute it.
+
+When no approved adapter exists, also omit `--adapter`. After validating the
+fixed trace and criterion, the command returns `unavailable` with reason
 `adapter-absent` without attempting product mutation.
 
 Adapter verification requires a Git repository with a committed `HEAD` and the

@@ -48,6 +48,7 @@ function verify(values) {
       '--repo',
       '--run-id',
       '--adapter',
+      '--mutation-id',
       '--criterion-id',
       '--approval-digest',
     ]),
@@ -56,6 +57,7 @@ function verify(values) {
     options['--repo'] ?? process.cwd(),
     options['--run-id'],
     options['--adapter'],
+    options['--mutation-id'],
     options['--criterion-id'],
     options['--approval-digest'],
   );

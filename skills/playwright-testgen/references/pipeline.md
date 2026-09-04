@@ -76,9 +76,11 @@ or debug.
    explicit human approval. If several entries could apply, ask now; never
    choose one implicitly. When that approval exists, Main captures the
    `pre-author` boundary with the exact command in `artifact-contract.md`. Do
-   this after the policy exists and before delegating Author. If no exact entry
-   is approved, continue in no-adapter mode without a change manifest. If
-   capture fails, stop before Author; never continue with an incomplete
+   this after the policy exists and before delegating Author. If an approved
+   adapter has no entry for the required criterion, retain its path for the
+   later `criterion-unmapped` coverage check but continue without a change
+   manifest. If no adapter is approved, continue in no-adapter mode. If capture
+   fails, stop before Author; never continue with an incomplete
    repository-state baseline.
 
 3. Main delegates the Author stage to
@@ -129,9 +131,14 @@ or debug.
      verification. If capture fails, do not invoke the adapter; record the
      bounded capture error as behavior `error` in the vacuity report.
    - When an adapter entry and its digest were explicitly approved before
-     Author, run exactly that criterion-linked entry with the command in
-     `mutation-check.md`. Never add, select, or switch an adapter after Author;
-     a later approval starts a new run with a new pre-Author boundary.
+     Author, run exactly that mutation-and-criterion-linked entry with the
+     command in `mutation-check.md`. Never add, select, or switch an adapter
+     after Author; a later approval starts a new run with a new pre-Author
+     boundary.
+   - When an approved adapter had no entry for the required criterion, run the
+     coverage-only form from `mutation-check.md` without a mutation ID or
+     digest. It returns behavior `unavailable` with reason
+     `criterion-unmapped`; it can never execute a mutation.
    - When no approved adapter exists, run the no-adapter form from
      `mutation-check.md`, even if unapproved adapter files exist. It needs no
      change manifest and returns behavior `unavailable` with reason
