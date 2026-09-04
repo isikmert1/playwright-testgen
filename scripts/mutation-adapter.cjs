@@ -194,5 +194,4 @@ module.exports = {
   definitionDigest,
   digestAdapter,
   parseAdapter,
-  safeFile,
 };

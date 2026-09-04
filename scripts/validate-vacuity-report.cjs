@@ -230,4 +230,4 @@ function validateVacuityReport(artifact, repository, handoffCriteria, errors) {
     errors.push('report-disposition-mismatch');
 }
 
-module.exports = { expectedDisposition, validateVacuityReport };
+module.exports = { validateVacuityReport };

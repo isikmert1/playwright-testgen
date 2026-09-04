@@ -422,9 +422,4 @@ function verifyMutation(
   return result;
 }
 
-module.exports = {
-  changedPaths,
-  parseRunnerOutput,
-  snapshotsMatch,
-  verifyMutation,
-};
+module.exports = { verifyMutation };

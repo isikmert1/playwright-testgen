@@ -92,5 +92,3 @@ function main(argv = process.argv.slice(2)) {
 }
 
 if (require.main === module) main();
-
-module.exports = { main, parseFlags };

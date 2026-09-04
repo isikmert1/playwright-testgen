@@ -27,7 +27,6 @@ const {
   comparePaths,
   currentHead,
   isRunScratch,
-  runGit,
 } = require('./repository-snapshot.cjs');
 
 const MAX_MANIFEST_SIZE = 512 * 1024;
@@ -322,15 +321,9 @@ function captureBoundary(repositoryInput, runId, boundary) {
 }
 
 module.exports = {
-  MutationCheckError,
   captureBoundary,
-  capturePreAuthor,
-  captureSnapshot,
-  comparePaths,
-  currentHead,
   loadManifest,
   resolveRun,
-  runGit,
   sameEntry,
   snapshotMap,
   validateArtifact,
