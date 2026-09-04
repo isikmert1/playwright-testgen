@@ -51,7 +51,13 @@ delegate a fresh-context `playwright-testgen:playwright-test-healer` with the
 run ID, target repository, exact approved spec, original criteria, validated
 handoff, and known runner, route, auth, environment, and data facts. Healer
 executes, diagnoses, makes bounded repairs, and reports its trace; Main never
-performs Healer work.
+performs Healer work. A validated `fixed` trace enters Main's vacuity gate:
+Main runs one approved criterion-linked product mutation when available,
+writes and validates `vacuity-report.json`, and reports only its derived
+disposition. Without an adapter, record mutation verification as unavailable;
+unless a separate assertion-sensitivity check ran, its status is `not-run`.
+Skipped runs remain `generated-unverified`; nonfixed runs keep their Healer
+disposition. Both bypass this gate.
 
 ## Reference loading
 
@@ -60,8 +66,10 @@ create a second routing layer.
 
 - [pipeline.md](references/pipeline.md) — Read this when starting this skill's generation workflow or its post-checkpoint run or repair path, to establish ordering, ownership, checkpoints, and handoffs.
 - [test-policy.md](references/test-policy.md) — Read this when planning, writing, or revising a spec or helper.
+- [vacuity-policy.md](references/vacuity-policy.md) — Read this when planning, writing, or revising assertions, and during Author's pre-write self-check.
 - [locator-policy.md](references/locator-policy.md) — Read this when choosing, verifying, or changing any locator.
 - [failure-taxonomy.md](references/failure-taxonomy.md) — Read this when a run fails, before assigning its cause, remedy, or next owner.
 - [healing-protocol.md](references/healing-protocol.md) — Read this when Healer is authorized to run or debug a spec, and before repairing a failure.
-- [artifact-contract.md](references/artifact-contract.md) — Read this before starting Author to create the run ID, and when creating, validating, or consuming an Author handoff or Healer trace.
+- [artifact-contract.md](references/artifact-contract.md) — Read this before starting Author to create the run ID, and when creating, validating, or consuming an Author handoff, Healer trace, or vacuity report.
+- [mutation-check.md](references/mutation-check.md) — Read this before approving any mutation adapter, and after a fixed Healer result to run the approved mutation or record that verification is unavailable.
 - [cleanup-contract.md](references/cleanup-contract.md) — Read this when browser sessions or scratch artifacts may be created, and before any exit path.

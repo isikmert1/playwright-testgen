@@ -1,9 +1,27 @@
 const { createHash } = require('node:crypto');
-const { readFileSync, realpathSync, statSync } = require('node:fs');
+const { lstatSync, readFileSync, realpathSync } = require('node:fs');
 const path = require('node:path');
 
 const RUN_ID = /^tg-[a-f0-9]{24}$/u;
-const TYPES = new Set(['handoff', 'trace']);
+const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$/u;
+const SCHEMAS = {
+  handoff: {
+    filename: 'author-handoff.v1.schema.json',
+    version: 'author-handoff.v1',
+    hash: '7021f22a0d03e831ef272f797e60573020959d79e6edd1b38b2890d26a9b1ac4',
+  },
+  trace: {
+    filename: 'healer-trace.v1.schema.json',
+    version: 'healer-trace.v1',
+    hash: '66b4eb06580a63dd3f5aa3367d718a46afdef54295cfd9fdfd7f5a4706e2320f',
+  },
+  vacuity: {
+    filename: 'vacuity-report.v1.schema.json',
+    version: 'vacuity-report.v1',
+    hash: '28aa9696e749f77e41ac0f242dcc2c146f670f7b06171251fd66ad47946f6094',
+  },
+};
+const TYPES = new Set(Object.keys(SCHEMAS));
 const CLASSIFICATIONS = new Set([
   'selector-drift',
   'timing',
@@ -31,10 +49,6 @@ const REPAIRABLE_CLASSIFICATIONS = new Set([
   'timing',
   'expectation-drift',
 ]);
-const SCHEMA_HASHES = {
-  handoff: '5cc69a16d0240e293c93393d6e9ae24603a072491da745f41ffdc7e1d7f52d60',
-  trace: '7e96ee2d29342047991f6ee835f63cd2677f8d0630f11bc049d278b74b06763b',
-};
 const PROHIBITED_KEY =
   /(?:credential|password|passwd|secret|token|cookie|authorization|storage.?state|environment|snapshot|screenshot|video|trace|dom|(?:raw_)?log|request|response|ticket|scenario(?:_|-)?body|spec(?:_|-)?body)/iu;
 const PROHIBITED_VALUE =
@@ -45,26 +59,26 @@ const CSS_ATTRIBUTE_SELECTOR =
 const RAW_DOM_TAG = /<\/?[A-Za-z][A-Za-z0-9:-]*(?:\s[^<>]*?)?\/?>/u;
 
 function loadSchema(type) {
-  const filename =
-    type === 'handoff'
-      ? 'author-handoff.v1.schema.json'
-      : 'healer-trace.v1.schema.json';
-  const version = type === 'handoff' ? 'author-handoff.v1' : 'healer-trace.v1';
+  const metadata = SCHEMAS[type];
+  if (metadata == null) return null;
   try {
     const schema = JSON.parse(
-      readFileSync(path.join(__dirname, '..', 'schemas', filename), 'utf8'),
+      readFileSync(
+        path.join(__dirname, '..', 'schemas', metadata.filename),
+        'utf8',
+      ),
     );
     const hash = createHash('sha256')
       .update(JSON.stringify(schema))
       .digest('hex');
     return isObject(schema) &&
       schema.$schema === 'https://json-schema.org/draft/2020-12/schema' &&
-      schema.$id === `playwright-testgen/${version}` &&
+      schema.$id === `playwright-testgen/${metadata.version}` &&
       schema.type === 'object' &&
       schema.additionalProperties === false &&
-      schema.properties?.schema_version?.const === version &&
+      schema.properties?.schema_version?.const === metadata.version &&
       schema.properties?.run_id?.pattern === RUN_ID.source &&
-      hash === SCHEMA_HASHES[type]
+      hash === metadata.hash
       ? schema
       : null;
   } catch {
@@ -110,9 +124,13 @@ function isText(value, maximum) {
   );
 }
 
+function isIdentifier(value) {
+  return typeof value === 'string' && ID.test(value);
+}
+
 function isFile(value) {
   try {
-    return statSync(value).isFile();
+    return lstatSync(value).isFile();
   } catch {
     return false;
   }
@@ -260,6 +278,7 @@ module.exports = {
   containsProhibited,
   isAttributeName,
   isFile,
+  isIdentifier,
   isInside,
   isObject,
   isRepoPath,

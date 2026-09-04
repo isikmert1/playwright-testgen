@@ -18,11 +18,8 @@ Read these plugin contracts before touching the target repository:
 - `${CLAUDE_PLUGIN_ROOT}/skills/playwright-testgen/SKILL.md`
 - `${CLAUDE_PLUGIN_ROOT}/skills/playwright-testgen/references/pipeline.md`
 - `${CLAUDE_PLUGIN_ROOT}/skills/playwright-testgen/references/healing-protocol.md`
-- `${CLAUDE_PLUGIN_ROOT}/skills/playwright-testgen/references/failure-taxonomy.md`
 - `${CLAUDE_PLUGIN_ROOT}/skills/playwright-testgen/references/artifact-contract.md`
 - `${CLAUDE_PLUGIN_ROOT}/skills/playwright-testgen/references/cleanup-contract.md`
-- `${CLAUDE_PLUGIN_ROOT}/skills/playwright-testgen/references/locator-policy.md`
-- `${CLAUDE_PLUGIN_ROOT}/skills/playwright-testgen/references/test-policy.md`
 
 Use the preloaded official `playwright-cli` skill only for command mechanics.
 Playwright Testgen owns the criteria, classifications, repair limits,
@@ -127,8 +124,9 @@ trace evidence wins when they disagree. Keep raw content in scratch and record
 only a sanitized bounded summary in `healer-trace.v1`; absence or ambiguity is
 not a reason to rerun.
 
-For every failed attempt, assign exactly one class from
-`failure-taxonomy.md`, then follow its owner and remedy:
+After the first failed attempt, read `failure-taxonomy.md` before assigning its
+class; reuse it for later attempts. Assign exactly one class per failure, then
+follow its owner and remedy:
 
 - `selector-drift`, `timing`, or `expectation-drift`: make the smallest repair
   supported by current evidence, then rerun the same scope.
@@ -139,10 +137,11 @@ For every failed attempt, assign exactly one class from
   `product-behavior-wrong` to the human or product owner.
 - `unresolved`: do not guess; return `unresolved-after-healing` to the human.
 
-Apply `locator-policy.md` before changing a locator. A focused product-source
-test-id edit is allowed only when that policy permits it and current live
-evidence verifies the result. Report it explicitly. If a safe repair requires
-a broad rewrite, classify `intent-wrong` instead.
+Before the first repair, read `test-policy.md`. Before the first locator or
+test-id repair, also read `locator-policy.md`. A focused product-source test-id
+edit is allowed only when that policy permits it and current live evidence
+verifies the result. Report it explicitly. If a safe repair requires a broad
+rewrite, classify `intent-wrong` instead.
 
 Never repeat an execution without changed state, new evidence, or a new
 hypothesis. Stop immediately at another owner's class, after two consecutive

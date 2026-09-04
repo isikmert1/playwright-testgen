@@ -96,6 +96,63 @@ function trace(run = runId) {
   };
 }
 
+function repairedTrace(paths) {
+  const artifact = trace();
+  artifact.attempts.unshift({
+    number: 1,
+    kind: 'debug-run',
+    hypothesis: 'the saved locator no longer matches the control',
+    failure_signature: 'save-button-not-found',
+    evidence_summary: 'one renamed Save changes control was visible',
+    classification: 'selector-drift',
+    action: 'updated the approved spec locator',
+    outcome: 'fail',
+  });
+  artifact.attempts[1].number = 2;
+  artifact.repairs = [
+    {
+      attempt_number: 1,
+      paths,
+      reason: 'matched the renamed visible control',
+    },
+  ];
+  artifact.final_classification = 'selector-drift';
+  return artifact;
+}
+
+function vacuityReport(run = runId) {
+  return {
+    schema_version: 'vacuity-report.v1',
+    run_id: run,
+    spec_path: 'tests/account.spec.ts',
+    behavior: {
+      status: 'killed',
+      mutation: {
+        adapter_id: 'account-fixture',
+        mutation_id: 'disable-save',
+        criterion_id: 'criterion-1',
+        definition_digest: 'a'.repeat(64),
+        affected_paths: ['src/account.js'],
+      },
+      baseline: 'pass',
+      mutant: 'fail',
+      reason: null,
+      error: null,
+      isolation: 'disposable-worktree',
+      cleanup: 'removed',
+    },
+    assertion_sensitivity: {
+      status: 'not-run',
+      baseline: null,
+      mutant: null,
+      error: null,
+      isolation: 'not-run',
+      cleanup: 'not-run',
+    },
+    disposition: 'verified-non-vacuous',
+  };
+}
+
 function productFindingAttempt() {
   return {
     number: 1,
@@ -125,6 +182,7 @@ function withRepository(callback) {
     writeFileSync(path.join(repository, 'tests', 'account.spec.ts'), '');
     writePolicy(repository, 'tests/account.spec.ts');
     writeArtifact(repository, runId, 'handoff.json', handoff());
+    writeArtifact(repository, runId, 'healer-trace.json', trace());
     callback(repository);
   } finally {
     rmSync(repository, { force: true, recursive: true });
@@ -155,6 +213,12 @@ function writeArtifact(repository, run, name, artifact) {
   return relative;
 }
 
+function writeVacuityReport(repository, value) {
+  mkdirSync(path.join(repository, 'src'), { recursive: true });
+  writeFileSync(path.join(repository, 'src', 'account.js'), '');
+  return writeArtifact(repository, runId, 'vacuity-report.json', value);
+}
+
 function validate(repository, type, run, artifact) {
   return runScript(validatorPath, [
     '--repo',
@@ -165,6 +229,13 @@ function validate(repository, type, run, artifact) {
     run,
     artifact,
   ]);
+}
+
+function assertRejected(repository, type, name, artifact, error) {
+  const artifactPath = writeArtifact(repository, runId, name, artifact);
+  const result = validate(repository, type, runId, artifactPath);
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, error);
 }
 
 test('creates unique canonical Testgen run IDs', () => {
@@ -213,6 +284,212 @@ test('accepts a valid fixed Healer trace in its run-owned location', () => {
   });
 });
 
+test('accepts a behavior-killed vacuity report for the approved spec', () => {
+  withRepository((repository) => {
+    const artifact = writeVacuityReport(repository, vacuityReport());
+    const result = validate(repository, 'vacuity', runId, artifact);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), {
+      valid: true,
+      type: 'vacuity',
+      run_id: runId,
+      artifact_path: artifact,
+    });
+  });
+});
+
+test('requires a fixed Healer result before accepting a vacuity report', () => {
+  withRepository((repository) => {
+    const tracePath = path.join(
+      repository,
+      '.playwright-cli',
+      'testgen',
+      runId,
+      'healer-trace.json',
+    );
+    const nonfixed = trace();
+    nonfixed.attempts = [productFindingAttempt()];
+    nonfixed.final_classification = 'product-behavior-wrong';
+    nonfixed.disposition = 'product-behavior-wrong';
+    nonfixed.next_owner = 'product-owner';
+    nonfixed.escalation = 'the criterion conflicts with product behavior';
+
+    for (const [name, traceValue, error] of [
+      ['missing', null, 'report-trace-unavailable'],
+      ['nonfixed', nonfixed, 'report-trace-not-fixed'],
+    ]) {
+      if (traceValue == null) rmSync(tracePath, { force: true });
+      else writeFileSync(tracePath, JSON.stringify(traceValue));
+      const artifact = writeVacuityReport(repository, vacuityReport());
+
+      const result = validate(repository, 'vacuity', runId, artifact);
+
+      assert.equal(result.status, 1, `${name}: ${result.stdout}`);
+      assert.match(result.stderr, new RegExp(error, 'u'), name);
+    }
+  });
+});
+
+test('accepts assertion-only evidence without claiming behavior verification', () => {
+  withRepository((repository) => {
+    const value = vacuityReport();
+    value.behavior = {
+      status: 'unavailable',
+      mutation: null,
+      baseline: null,
+      mutant: null,
+      reason: 'adapter-absent',
+      error: null,
+      isolation: 'not-run',
+      cleanup: 'not-run',
+    };
+    value.assertion_sensitivity = {
+      status: 'killed',
+      baseline: 'pass',
+      mutant: 'fail',
+      error: null,
+      isolation: 'disposable-copy',
+      cleanup: 'removed',
+    };
+    value.disposition = 'assertion-sensitive-only';
+    const artifact = writeVacuityReport(repository, value);
+
+    const result = validate(repository, 'vacuity', runId, artifact);
+
+    assert.equal(result.status, 0, result.stderr);
+  });
+});
+
+test('reports absent product mutation coverage without overstating verification', () => {
+  withRepository((repository) => {
+    const value = vacuityReport();
+    value.behavior = {
+      status: 'unavailable',
+      mutation: null,
+      baseline: null,
+      mutant: null,
+      reason: 'adapter-absent',
+      error: null,
+      isolation: 'not-run',
+      cleanup: 'not-run',
+    };
+    value.disposition = 'mutation-not-verified';
+    const artifact = writeVacuityReport(repository, value);
+
+    const result = validate(repository, 'vacuity', runId, artifact);
+
+    assert.equal(result.status, 0, result.stderr);
+  });
+});
+
+test('rejects a vacuity disposition that overstates its evidence', () => {
+  withRepository((repository) => {
+    const value = vacuityReport();
+    value.behavior.status = 'survived';
+    value.behavior.mutant = 'pass';
+    const artifact = writeVacuityReport(repository, value);
+
+    const result = validate(repository, 'vacuity', runId, artifact);
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /report-disposition-mismatch/iu);
+  });
+});
+
+test('keeps conclusive behavior evidence authoritative over a secondary error', () => {
+  withRepository((repository) => {
+    for (const [status, mutant, disposition] of [
+      ['killed', 'fail', 'verified-non-vacuous'],
+      ['survived', 'pass', 'rejected-vacuous'],
+    ]) {
+      const value = vacuityReport();
+      value.behavior.status = status;
+      value.behavior.mutant = mutant;
+      value.assertion_sensitivity = {
+        status: 'error',
+        baseline: null,
+        mutant: null,
+        error: 'assertion-check-failed',
+        isolation: 'not-run',
+        cleanup: 'not-run',
+      };
+      value.disposition = disposition;
+      const artifact = writeVacuityReport(repository, value);
+
+      const result = validate(repository, 'vacuity', runId, artifact);
+
+      assert.equal(result.status, 0, `${disposition}: ${result.stderr}`);
+    }
+  });
+});
+
+test('limits unavailable reports to explicit coverage gaps', () => {
+  withRepository((repository) => {
+    const value = vacuityReport();
+    value.behavior = {
+      status: 'unavailable',
+      mutation: null,
+      baseline: null,
+      mutant: null,
+      reason: 'runner-failed',
+      error: null,
+      isolation: 'not-run',
+      cleanup: 'not-run',
+    };
+    value.assertion_sensitivity.status = 'not-run';
+    value.disposition = 'mutation-not-verified';
+    const artifact = writeVacuityReport(repository, value);
+
+    const result = validate(repository, 'vacuity', runId, artifact);
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /report-invalid-unavailable-reason/iu);
+  });
+});
+
+test('binds a selected mutation to an approved criterion', () => {
+  withRepository((repository) => {
+    const value = vacuityReport();
+    value.behavior.mutation.criterion_id = 'criterion-other';
+    const artifact = writeVacuityReport(repository, value);
+
+    const result = validate(repository, 'vacuity', runId, artifact);
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /report-unknown-criterion/iu);
+  });
+});
+
+test('requires mutation affected paths to be regular files', () => {
+  withRepository((repository) => {
+    const value = vacuityReport();
+    value.behavior.mutation.affected_paths = ['src'];
+    const artifact = writeVacuityReport(repository, value);
+
+    const result = validate(repository, 'vacuity', runId, artifact);
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /report-affected-path-not-file/iu);
+  });
+});
+
+test('rejects symlinks as mutation affected paths', () => {
+  withRepository((repository) => {
+    const value = vacuityReport();
+    writeVacuityReport(repository, value);
+    const linkedPath = path.join(repository, 'src', 'linked-account.js');
+    symlinkSync(path.join(repository, 'src', 'account.js'), linkedPath, 'file');
+    value.behavior.mutation.affected_paths = ['src/linked-account.js'];
+    const artifact = writeVacuityReport(repository, value);
+
+    const result = validate(repository, 'vacuity', runId, artifact);
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /report-affected-path-not-file/iu);
+  });
+});
+
 test('accepts the target repository test filename and test-id convention', () => {
   withRepository((repository) => {
     const specPath = 'e2e/account-flow.e2e.ts';
@@ -228,6 +505,29 @@ test('accepts the target repository test filename and test-id convention', () =>
     const result = validate(repository, 'handoff', runId, artifact);
 
     assert.equal(result.status, 0, result.stderr);
+  });
+});
+
+test('rejects a symlink as the approved spec', () => {
+  withRepository((repository) => {
+    const specPath = 'tests/linked-account.spec.ts';
+    symlinkSync(
+      path.join(repository, 'tests', 'account.spec.ts'),
+      path.join(repository, specPath),
+      'file',
+    );
+    writePolicy(repository, specPath);
+    const value = handoff();
+    value.spec_path = specPath;
+    value.criteria[0].assertion_location = `${specPath}:18`;
+    value.touched_paths = [specPath];
+    assertRejected(
+      repository,
+      'handoff',
+      'handoff.json',
+      value,
+      /handoff-spec-unavailable/iu,
+    );
   });
 });
 
@@ -269,6 +569,195 @@ test('rejects a malformed Author handoff', () => {
 
     assert.equal(result.status, 1);
     assert.equal(JSON.parse(result.stderr).valid, false);
+  });
+});
+
+test('rejects criterion IDs that downstream artifacts cannot use', () => {
+  withRepository((repository) => {
+    const artifact = handoff();
+    artifact.criteria[0].id = 'criterion one';
+    assertRejected(
+      repository,
+      'handoff',
+      'handoff.json',
+      artifact,
+      /handoff-invalid-criterion-id/iu,
+    );
+  });
+});
+
+test('requires the approved spec in Author touched paths', () => {
+  withRepository((repository) => {
+    writeFileSync(path.join(repository, 'notes.md'), 'notes');
+    const artifact = handoff();
+    artifact.touched_paths = ['notes.md'];
+    assertRejected(
+      repository,
+      'handoff',
+      'handoff.json',
+      artifact,
+      /handoff-spec-not-touched/iu,
+    );
+  });
+});
+
+test('rejects duplicate Author touched paths', () => {
+  withRepository((repository) => {
+    const artifact = handoff();
+    artifact.touched_paths.push('tests/account.spec.ts');
+    assertRejected(
+      repository,
+      'handoff',
+      'handoff.json',
+      artifact,
+      /handoff-duplicate-touched-path/iu,
+    );
+  });
+});
+
+test('requires Author touched paths to be regular files', () => {
+  withRepository((repository) => {
+    const artifact = handoff();
+    artifact.touched_paths.push('tests');
+    assertRejected(
+      repository,
+      'handoff',
+      'handoff.json',
+      artifact,
+      /handoff-touched-not-file/iu,
+    );
+  });
+});
+
+test('rejects internal symlinks in Author touched paths', () => {
+  withRepository((repository) => {
+    const target = path.join(repository, 'tests', 'source.ts');
+    const linked = path.join(repository, 'tests', 'linked-source.ts');
+    writeFileSync(target, 'export const value = true;');
+    symlinkSync(target, linked, 'file');
+    const artifact = handoff();
+    artifact.touched_paths.push('tests/linked-source.ts');
+    assertRejected(
+      repository,
+      'handoff',
+      'handoff.json',
+      artifact,
+      /handoff-touched-not-file/iu,
+    );
+  });
+});
+
+test('rejects duplicate test-id additions', () => {
+  withRepository((repository) => {
+    const artifact = handoff();
+    artifact.test_id_convention = 'data-testid';
+    const addition = {
+      path: 'tests/account.spec.ts',
+      attribute: 'data-testid',
+      purpose: 'identify the save control',
+    };
+    artifact.test_id_additions = [addition, { ...addition }];
+    assertRejected(
+      repository,
+      'handoff',
+      'handoff.json',
+      artifact,
+      /handoff-duplicate-test-id-addition/iu,
+    );
+  });
+});
+
+test('requires test-id addition paths to be regular files', () => {
+  withRepository((repository) => {
+    const artifact = handoff();
+    artifact.test_id_convention = 'data-testid';
+    artifact.test_id_additions = [
+      {
+        path: 'tests',
+        attribute: 'data-testid',
+        purpose: 'identify the save control',
+      },
+    ];
+    artifact.touched_paths.push('tests');
+    assertRejected(
+      repository,
+      'handoff',
+      'handoff.json',
+      artifact,
+      /handoff-test-id-addition-not-file/iu,
+    );
+  });
+});
+
+test('rejects internal symlinks as test-id addition paths', () => {
+  withRepository((repository) => {
+    const target = path.join(repository, 'tests', 'source.ts');
+    const linked = path.join(repository, 'tests', 'linked-source.ts');
+    writeFileSync(target, 'export const value = true;');
+    symlinkSync(target, linked, 'file');
+    const artifact = handoff();
+    artifact.test_id_convention = 'data-testid';
+    artifact.test_id_additions = [
+      {
+        path: 'tests/linked-source.ts',
+        attribute: 'data-testid',
+        purpose: 'identify the save control',
+      },
+    ];
+    artifact.touched_paths.push('tests/linked-source.ts');
+    assertRejected(
+      repository,
+      'handoff',
+      'handoff.json',
+      artifact,
+      /handoff-test-id-addition-not-file/iu,
+    );
+  });
+});
+
+test('rejects duplicate Healer repair paths', () => {
+  withRepository((repository) => {
+    const artifact = repairedTrace([
+      'tests/account.spec.ts',
+      'tests/account.spec.ts',
+    ]);
+    assertRejected(
+      repository,
+      'trace',
+      'healer-trace.json',
+      artifact,
+      /trace-duplicate-repair-path/iu,
+    );
+  });
+});
+
+test('requires Healer repair paths to be regular files', () => {
+  withRepository((repository) => {
+    const artifact = repairedTrace(['tests']);
+    assertRejected(
+      repository,
+      'trace',
+      'healer-trace.json',
+      artifact,
+      /trace-repair-not-file/iu,
+    );
+  });
+});
+
+test('rejects internal symlinks as Healer repair paths', () => {
+  withRepository((repository) => {
+    const target = path.join(repository, 'tests', 'source.ts');
+    const linked = path.join(repository, 'tests', 'linked-source.ts');
+    writeFileSync(target, 'export const value = true;');
+    symlinkSync(target, linked, 'file');
+    const artifact = repairedTrace(['tests/linked-source.ts']);
+    assertRejected(
+      repository,
+      'trace',
+      'healer-trace.json',
+      artifact,
+      /trace-repair-not-file/iu,
+    );
   });
 });
 

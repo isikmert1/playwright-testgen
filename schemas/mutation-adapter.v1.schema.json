@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "playwright-testgen/mutation-adapter.v1",
+  "title": "Mutation adapter v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "adapter_id", "runner_path", "mutations"],
+  "properties": {
+    "schema_version": { "const": "mutation-adapter.v1" },
+    "adapter_id": { "$ref": "#/$defs/id" },
+    "runner_path": { "$ref": "#/$defs/path" },
+    "mutations": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "mutation_id",
+          "criterion_id",
+          "affected_paths",
+          "patch_path",
+          "definition_digest",
+          "timeout_ms"
+        ],
+        "properties": {
+          "mutation_id": { "$ref": "#/$defs/id" },
+          "criterion_id": { "$ref": "#/$defs/id" },
+          "affected_paths": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 20,
+            "items": { "$ref": "#/$defs/path" }
+          },
+          "patch_path": { "$ref": "#/$defs/path" },
+          "definition_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "timeout_ms": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 120000
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$"
+    },
+    "path": { "type": "string", "minLength": 1, "maxLength": 240 }
+  }
+}

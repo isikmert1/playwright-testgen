@@ -5,6 +5,7 @@ const {
   containsProhibited,
   isAttributeName,
   isFile,
+  isIdentifier,
   isObject,
   isRepoPath,
   isText,
@@ -71,7 +72,7 @@ function validateHandoff(artifact, repository, errors) {
         errors,
         'criterion',
       );
-      if (!isText(criterion.id, 80) || ids.has(criterion.id))
+      if (!isIdentifier(criterion.id) || ids.has(criterion.id))
         errors.push('handoff-invalid-criterion-id');
       ids.add(criterion.id);
       if (
@@ -154,6 +155,7 @@ function validateHandoff(artifact, repository, errors) {
   ) {
     errors.push('handoff-invalid-test-id-additions');
   } else {
+    const additions = new Set();
     for (const addition of artifact.test_id_additions) {
       if (!isObject(addition)) {
         errors.push('handoff-invalid-test-id-addition');
@@ -168,6 +170,11 @@ function validateHandoff(artifact, repository, errors) {
         errors,
         'handoff-test-id-addition',
       );
+      if (
+        isRepoPath(addition.path) &&
+        !isFile(path.resolve(repository, addition.path))
+      )
+        errors.push('handoff-test-id-addition-not-file');
       if (
         !isAttributeName(addition.attribute) ||
         addition.attribute === 'none-found'
@@ -190,6 +197,16 @@ function validateHandoff(artifact, repository, errors) {
         errors.push('handoff-test-id-addition-not-touched');
       if (!isText(addition.purpose, 160))
         errors.push('handoff-invalid-test-id-purpose');
+      const additionKey = JSON.stringify([
+        typeof addition.path === 'string'
+          ? comparableRepoPath(addition.path)
+          : addition.path,
+        addition.attribute,
+        addition.purpose,
+      ]);
+      if (additions.has(additionKey))
+        errors.push('handoff-duplicate-test-id-addition');
+      additions.add(additionKey);
     }
   }
   if (!isObject(artifact.lint)) {
@@ -238,10 +255,24 @@ function validateHandoff(artifact, repository, errors) {
     'handoff-touched-paths',
     1,
   );
-  if (Array.isArray(artifact.touched_paths))
-    artifact.touched_paths.forEach((item) =>
-      validatePath(item, repository, errors, 'handoff-touched'),
+  if (Array.isArray(artifact.touched_paths)) {
+    const paths = artifact.touched_paths.filter(
+      (item) => typeof item === 'string',
     );
+    const comparable = paths.map(comparableRepoPath);
+    if (new Set(comparable).size !== paths.length)
+      errors.push('handoff-duplicate-touched-path');
+    if (
+      typeof artifact.spec_path === 'string' &&
+      !new Set(comparable).has(comparableRepoPath(artifact.spec_path))
+    )
+      errors.push('handoff-spec-not-touched');
+    for (const item of paths) {
+      validatePath(item, repository, errors, 'handoff-touched');
+      if (isRepoPath(item) && !isFile(path.resolve(repository, item)))
+        errors.push('handoff-touched-not-file');
+    }
+  }
   validateStringArray(
     artifact.assumptions,
     10,

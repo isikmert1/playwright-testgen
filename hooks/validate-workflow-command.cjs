@@ -571,6 +571,11 @@ function validateCleanup(cwd, args) {
     target == null
       ? null
       : normalizePath(path.relative(loaded.policy.runDirectory, target));
+  if (relative === '') {
+    return deny(
+      'The full run directory is Main-owned. Remove only the generated exploration or attempt child; Main removes the full run directory after the result is accepted.',
+    );
+  }
   if (
     target == null ||
     ![

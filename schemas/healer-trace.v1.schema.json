@@ -79,8 +79,7 @@
             "properties": {
               "criterion_id": {
                 "type": "string",
-                "minLength": 1,
-                "maxLength": 80
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$"
               },
               "required_outcome": {
                 "type": "string",
@@ -145,6 +144,7 @@
             "type": "array",
             "minItems": 1,
             "maxItems": 3,
+            "uniqueItems": true,
             "items": { "type": "string", "minLength": 1, "maxLength": 240 }
           },
           "reason": { "type": "string", "minLength": 1, "maxLength": 200 }

@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "playwright-testgen/change-manifest.v1",
+  "title": "Change manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "run_id", "head", "boundaries"],
+  "properties": {
+    "schema_version": { "const": "change-manifest.v1" },
+    "run_id": { "type": "string", "pattern": "^tg-[a-f0-9]{24}$" },
+    "head": {
+      "type": "string",
+      "pattern": "^(?:[a-f0-9]{40}|[a-f0-9]{64})$"
+    },
+    "boundaries": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pre_author", "checkpoint", "post_healer"],
+      "properties": {
+        "pre_author": { "$ref": "#/$defs/snapshot" },
+        "checkpoint": {
+          "anyOf": [{ "$ref": "#/$defs/snapshot" }, { "type": "null" }]
+        },
+        "post_healer": {
+          "anyOf": [{ "$ref": "#/$defs/snapshot" }, { "type": "null" }]
+        }
+      }
+    }
+  },
+  "$defs": {
+    "snapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["paths"],
+      "properties": {
+        "paths": {
+          "type": "array",
+          "maxItems": 2000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["path", "kind", "fingerprint"],
+            "properties": {
+              "path": { "type": "string", "minLength": 1, "maxLength": 240 },
+              "kind": {
+                "enum": ["tracked", "untracked-file", "untracked-symlink"]
+              },
+              "fingerprint": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{64}$"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

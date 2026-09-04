@@ -80,8 +80,9 @@ function validateFileAccess(payload) {
   }
 
   const normalized = normalizePath(canonical);
+  const nearbyPolicies = policiesNear(payload.cwd, absolute, canonical);
   if (
-    policiesNear(payload.cwd, absolute, canonical).some((policy) =>
+    nearbyPolicies.some((policy) =>
       policy.allowedStatePaths.some(
         (allowed) =>
           samePath(allowed.absolute, absolute) ||
@@ -97,7 +98,7 @@ function validateFileAccess(payload) {
 
   if (payload.tool_name === 'Read') return {};
 
-  for (const policy of policiesNear(payload.cwd, absolute, canonical)) {
+  for (const policy of nearbyPolicies) {
     for (const [filename, owner] of [
       ['handoff.json', 'playwright-test-author'],
       ['healer-trace.json', 'playwright-test-healer'],
@@ -132,15 +133,43 @@ function validateFileAccess(payload) {
     );
   }
 
-  if (
-    (samePath(path.basename(lexical), 'command-policy.json') &&
-      runIdFromOwnedPath(lexical) != null) ||
-    (samePath(path.basename(normalized), 'command-policy.json') &&
-      runIdFromOwnedPath(normalized) != null)
-  ) {
+  const mainOwnedFiles = [
+    'command-policy.json',
+    'change-manifest.json',
+    'vacuity-report.json',
+  ];
+  const namesRunOwned = mainOwnedFiles.some(
+    (filename) =>
+      (samePath(path.basename(lexical), filename) &&
+        runIdFromOwnedPath(lexical) != null) ||
+      (samePath(path.basename(normalized), filename) &&
+        runIdFromOwnedPath(normalized) != null),
+  );
+  if (namesRunOwned) {
     return deny(
-      'The run command policy is Main-owned and immutable to Author and Healer. Return the update to Main instead of editing this file.',
+      'This run artifact is Main-owned and immutable to Author and Healer. Return the update to Main instead of editing it.',
     );
+  }
+
+  for (const filename of mainOwnedFiles) {
+    const aliasesMainOwned = nearbyPolicies.some((policy) => {
+      const expected = path.join(policy.runDirectory, filename);
+      const canonicalExpected = path.join(
+        policy.canonicalRunDirectory,
+        filename,
+      );
+      return (
+        samePath(absolute, expected) ||
+        samePath(canonical, canonicalExpected) ||
+        sameFile(expected, absolute) ||
+        sameFile(expected, canonical)
+      );
+    });
+    if (aliasesMainOwned) {
+      return deny(
+        'This run artifact is Main-owned and immutable to Author and Healer. Return the update to Main instead of editing it.',
+      );
+    }
   }
 
   return {};

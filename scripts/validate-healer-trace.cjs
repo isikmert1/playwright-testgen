@@ -1,10 +1,12 @@
 const path = require('node:path');
 const {
   CLASSIFICATIONS,
+  comparableRepoPath,
   DISPOSITIONS,
   REPAIRABLE_CLASSIFICATIONS,
   TERMINAL_CLASSIFICATIONS,
   isFile,
+  isIdentifier,
   isObject,
   isRepoPath,
   isText,
@@ -28,7 +30,7 @@ function validateProductEvidence(value, handoffCriteria, errors) {
   ];
   requireFields(value, fields, errors, 'product-behavior-evidence');
   rejectUnknown(value, new Set(fields), errors, 'product-behavior-evidence');
-  if (!isText(value.criterion_id, 80))
+  if (!isIdentifier(value.criterion_id))
     errors.push('trace-invalid-product-criterion');
   else {
     const retainedOutcome = handoffCriteria?.get(value.criterion_id);
@@ -185,10 +187,16 @@ function validateTrace(artifact, repository, handoffCriteria, errors) {
         'trace-repair-paths',
         1,
       );
-      if (Array.isArray(repair.paths))
-        repair.paths.forEach((item) =>
-          validatePath(item, repository, errors, 'trace-repair'),
-        );
+      if (Array.isArray(repair.paths)) {
+        const paths = repair.paths.filter((item) => typeof item === 'string');
+        if (new Set(paths.map(comparableRepoPath)).size !== repair.paths.length)
+          errors.push('trace-duplicate-repair-path');
+        for (const item of paths) {
+          validatePath(item, repository, errors, 'trace-repair');
+          if (isRepoPath(item) && !isFile(path.resolve(repository, item)))
+            errors.push('trace-repair-not-file');
+        }
+      }
       if (!isText(repair.reason, 200))
         errors.push('trace-invalid-repair-reason');
     }

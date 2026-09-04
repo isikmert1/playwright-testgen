@@ -642,12 +642,14 @@ test('allows canonical inspection of a current-attempt artifact', () => {
   });
 });
 
-test('allows removal of only the exact run directory', () => {
+test('reserves full run removal for Main', () => {
   withTargetRepository(({ targetRepository }) => {
     const exactRun = `.playwright-cli/testgen/${runId}`;
-    assert.equal(
-      runHook(targetRepository, `rm -rf -- ${exactRun}`).permissionDecision,
-      'allow',
+    const exact = runHook(targetRepository, `rm -rf -- ${exactRun}`);
+    assert.equal(exact.permissionDecision, 'deny');
+    assert.match(
+      exact.permissionDecisionReason,
+      /Main removes the full run directory/iu,
     );
 
     const parent = runHook(
@@ -688,6 +690,61 @@ test('denies agent edits to the run command policy', () => {
       result.permissionDecisionReason,
       /return the update to Main/iu,
     );
+  });
+});
+
+test('denies governed agents from writing the run change manifest', () => {
+  withTargetRepository(({ runDirectory, targetRepository }) => {
+    const manifestPath = path.join(runDirectory, 'change-manifest.json');
+    writeFileSync(manifestPath, '{}');
+
+    for (const agentType of [
+      'playwright-test-author',
+      'playwright-test-healer',
+    ]) {
+      const result = runToolHook(
+        targetRepository,
+        'Write',
+        { content: '{}', file_path: manifestPath },
+        agentType,
+      );
+
+      assert.equal(result.permissionDecision, 'deny');
+      assert.match(result.permissionDecisionReason, /Main-owned/iu);
+    }
+
+    const aliasPath = path.join(targetRepository, 'manifest-link.json');
+    linkSync(manifestPath, aliasPath);
+    const aliasResult = runToolHook(targetRepository, 'Edit', {
+      file_path: aliasPath,
+      new_string: 'changed',
+      old_string: '{}',
+      replace_all: false,
+    });
+    assert.equal(aliasResult.permissionDecision, 'deny');
+    assert.match(aliasResult.permissionDecisionReason, /Main-owned/iu);
+  });
+});
+
+test('denies governed agents from writing the run vacuity report', () => {
+  withTargetRepository(({ runDirectory, targetRepository }) => {
+    const reportPath = path.join(runDirectory, 'vacuity-report.json');
+    writeFileSync(reportPath, '{}');
+
+    for (const agentType of [
+      'playwright-test-author',
+      'playwright-test-healer',
+    ]) {
+      const result = runToolHook(
+        targetRepository,
+        'Write',
+        { content: '{}', file_path: reportPath },
+        agentType,
+      );
+
+      assert.equal(result.permissionDecision, 'deny');
+      assert.match(result.permissionDecisionReason, /Main-owned/iu);
+    }
   });
 });
 

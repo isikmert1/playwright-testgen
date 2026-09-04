@@ -6,7 +6,6 @@ const {
   validateGrepAccess,
 } = require('./validate-access.cjs');
 const { deny } = require('./hook-result.cjs');
-const { loadPolicy } = require('./run-policy.cjs');
 const { validateCommand } = require('./validate-command.cjs');
 
 const GOVERNED_AGENT =
@@ -44,5 +43,3 @@ function main() {
 }
 
 if (require.main === module) main();
-
-module.exports = { evaluate, loadPolicy };
