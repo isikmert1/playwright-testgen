@@ -158,7 +158,8 @@ scratch evidence.
 Use schema version `vacuity-report.v1`. When a fixed result reaches the
 post-Healer vacuity gate, Main writes the report at
 `.playwright-cli/testgen/<run_id>/vacuity-report.json`. It binds the exact
-approved spec to two separate results:
+approved spec to two separate results. The validator rereads the retained
+Healer trace and rejects the report unless that trace is valid and `fixed`:
 
 - product-behavior mutation: `killed`, `survived`, `unavailable`, or `error`;
 - assertion sensitivity: `killed`, `survived`, `not-run`, or `error`.

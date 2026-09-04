@@ -61,21 +61,24 @@ The digest binds the adapter and mutation identifiers, criterion, sorted
 affected paths, runner path and bytes, patch path and bytes, and timeout. Record
 the final digest in the entry and present the same digest for explicit human
 approval. Never feed `digest` output directly into verification as automatic
-approval. A controlled fixture harness may instead provide a separately pinned
-digest.
+approval. Obtain approval before the pre-Author boundary and Author delegation;
+a later approval requires a new run. A controlled fixture harness may instead
+provide a separately pinned digest.
 
 ## Verification
 
-With an approved adapter, Main runs this after all three change-manifest
-boundaries are valid:
+After Healer stops, Main runs verification only for a schema-valid `fixed`
+trace and a criterion retained in the validated handoff. With an approved
+adapter, run this after all three change-manifest boundaries are valid:
 
 ```sh
 node "$CLAUDE_PLUGIN_ROOT/scripts/mutation-check.cjs" verify --repo . --run-id <run_id> --adapter <manifest> --criterion-id <criterion_id> --approval-digest <sha256>
 ```
 
 When no approved adapter exists, no change manifest is required. Omit
-`--adapter` and `--approval-digest`; the same command returns `unavailable`
-with reason `adapter-absent` without attempting mutation verification.
+`--adapter` and `--approval-digest`; after validating the fixed trace and
+criterion, the same command returns `unavailable` with reason
+`adapter-absent` without attempting product mutation.
 
 Adapter verification requires a Git repository with a committed `HEAD` and the
 Git CLI available. The target runner owns application-specific dependencies,
@@ -109,4 +112,6 @@ An unrelated red mutant is `verification-error`, never `killed`. These are
 mechanism results. Main records them separately from assertion sensitivity in
 the `vacuity-report.v1` contract defined by `artifact-contract.md`;
 `verification-error` becomes the report's bounded behavior `error`. The report
-and its disposition remain owned by Main.
+and its disposition remain owned by Main. If no separate assertion-sensitivity
+check ran, record its complete result as `not-run`; unavailable behavior then
+becomes `mutation-not-verified`.

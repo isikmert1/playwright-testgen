@@ -137,6 +137,18 @@ function main() {
     if (options.type === 'trace')
       validateTrace(artifact, repository, handoffCriteria, errors);
     else {
+      let trace = null;
+      try {
+        trace = require('./change-manifest.cjs').validateArtifact(
+          repository,
+          options.runId,
+          'trace',
+        );
+      } catch {
+        errors.push('report-trace-unavailable');
+      }
+      if (trace != null && trace.disposition !== 'fixed')
+        errors.push('report-trace-not-fixed');
       const {
         validateVacuityReport,
       } = require('./validate-vacuity-report.cjs');

@@ -259,6 +259,11 @@ function verifyMutation(
 ) {
   const { policy, repository } = resolveRun(repositoryInput, runId);
   if (!isIdentifier(criterionId)) fail('criterion-id-invalid');
+  const handoff = validateArtifact(repository, runId, 'handoff');
+  const trace = validateArtifact(repository, runId, 'trace');
+  if (trace.disposition !== 'fixed') fail('trace-not-fixed');
+  if (!handoff.criteria.some(({ id }) => id === criterionId))
+    fail('criterion-not-approved');
   if (adapterInput == null) {
     return {
       status: 'unavailable',
@@ -271,13 +276,9 @@ function verifyMutation(
     fail('change-manifest-incomplete');
   if (currentHead(repository) !== manifest.head)
     fail('repository-head-changed');
-  const handoff = validateArtifact(repository, runId, 'handoff');
-  validateArtifact(repository, runId, 'trace');
   const activeBefore = captureSnapshot(repository, runId);
   if (!snapshotsMatch(activeBefore, manifest.boundaries.post_healer))
     fail('post-healer-state-mismatch');
-  if (!handoff.criteria.some(({ id }) => id === criterionId))
-    fail('criterion-not-approved');
 
   const parsed = parseAdapter(repository, adapterInput);
   requireHeadFile(repository, manifest.head, parsed.adapterFile.relative, true);
@@ -306,6 +307,7 @@ function verifyMutation(
   for (const affectedPath of mutation.affected_paths)
     requireHeadFile(repository, manifest.head, affectedPath, false);
   const digest = definitionDigest(parsed, mutation);
+  // Computed, committed-manifest, and human-approved digests must all match.
   if (mutation.definition_digest !== digest || approvalDigest !== digest)
     fail('mutation-approval-mismatch');
 

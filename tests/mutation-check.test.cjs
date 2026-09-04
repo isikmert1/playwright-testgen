@@ -224,6 +224,38 @@ function passingTrace() {
   return value;
 }
 
+function blockedTrace() {
+  const value = passingTrace();
+  value.attempts = [
+    {
+      number: 1,
+      kind: 'debug-run',
+      hypothesis: 'authentication is required before the scenario can run',
+      failure_signature: 'authentication-required',
+      evidence_summary: 'the application redirected to its login route',
+      classification: 'environment-or-auth',
+      action: 'stopped pending approved authentication input',
+      outcome: 'blocked',
+    },
+  ];
+  value.final_classification = 'environment-or-auth';
+  value.disposition = 'needs-user-input';
+  value.escalation = 'approved authentication input is required';
+  return value;
+}
+
+function writeApprovedCandidate(repository, runDirectory) {
+  mkdirSync(path.join(repository, 'tests'), { recursive: true });
+  writeFileSync(
+    path.join(repository, 'tests', 'account.spec.ts'),
+    'test("saves", async () => expect("saved").toBe("saved"));\n',
+  );
+  writeFileSync(
+    path.join(runDirectory, 'handoff.json'),
+    JSON.stringify(handoff()),
+  );
+}
+
 function commitAdapter(repository, adapterPath) {
   const digest = run(repository, [
     'digest',
@@ -246,15 +278,7 @@ function commitAdapter(repository, adapterPath) {
 
 function capturePassingRun(repository, runDirectory) {
   assert.equal(capture(repository, 'pre-author').status, 0);
-  mkdirSync(path.join(repository, 'tests'), { recursive: true });
-  writeFileSync(
-    path.join(repository, 'tests', 'account.spec.ts'),
-    'test("saves", async () => expect("saved").toBe("saved"));\n',
-  );
-  writeFileSync(
-    path.join(runDirectory, 'handoff.json'),
-    JSON.stringify(handoff()),
-  );
+  writeApprovedCandidate(repository, runDirectory);
   const checkpoint = capture(repository, 'checkpoint');
   assert.equal(checkpoint.status, 0, checkpoint.stderr);
   writeFileSync(
@@ -624,6 +648,11 @@ test('rejects an unmapped result from a dirty adapter definition', () => {
 
 test('returns unavailable when the repository has no mutation adapter', () => {
   withRepository(({ repository, runDirectory }) => {
+    writeApprovedCandidate(repository, runDirectory);
+    writeFileSync(
+      path.join(runDirectory, 'healer-trace.json'),
+      JSON.stringify(passingTrace()),
+    );
     assert.equal(
       existsSync(path.join(runDirectory, 'change-manifest.json')),
       false,
@@ -647,6 +676,36 @@ test('returns unavailable when the repository has no mutation adapter', () => {
       criterion_id: 'criterion-1',
       reason: 'adapter-absent',
     });
+  });
+});
+
+test('requires a fixed Healer result before reporting adapter absence', () => {
+  withRepository(({ repository, runDirectory }) => {
+    writeApprovedCandidate(repository, runDirectory);
+
+    for (const [name, traceValue, error] of [
+      ['missing', null, 'trace-artifact-unavailable'],
+      ['nonfixed', blockedTrace(), 'trace-not-fixed'],
+    ]) {
+      if (traceValue != null)
+        writeFileSync(
+          path.join(runDirectory, 'healer-trace.json'),
+          JSON.stringify(traceValue),
+        );
+
+      const result = run(repository, [
+        'verify',
+        '--repo',
+        '.',
+        '--run-id',
+        runId,
+        '--criterion-id',
+        'criterion-1',
+      ]);
+
+      assert.equal(result.status, 1, `${name}: ${result.stdout}`);
+      assert.equal(JSON.parse(result.stdout).error, error, name);
+    }
   });
 });
 

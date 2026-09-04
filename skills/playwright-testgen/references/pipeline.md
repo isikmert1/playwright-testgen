@@ -21,6 +21,7 @@ dispositions. The workflow handles exactly one written scenario at a time.
 | Approve, skip, or redirect the candidate                          | Human                      |
 | Run and diagnose an approved spec                                 | Healer                     |
 | Make a bounded, evidence-backed repair                            | Healer                     |
+| Run the post-Healer vacuity gate and write its report             | Main session               |
 | Resolve intent, product, environment, or authentication decisions | Human or Author, as routed |
 
 Writes stay sequential. Author is the only pre-checkpoint spec writer. Healer
@@ -70,11 +71,15 @@ or debug.
    Author and Healer must never edit it; preserve it through Healer and never
    treat it as a handoff artifact.
 
-   When a controlled fixture or explicitly approved repository adapter makes
-   mutation verification available, Main captures the `pre-author` boundary
-   with the exact command in `artifact-contract.md`. Do this after the policy
-   exists and before delegating Author. If capture fails, stop before Author;
-   never continue with an incomplete repository-state baseline.
+   Before enabling mutation verification, Main identifies one exact
+   criterion-linked adapter entry and digest under `mutation-check.md` and gets
+   explicit human approval. If several entries could apply, ask now; never
+   choose one implicitly. When that approval exists, Main captures the
+   `pre-author` boundary with the exact command in `artifact-contract.md`. Do
+   this after the policy exists and before delegating Author. If no exact entry
+   is approved, continue in no-adapter mode without a change manifest. If
+   capture fails, stop before Author; never continue with an incomplete
+   repository-state baseline.
 
 3. Main delegates the Author stage to
    `playwright-testgen:playwright-test-author` with the run ID, original
@@ -115,20 +120,49 @@ or debug.
    each failure, performs only permitted repairs, replaces the declared trace
    draft with the complete artifact, validates
    `.playwright-cli/testgen/<run_id>/healer-trace.json`, and stops at the
-   healing limits. When the run has a change manifest, Main validates the trace
-   and captures `post-healer` before any mutation check. A failed capture is a
-   repository-state verification error, never a successful test result.
-7. Main reports the outcome and applies `cleanup-contract.md` on every exit.
+   healing limits. Main validates the retained trace. A nonfixed disposition
+   bypasses the vacuity gate and remains the run's final disposition.
+7. Only a validated `fixed` trace enters Main's vacuity gate. Main does not put
+   this work in `Stop` or `SubagentStop`, redispatch Healer for bookkeeping, or
+   report `fixed` as the final Testgen result.
+   - When the run has a change manifest, Main captures `post-healer` before
+     verification. If capture fails, do not invoke the adapter; record the
+     bounded capture error as behavior `error` in the vacuity report.
+   - When an adapter entry and its digest were explicitly approved before
+     Author, run exactly that criterion-linked entry with the command in
+     `mutation-check.md`. Never add, select, or switch an adapter after Author;
+     a later approval starts a new run with a new pre-Author boundary.
+   - When no approved adapter exists, run the no-adapter form from
+     `mutation-check.md`, even if unapproved adapter files exist. It needs no
+     change manifest and returns behavior `unavailable` with reason
+     `adapter-absent`.
+   - Map `killed`, `survived`, and `unavailable` directly into the report's
+     behavior status. Map a checker `verification-error` to behavior `error`.
+     Unless a separate assertion-sensitivity check actually ran, record its
+     complete status as `not-run`; do not infer evidence from the spec.
+   - Main writes and validates `vacuity-report.json` with the exact command in
+     `artifact-contract.md`, then reports only its derived disposition. A
+     surviving product mutation is `rejected-vacuous`; include its mutation ID
+     as evidence. It never automatically returns to Author. The human may start
+     a new approved Author run using that evidence.
+8. Main applies `cleanup-contract.md` on every exit.
 
 Never auto-advance through the checkpoint. When lint fails, offer only `adjust`
 or `skip`; do not run, change configuration, or weaken the spec.
 
 ## Final dispositions
 
+`fixed` is a Healer-stage disposition that enters the vacuity gate. It is not a
+final Testgen disposition.
+
 | Disposition                | Meaning                                                                  | Next owner                  |
 | -------------------------- | ------------------------------------------------------------------------ | --------------------------- |
 | `generated-unverified`     | Human skipped execution                                                  | Human                       |
-| `fixed`                    | Approved spec passed after zero or more permitted repairs                | Human                       |
+| `verified-non-vacuous`     | Approved product mutation was killed by the fixed spec                   | Human                       |
+| `rejected-vacuous`         | Runnable product or assertion mutation survived                          | Human                       |
+| `assertion-sensitive-only` | Assertion sensitivity was shown without product-behavior verification    | Human                       |
+| `mutation-not-verified`    | No approved product adapter was available and no secondary check ran     | Human                       |
+| `verification-error`       | The gate could not establish a trustworthy verification result           | Human                       |
 | `needs-author-revision`    | Intent or structure requires broad revision                              | Author after human approval |
 | `needs-user-input`         | A product, environment, auth, or missing-choice decision blocks progress | Human                       |
 | `product-behavior-wrong`   | Criteria and observed product behavior cannot both be true               | Human/product owner         |

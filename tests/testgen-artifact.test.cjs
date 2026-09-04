@@ -158,6 +158,7 @@ function withRepository(callback) {
     writeFileSync(path.join(repository, 'tests', 'account.spec.ts'), '');
     writePolicy(repository, 'tests/account.spec.ts');
     writeArtifact(repository, runId, 'handoff.json', handoff());
+    writeArtifact(repository, runId, 'healer-trace.json', trace());
     callback(repository);
   } finally {
     rmSync(repository, { force: true, recursive: true });
@@ -267,6 +268,38 @@ test('accepts a behavior-killed vacuity report for the approved spec', () => {
   });
 });
 
+test('requires a fixed Healer result before accepting a vacuity report', () => {
+  withRepository((repository) => {
+    const tracePath = path.join(
+      repository,
+      '.playwright-cli',
+      'testgen',
+      runId,
+      'healer-trace.json',
+    );
+    const nonfixed = trace();
+    nonfixed.attempts = [productFindingAttempt()];
+    nonfixed.final_classification = 'product-behavior-wrong';
+    nonfixed.disposition = 'product-behavior-wrong';
+    nonfixed.next_owner = 'product-owner';
+    nonfixed.escalation = 'the criterion conflicts with product behavior';
+
+    for (const [name, traceValue, error] of [
+      ['missing', null, 'report-trace-unavailable'],
+      ['nonfixed', nonfixed, 'report-trace-not-fixed'],
+    ]) {
+      if (traceValue == null) rmSync(tracePath, { force: true });
+      else writeFileSync(tracePath, JSON.stringify(traceValue));
+      const artifact = writeVacuityReport(repository, vacuityReport());
+
+      const result = validate(repository, 'vacuity', runId, artifact);
+
+      assert.equal(result.status, 1, `${name}: ${result.stdout}`);
+      assert.match(result.stderr, new RegExp(error, 'u'), name);
+    }
+  });
+});
+
 test('accepts assertion-only evidence without claiming behavior verification', () => {
   withRepository((repository) => {
     const value = vacuityReport();
@@ -289,6 +322,28 @@ test('accepts assertion-only evidence without claiming behavior verification', (
       cleanup: 'removed',
     };
     value.disposition = 'assertion-sensitive-only';
+    const artifact = writeVacuityReport(repository, value);
+
+    const result = validate(repository, 'vacuity', runId, artifact);
+
+    assert.equal(result.status, 0, result.stderr);
+  });
+});
+
+test('reports absent product mutation coverage without overstating verification', () => {
+  withRepository((repository) => {
+    const value = vacuityReport();
+    value.behavior = {
+      status: 'unavailable',
+      mutation: null,
+      baseline: null,
+      mutant: null,
+      reason: 'adapter-absent',
+      error: null,
+      isolation: 'not-run',
+      cleanup: 'not-run',
+    };
+    value.disposition = 'mutation-not-verified';
     const artifact = writeVacuityReport(repository, value);
 
     const result = validate(repository, 'vacuity', runId, artifact);
