@@ -144,10 +144,10 @@ function validateNavigation(subcommand, args, policy) {
 }
 
 function validateCli(cwd, assignments, args, agentType) {
-  if (args.length === 1 && args[0] === '--help') {
+  if (args.length === 1 && (args[0] === '--help' || args[0] === '--version')) {
     if (assignments.length !== 0) {
       return deny(
-        'The read-only playwright-cli help check does not accept environment assignments. Run playwright-cli --help.',
+        `The read-only playwright-cli ${args[0].slice(2)} check does not accept environment assignments. Run playwright-cli ${args[0]}.`,
       );
     }
     return decision(
@@ -155,6 +155,9 @@ function validateCli(cwd, assignments, args, agentType) {
       'Read-only check of the official global playwright-cli.',
     );
   }
+
+  const rawCount = args.filter((value) => value === '--raw').length;
+  args = args.filter((value) => value !== '--raw');
 
   let session = '';
   if (args[0]?.startsWith('-s=')) {
@@ -165,6 +168,11 @@ function validateCli(cwd, assignments, args, agentType) {
   if (!ALLOWED_CLI_COMMANDS.has(subcommand)) {
     return deny(
       `playwright-cli subcommand "${subcommand ?? ''}" is not allowed. Use snapshot, find, or generate-locator for inspection and a listed interaction command for the verified action.`,
+    );
+  }
+  if (rawCount > 1 || (rawCount === 1 && subcommand !== 'generate-locator')) {
+    return deny(
+      '--raw is allowed once only for generate-locator. Use structured output for every other Playwright CLI command.',
     );
   }
 
@@ -229,7 +237,7 @@ function validateCli(cwd, assignments, args, agentType) {
 
   if (args.some((value) => BLOCKED_OPTIONS.test(value))) {
     return deny(
-      'Profiles, custom config/output paths, raw evaluation, uploads, and implicit submission are not allowed. Use run-owned default output and explicit allowlisted browser actions.',
+      'Profiles, custom config/output paths, uploads, and implicit submission are not allowed. Use run-owned default output and explicit allowlisted browser actions.',
     );
   }
 

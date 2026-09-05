@@ -106,6 +106,7 @@ function handoff() {
     criteria: [
       {
         id: 'criterion-1',
+        step_title: 'verify the saved profile is visible',
         assertion_location: 'tests/account.spec.ts:8',
         outcome: 'saved profile is visible',
       },
@@ -465,7 +466,7 @@ test('kills a criterion-linked mutation in disposable isolation', () => {
         'const value=(name)=>process.argv[process.argv.indexOf(name)+1];',
         "const spec=value('--spec');",
         "let result={protocol_version:1,outcome:'pass',criterion_id:null};",
-        "if(process.argv.slice(2).length!==6) result={protocol_version:1,outcome:'error',criterion_id:null,reason:'unexpected-arguments'};",
+        "if(process.argv.slice(2).length!==8||value('--step-title')!=='verify the saved profile is visible') result={protocol_version:1,outcome:'error',criterion_id:null,reason:'unexpected-arguments'};",
         "else if(existsSync(path.join(process.cwd(),'notes.txt'))) result={protocol_version:1,outcome:'error',criterion_id:null,reason:'user-content-copied'};",
         "else if(!existsSync(path.join(process.cwd(),spec))) result={protocol_version:1,outcome:'error',criterion_id:null,reason:'spec-not-copied'};",
         "else if(readFileSync(path.join(process.cwd(),'src/app.js'),'utf8').includes('= 0')) result={protocol_version:1,outcome:'fail',criterion_id:value('--criterion-id')};",

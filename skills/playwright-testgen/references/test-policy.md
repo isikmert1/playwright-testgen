@@ -20,6 +20,9 @@ win.
 ## Layout and reuse
 
 - Follow nearby specs for imports, fixtures, naming, output location, and setup.
+- Choose the file extension from existing Playwright specs, not application or
+  config-file language. Use JavaScript only when existing Playwright specs
+  establish it; otherwise use TypeScript, including when no specs exist.
 - Keep one independently runnable scenario per spec.
 - Keep logic inline unless a plain helper is already reusable by two specs. Do
   not create speculative page objects, fixtures, directories, or abstractions.
@@ -31,16 +34,20 @@ win.
 - Match the target repository's established `test` and `expect` imports and
   fixture signatures.
 - Use `test.step()` only for meaningful user-flow phases, not every click.
-- Wrap each criterion's meaningful assertion in one stable
-  `test.step('testgen:criterion:<criterion-id>', async () => { ... })`. Keep
-  the exact title unchanged so post-Healer mutation evidence remains tied to
-  the written criterion even when line numbers move.
+- Wrap each criterion's meaningful assertion in one stable `test.step()` with
+  a concise, unique, human-readable title that describes the assertion. Record
+  the exact title as `step_title` beside the criterion ID in the handoff and
+  keep it unchanged through healing so mutation evidence remains attributable
+  when line numbers move. Never add Testgen IDs, tags, markers, or ownership
+  comments to the generated spec.
 - Keep the behavior under test and its meaningful assertions visible in the
   spec; helpers may prepare or navigate but must not hide the scenario.
 - Apply `vacuity-policy.md` to every planned assertion. A criterion is not
   covered unless its assertion can fail when the required behavior is absent.
-- Author lints every touched spec and helper with the repository's existing
-  command, records the result, and never executes the spec.
+- Author runs the repository's existing scoped lint against every touched spec
+  and helper. When no compatible linter exists, an existing collection-only
+  check may validate the selected spec. Author records the result and never
+  executes the spec.
 
 ## Waiting and navigation
 

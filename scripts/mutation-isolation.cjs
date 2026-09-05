@@ -255,11 +255,28 @@ function runAdapterProcess(runner, args, options) {
   });
 }
 
-async function runAdapter(worktree, parsed, mutation, spec, phase, signal) {
+async function runAdapter(
+  worktree,
+  parsed,
+  mutation,
+  stepTitle,
+  spec,
+  phase,
+  signal,
+) {
   const runner = path.join(worktree, parsed.runner.relative);
   const result = await runAdapterProcess(
     runner,
-    ['--phase', phase, '--spec', spec, '--criterion-id', mutation.criterion_id],
+    [
+      '--phase',
+      phase,
+      '--spec',
+      spec,
+      '--criterion-id',
+      mutation.criterion_id,
+      '--step-title',
+      stepTitle,
+    ],
     {
       cwd: worktree,
       env: {
@@ -468,6 +485,7 @@ async function verifyMutation(
       worktree,
       parsed,
       mutation,
+      criterion.step_title,
       overlay.approvedSpec,
       'baseline',
       signal,
@@ -502,6 +520,7 @@ async function verifyMutation(
       worktree,
       parsed,
       mutation,
+      criterion.step_title,
       overlay.approvedSpec,
       'mutant',
       signal,

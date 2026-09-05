@@ -23,13 +23,18 @@ Main runs this read-only preflight from the target package directory before
 every generation, even when a `/setup` profile exists:
 
 ```sh
+node --version
 node -e "for (const id of ['playwright/package.json','@playwright/test/package.json']) require.resolve(id)"
+playwright-cli --version
 playwright-cli --help
 ```
 
-The help command must complete without a missing or outdated official-skill
-warning. If any package, CLI, or skill is missing or outdated, stop before
-Author.
+The CLI must be version 0.1.19 or newer, and its help must list `attach`,
+`find`, `generate-locator`, and `requests` without a missing or outdated
+official-skill warning. If any package, CLI capability, or skill is missing or
+outdated, stop before Author. Run the official install from the same Node/npm
+environment that launches the agent; a different global npm prefix does not
+satisfy this check.
 When `/setup` is available, it owns guided detection and approved remediation;
 its prior result never replaces this runtime preflight. Until `/setup` ships,
 Main offers only the relevant official remediation:

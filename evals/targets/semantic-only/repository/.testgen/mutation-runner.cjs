@@ -35,7 +35,7 @@ function parseArguments(values) {
     const key = values[index];
     const value = values[index + 1];
     if (
-      !['--phase', '--spec', '--criterion-id'].includes(key) ||
+      !['--phase', '--spec', '--criterion-id', '--step-title'].includes(key) ||
       value == null ||
       Object.hasOwn(options, key)
     )
@@ -45,7 +45,14 @@ function parseArguments(values) {
   if (
     !['baseline', 'mutant'].includes(options['--phase']) ||
     !isRepositoryPath(options['--spec']) ||
-    !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$/u.test(options['--criterion-id'] ?? '')
+    !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$/u.test(
+      options['--criterion-id'] ?? '',
+    ) ||
+    typeof options['--step-title'] !== 'string' ||
+    options['--step-title'].length === 0 ||
+    options['--step-title'].length > 160 ||
+    options['--step-title'].trim() !== options['--step-title'] ||
+    /\p{Cc}/u.test(options['--step-title'])
   )
     throw new Error('invalid-arguments');
   return options;
@@ -148,20 +155,19 @@ function testResults(suites) {
   ]);
 }
 
-function hasFailedCriterionStep(steps, criterionId) {
-  const title = `testgen:criterion:${criterionId}`;
+function hasFailedCriterionStep(steps, stepTitle) {
   return (steps ?? []).some(
     (step) =>
-      (step.title === title && step.error != null) ||
-      hasFailedCriterionStep(step.steps, criterionId),
+      (step.title === stepTitle && step.error != null) ||
+      hasFailedCriterionStep(step.steps, stepTitle),
   );
 }
 
-function hasRelevantFailure(report, criterionId) {
+function hasRelevantFailure(report, stepTitle) {
   return testResults(report.suites)
     .filter((test) => test.status === 'unexpected')
     .flatMap((test) => test.results ?? [])
-    .some((result) => hasFailedCriterionStep(result.steps, criterionId));
+    .some((result) => hasFailedCriterionStep(result.steps, stepTitle));
 }
 
 async function run() {
@@ -240,7 +246,7 @@ async function run() {
     if (result.status === 0 && report.stats.expected > 0)
       return { protocol_version: 1, outcome: 'pass', criterion_id: null };
     if (result.status !== 0 && report.stats.unexpected > 0) {
-      if (!hasRelevantFailure(report, options['--criterion-id']))
+      if (!hasRelevantFailure(report, options['--step-title']))
         throw new Error('failure-unattributed');
       return {
         protocol_version: 1,

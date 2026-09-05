@@ -32,11 +32,13 @@ its manifest, runner, or any adapter patch. Testgen applies the patch itself;
 the runner receives no product-mutation API.
 
 The runner is invoked in the disposable checkout with literal `--phase`,
-`--spec`, and `--criterion-id` arguments. It independently checks the exact
+`--spec`, `--criterion-id`, and `--step-title` arguments. The step title comes
+from the validated Author handoff. The runner independently checks the exact
 approved spec's report and may attribute a failure only when the failed result
-contains the exact `testgen:criterion:<criterion-id>` step with its own error.
-This stable marker survives line movement during healing. The runner translates
-the result into one JSON object on stdout:
+contains that exact descriptive step with its own error. This out-of-band
+mapping survives line movement during healing without adding Testgen markers to
+the generated spec. The runner translates the result into one JSON object on
+stdout:
 
 ```json
 { "protocol_version": 1, "outcome": "pass", "criterion_id": null }

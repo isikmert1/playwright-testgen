@@ -170,10 +170,40 @@ test('allows the official global Playwright CLI invocation', () => {
 
 test('allows the official global Playwright CLI preflight', () => {
   withTargetRepository(({ targetRepository }) => {
-    assert.equal(
-      runHook(targetRepository, 'playwright-cli --help').permissionDecision,
-      'allow',
-    );
+    for (const command of [
+      'node --version',
+      'playwright-cli --version',
+      'playwright-cli --help',
+    ]) {
+      assert.equal(
+        runHook(targetRepository, command).permissionDecision,
+        'allow',
+      );
+    }
+  });
+});
+
+test('allows raw output only for locator generation', () => {
+  withTargetRepository(({ targetRepository }) => {
+    for (const command of [
+      `-s=${runId} --raw generate-locator e1`,
+      `-s=${runId} generate-locator e1 --raw`,
+    ]) {
+      assert.equal(
+        runCliHook(targetRepository, command).permissionDecision,
+        'allow',
+      );
+    }
+
+    for (const command of [
+      `-s=${runId} snapshot --raw`,
+      `-s=${runId} generate-locator e1 --raw=true`,
+    ]) {
+      assert.equal(
+        runCliHook(targetRepository, command).permissionDecision,
+        'deny',
+      );
+    }
   });
 });
 
@@ -1167,13 +1197,13 @@ test('asks before running a target repository script', () => {
   withTargetRepository(({ targetRepository }) => {
     const result = runHook(
       targetRepository,
-      'npm run lint -- tests/account.spec.ts',
+      'npm run check:tests -- tests/account.spec.ts',
     );
 
     assert.equal(result.permissionDecision, 'ask');
     assert.match(
       result.permissionDecisionReason,
-      /target repository's existing scoped lint or formatter/iu,
+      /existing scoped lint, typecheck, collection check, or formatter/iu,
     );
   });
 });

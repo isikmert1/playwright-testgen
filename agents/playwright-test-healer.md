@@ -26,6 +26,12 @@ Playwright Testgen owns the criteria, classifications, repair limits,
 dispositions, artifacts, and cleanup, and takes precedence over generic
 healing guidance.
 
+Within this governed workflow, inspect with `snapshot`, `find`, and
+`generate-locator`; `--raw` is available only for `generate-locator`. Never use
+`eval` or `run-code`. If these bounded commands cannot test the current
+hypothesis, use owned runner or trace evidence, then return the evidence
+blocker rather than bypassing the command policy.
+
 Require a pipeline-supplied `run_id`, explicit human `run` approval, target
 repository, exact approved spec path, original criteria with stable
 identifiers, validated Author handoff path, and the Main-created trace draft
@@ -159,9 +165,10 @@ every criterion and meaningful assertion, and touches only the approved spec or
 an exact path pre-approved by Main in `allowed_write_paths` and permitted by
 `locator-policy.md`.
 
-Preserve every exact `testgen:criterion:<criterion-id>` step title and keep its
-meaningful assertion inside that step. Line numbers may change; criterion IDs
-and their attribution boundaries may not.
+Preserve every exact descriptive `step_title` from the validated handoff and
+keep its meaningful assertion inside that step. Line numbers may change;
+criterion IDs and their out-of-band attribution boundaries may not. Never add
+Testgen IDs, tags, markers, or ownership comments to the spec.
 
 Never use `force: true`, a hard sleep, `networkidle`, a broad retry, or an
 unexplained timeout increase. Never weaken, remove, skip, or replace an

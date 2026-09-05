@@ -42,6 +42,7 @@ function handoff(run = runId) {
     criteria: [
       {
         id: 'criterion-1',
+        step_title: 'verify the saved profile is visible',
         assertion_location: 'tests/account.spec.ts:18',
         outcome: 'saved profile is visible',
       },
@@ -583,6 +584,42 @@ test('rejects criterion IDs that downstream artifacts cannot use', () => {
       'handoff.json',
       artifact,
       /handoff-invalid-criterion-id/iu,
+    );
+  });
+});
+
+test('requires unique human-readable criterion step titles', () => {
+  withRepository((repository) => {
+    for (const stepTitle of [
+      '',
+      ' verify the saved profile',
+      'verify\0the saved profile',
+      'verify\u0085the saved profile',
+      'testgen:criterion:criterion-1',
+    ]) {
+      const artifact = handoff();
+      artifact.criteria[0].step_title = stepTitle;
+      assertRejected(
+        repository,
+        'handoff',
+        'handoff.json',
+        artifact,
+        /handoff-invalid-step-title/iu,
+      );
+    }
+
+    const artifact = handoff();
+    artifact.criteria.push({
+      ...artifact.criteria[0],
+      id: 'criterion-2',
+      step_title: artifact.criteria[0].step_title,
+    });
+    assertRejected(
+      repository,
+      'handoff',
+      'handoff.json',
+      artifact,
+      /handoff-duplicate-step-title/iu,
     );
   });
 });

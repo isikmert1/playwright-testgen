@@ -59,8 +59,9 @@ after dispatch requires approval and redispatch.
 
 - Scope to the owning dialog, form, navigation, row, active panel, or verified
   overlay before filtering by intent.
-- Use narrowly scoped read-only DOM inspection only when the accessibility
-  snapshot lacks required attribute or containment evidence.
+- When the accessibility snapshot lacks required attribute or containment
+  evidence, use a scoped `find` or `generate-locator --raw`. If those bounded
+  commands remain insufficient, stop with the evidence blocker.
 - Do not mutate the DOM, dispatch events, or retrieve full-page markup to prove
   a locator.
 - If the intended element remains ambiguous, stop or route to Author. Do not

@@ -182,6 +182,14 @@ function validateCommand(payload) {
   if (
     executable === 'node' &&
     split.assignments.length === 0 &&
+    args.length === 1 &&
+    args[0] === '--version'
+  ) {
+    return decision('allow', 'Read-only Node.js runtime version check.');
+  }
+  if (
+    executable === 'node' &&
+    split.assignments.length === 0 &&
     args.length === 2 &&
     args[0] === '-e' &&
     args[1] === RUNTIME_PREFLIGHT
@@ -233,12 +241,12 @@ function validateCommand(payload) {
   if (executable === 'npm' && args[0] === 'run') {
     return decision(
       'ask',
-      "This hook cannot inspect repository-defined npm scripts. Approve only the target repository's existing scoped lint or formatter with touched-file arguments; otherwise deny and report the lint prerequisite.",
+      'This hook cannot inspect repository-defined npm scripts. Approve only an existing scoped lint, typecheck, collection check, or formatter with touched-file arguments; otherwise deny and report the validation prerequisite.',
     );
   }
 
   return deny(
-    "This command is outside the workflow allowlist. Use playwright-cli directly for browser work, npx --no playwright for the target repository runner or trace inspection, or the target repository's existing scoped npm lint script with approval.",
+    'This command is outside the workflow allowlist. Use playwright-cli directly for browser work, npx --no playwright for the target repository runner or trace inspection, or an existing scoped npm validation script with approval.',
   );
 }
 

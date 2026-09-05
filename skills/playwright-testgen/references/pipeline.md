@@ -45,6 +45,14 @@ or debug.
    also writes `.playwright-cli/testgen/<run_id>/command-policy.json` with only
    this shape:
 
+   Main derives the scenario reference; never require the human to supply one.
+   An explicit spec path wins. Otherwise, inspect existing Playwright specs and
+   the selected Playwright config, then match their test directory, naming, and
+   language. Use JavaScript only when existing Playwright specs establish that
+   convention. When no Playwright specs exist, default to a descriptive
+   TypeScript `.spec.ts` file in the configured test directory. Ask before
+   creating the policy when conventions or the selected config are ambiguous.
+
    ```json
    {
      "approved_spec": "tests/account.spec.ts",
@@ -60,8 +68,10 @@ or debug.
    The origin above is illustrative; it is never a default. `approved_spec` is
    the proposed repository-relative spec path. Each allowed origin is an exact
    HTTP(S) scheme, host, and port without a path or credentials. Include only
-   origins explicitly supplied for the target application. If none is known,
-   stop and ask rather than starting Author.
+   origins explicitly supplied or confirmed for the target application. Main
+   may inspect an existing selected Playwright config or `/setup` profile for a
+   candidate origin, but discovery is not approval. If no single candidate is
+   known and confirmed, stop and ask rather than starting Author.
    `allowed_runner_options` is initially empty and may contain only exact
    `--project=<name>` or `--config=<path>` arguments explicitly selected by
    Main. `allowed_state_paths` contains only existing target-repository storage

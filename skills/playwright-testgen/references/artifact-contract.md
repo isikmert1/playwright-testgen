@@ -106,14 +106,14 @@ Healer needs:
 
 - `run_id`, a non-sensitive `scenario_ref`, and `spec_path`;
 - criterion identifiers matching
-  `^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$`, mapped to exact
-  `testgen:criterion:<criterion-id>` steps, assertion locations, and observable
+  `^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$`, mapped out of band to unique,
+  human-readable `step_title` values, assertion locations, and observable
   outcomes;
 - locator decisions with purpose, locator, strategy, live count, and visibility
   result;
 - detected test-id convention or an explicit no-result outcome;
 - any focused product-source test-id additions, or an empty list;
-- lint command name, status, and bounded diagnostics;
+- the `lint` pre-run check record: command name, status, and bounded diagnostics;
 - assumptions, open questions, test-data strategy, and touched paths.
 
 The handoff never substitutes for the approved spec or original criteria. Main
@@ -126,11 +126,17 @@ configured bare custom attribute; use the explicit `none-found` when detection
 is inconclusive. `touched_paths` contains the approved spec and only unique
 regular repository files. Every test-id addition must use that exact convention,
 name a regular file in `touched_paths`, and not duplicate another addition.
-Criterion assertion locations name a contained declared repository path and
-line inside the criterion's stable step. They remain human audit metadata; the
-post-Healer mutation runner uses the step title because healing may move lines.
-Lint status may be `pass`, `fixed`, `failed`, or `command-failed`; failed lint
-blocks `run` but still permits the pipeline's `adjust` or `skip` checkpoint.
+Each `step_title` is 1-160 characters without control characters or leading or
+trailing whitespace, is unique in the handoff, and exactly matches the
+descriptive `test.step()` title in the spec. Testgen identifiers remain in run
+artifacts, never in the generated spec. Criterion assertion locations name a
+contained declared repository path and line inside that stable step. They
+remain human audit metadata; the post-Healer mutation runner uses `step_title`
+because healing may move lines.
+The `lint` record may describe the target's scoped linter or, when none is
+compatible, an existing collection-only check. Its status may be `pass`,
+`fixed`, `failed`, or `command-failed`; failure blocks `run` but still permits
+the pipeline's `adjust` or `skip` checkpoint.
 
 ## Healer trace
 

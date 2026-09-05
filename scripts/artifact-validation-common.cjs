@@ -8,7 +8,7 @@ const SCHEMAS = {
   handoff: {
     filename: 'author-handoff.v1.schema.json',
     version: 'author-handoff.v1',
-    hash: '7021f22a0d03e831ef272f797e60573020959d79e6edd1b38b2890d26a9b1ac4',
+    hash: '5be739fd42dad453d8b5dac428d8f8673a9108372e51a8b8646f8b597e9953c0',
   },
   trace: {
     filename: 'healer-trace.v1.schema.json',

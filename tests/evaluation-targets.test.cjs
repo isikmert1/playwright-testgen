@@ -103,11 +103,19 @@ test('owned target keeps only its Playwright test runner dependencies local', ()
     existsSync(path.join(targetRoot, 'repository', 'package-lock.json')),
     true,
   );
-  assert.equal(packageJson.scripts.lint, 'node --check');
   assert.equal('@playwright/cli' in packageJson.devDependencies, false);
   for (const dependency of ['@playwright/test', 'playwright']) {
     assert.match(packageJson.devDependencies[dependency], /^\d+\.\d+\.\d+$/u);
   }
+});
+
+test('owned target collects generated TypeScript without executing it', () => {
+  const packageJson = readJson(
+    path.join(targetsRoot, 'semantic-only', 'repository', 'package.json'),
+  );
+
+  assert.equal(packageJson.scripts['check:tests'], 'playwright test --list');
+  assert.equal('lint' in packageJson.scripts, false);
 });
 
 test('selector-drift variant renames a control without changing behavior', (t) => {
@@ -237,7 +245,7 @@ test('mutation runner translates isolated Playwright results and removes its lin
       'fetch(`${process.env.TESTGEN_BASE_URL}/app.js`).then((response)=>response.text()).then((source)=>{',
       "const failed=!source.includes('orders.push(order);');",
       "const file='tests/order.spec.js';",
-      "const result=failed?{status:'failed',errorLocation:{file:path.resolve(file),line:108,column:1},steps:[{title:'testgen:criterion:order-appears-in-table',error:{message:'assertion failed'}}]}:{status:'passed'};",
+      "const result=failed?{status:'failed',errorLocation:{file:path.resolve(file),line:108,column:1},steps:[{title:'verify the submitted order details',error:{message:'assertion failed'}}]}:{status:'passed'};",
       "const report={errors:[],stats:{expected:failed?0:1,unexpected:failed?1:0},suites:[{title:file,file,specs:[{title:'order',file,line:1,column:1,tests:[{status:failed?'unexpected':'expected',results:[result]}]}]}]};",
       'writeFileSync(process.env.PLAYWRIGHT_JSON_OUTPUT_FILE,JSON.stringify(report));',
       'process.exitCode=failed?1:0;',
@@ -258,6 +266,8 @@ test('mutation runner translates isolated Playwright results and removes its lin
         'tests/order.spec.js',
         '--criterion-id',
         'order-appears-in-table',
+        '--step-title',
+        'verify the submitted order details',
       ],
       {
         cwd: targetRoot,
@@ -309,7 +319,7 @@ test('mutation runner translates isolated Playwright results and removes its lin
       "const {writeFileSync}=require('node:fs');",
       "const path=require('node:path');",
       "const file='tests/order.spec.js';",
-      "const report={errors:[],stats:{expected:0,unexpected:1},suites:[{title:file,file,specs:[{title:'order',file,line:1,column:1,tests:[{status:'unexpected',results:[{status:'failed',steps:[{title:'testgen:criterion:another-criterion',error:{message:'assertion failed'}}]}]}]}]}]};",
+      "const report={errors:[],stats:{expected:0,unexpected:1},suites:[{title:file,file,specs:[{title:'order',file,line:1,column:1,tests:[{status:'unexpected',results:[{status:'failed',steps:[{title:'verify another outcome',error:{message:'assertion failed'}}]}]}]}]}]};",
       'writeFileSync(process.env.PLAYWRIGHT_JSON_OUTPUT_FILE,JSON.stringify(report));',
       'process.exitCode=1;',
       '',
@@ -372,6 +382,8 @@ test('mutation runner stops its server after an invalid startup handshake', (t) 
       'tests/order.spec.js',
       '--criterion-id',
       'order-appears-in-table',
+      '--step-title',
+      'verify the submitted order details',
     ],
     {
       cwd: targetRoot,
@@ -408,6 +420,8 @@ test('mutation runner rejects a spec path outside its target repository', () => 
       'tests/../../outside.spec.js',
       '--criterion-id',
       'order-appears-in-table',
+      '--step-title',
+      'verify the submitted order details',
     ],
     { cwd: targetRoot, encoding: 'utf8', windowsHide: true },
   );
