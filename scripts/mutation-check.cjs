@@ -41,7 +41,7 @@ function digest(values) {
   );
 }
 
-function verify(values) {
+function verify(values, signal) {
   const options = parseFlags(
     values,
     new Set([
@@ -60,22 +60,28 @@ function verify(values) {
     options['--mutation-id'],
     options['--criterion-id'],
     options['--approval-digest'],
+    signal,
   );
 }
 
-function main(argv = process.argv.slice(2)) {
+async function main(argv = process.argv.slice(2)) {
   const operation = argv.shift() ?? null;
+  const controller = operation === 'verify' ? new AbortController() : null;
+  const cancel = () => controller.abort();
+  if (controller != null) {
+    process.on('SIGINT', cancel);
+    process.on('SIGTERM', cancel);
+  }
   try {
-    const result =
-      operation === 'capture'
-        ? capture(argv)
-        : operation === 'digest'
-          ? digest(argv)
-          : operation === 'verify'
-            ? verify(argv)
-            : (() => {
-                throw new MutationCheckError('invalid-operation');
-              })();
+    const result = await (operation === 'capture'
+      ? capture(argv)
+      : operation === 'digest'
+        ? digest(argv)
+        : operation === 'verify'
+          ? verify(argv, controller.signal)
+          : (() => {
+              throw new MutationCheckError('invalid-operation');
+            })());
     const ok = result.status !== 'verification-error';
     process.stdout.write(`${JSON.stringify({ ok, operation, ...result })}\n`);
     if (!ok) process.exitCode = 1;
@@ -90,7 +96,12 @@ function main(argv = process.argv.slice(2)) {
       `${JSON.stringify(output)}\n`,
     );
     process.exitCode = 1;
+  } finally {
+    if (controller != null) {
+      process.removeListener('SIGINT', cancel);
+      process.removeListener('SIGTERM', cancel);
+    }
   }
 }
 
-if (require.main === module) main();
+if (require.main === module) void main();

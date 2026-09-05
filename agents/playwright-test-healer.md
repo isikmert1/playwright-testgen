@@ -70,11 +70,13 @@ Set `PLAYWRIGHT_HTML_OPEN=never` for every runner process. For interactive
 diagnosis, start the target repository's local runner in the background:
 
 ```sh
-PLAYWRIGHT_HTML_OPEN=never npm exec --no -- playwright test <approved-spec-argument> --debug=cli --retries=0 --repeat-each=1 --output=<attempt-results-dir>
+PLAYWRIGHT_HTML_OPEN=never npm exec --no -- playwright test '<approved-spec-filter>' --debug=cli --retries=0 --repeat-each=1 --output=<attempt-results-dir>
 ```
 
 Each path placeholder represents one argument safely escaped for the active
-shell; never interpolate an untrusted path as raw command text. Run the test
+shell; never interpolate an untrusted path as raw command text. Main supplies
+`<approved-spec-filter>` as the anchored, regex-escaped absolute path matching
+only `approved_spec`; do not derive or broaden it. Run the test
 process from the target package directory so its existing configuration
 applies. The retry, repetition, and output overrides make one runner invocation
 one Testgen attempt with attempt-owned artifacts; never remove them. The hook
@@ -139,9 +141,11 @@ follow its owner and remedy:
 
 Before the first repair, read `test-policy.md`. Before the first locator or
 test-id repair, also read `locator-policy.md`. A focused product-source test-id
-edit is allowed only when that policy permits it and current live evidence
-verifies the result. Report it explicitly. If a safe repair requires a broad
-rewrite, classify `intent-wrong` instead.
+edit is allowed only when that policy permits it, Main pre-approved its exact
+path in `allowed_write_paths`, and current live evidence verifies the result.
+Report it explicitly. A newly discovered path returns to Main for approval and
+redispatch. If a safe repair requires a broad rewrite, classify `intent-wrong`
+instead.
 
 Never repeat an execution without changed state, new evidence, or a new
 hypothesis. Stop immediately at another owner's class, after two consecutive
@@ -152,7 +156,12 @@ attempt is consumed.
 
 Before every edit, verify that it is supported by current evidence, preserves
 every criterion and meaningful assertion, and touches only the approved spec or
-a focused source test-id permitted by `locator-policy.md`.
+an exact path pre-approved by Main in `allowed_write_paths` and permitted by
+`locator-policy.md`.
+
+Preserve every exact `testgen:criterion:<criterion-id>` step title and keep its
+meaningful assertion inside that step. Line numbers may change; criterion IDs
+and their attribution boundaries may not.
 
 Never use `force: true`, a hard sleep, `networkidle`, a broad retry, or an
 unexplained timeout increase. Never weaken, remove, skip, or replace an
@@ -165,7 +174,7 @@ After the last permitted edit, reserve an attempt for the same approved scope
 without `--debug=cli` and run it in the foreground:
 
 ```sh
-PLAYWRIGHT_HTML_OPEN=never npm exec --no -- playwright test <approved-spec-argument> --retries=0 --repeat-each=1 --output=<attempt-results-dir>
+PLAYWRIGHT_HTML_OPEN=never npm exec --no -- playwright test '<approved-spec-filter>' --retries=0 --repeat-each=1 --output=<attempt-results-dir>
 ```
 
 Only that passing non-debug run can produce `fixed`. If the initial execution

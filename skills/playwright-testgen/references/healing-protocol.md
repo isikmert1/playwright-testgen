@@ -35,10 +35,14 @@ For each diagnostic attempt:
    does not open a browser window, then run:
 
    ```sh
-   PLAYWRIGHT_HTML_OPEN=never npm exec --no -- playwright test <spec-argument> --debug=cli --retries=0 --repeat-each=1 --output=<attempt-results-dir>
+   PLAYWRIGHT_HTML_OPEN=never npm exec --no -- playwright test '<approved-spec-filter>' --debug=cli --retries=0 --repeat-each=1 --output=<attempt-results-dir>
    cd <validated-run-directory> && PWTEST_CLI_GLOBAL_CONFIG=. npm exec --no -- playwright-cli attach <emitted-session>
    cd <validated-run-directory> && PWTEST_CLI_GLOBAL_CONFIG=. npm exec --no -- playwright-cli -s=<emitted-session> <inspection-command>
    ```
+
+   Main supplies `<approved-spec-filter>` as one anchored, regex-escaped
+   absolute argument that matches only `approved_spec`; never broaden or
+   reconstruct it.
 
    Run from the target repository. `--no` refuses npm's fallback package
    installation; a missing local executable is a prerequisite failure. Start
@@ -131,8 +135,10 @@ Never:
 - change scenario intent, repair product behavior, or perform a broad rewrite;
 - modify unrelated specs, helpers, locators, assertions, or source.
 
-A focused test-id source edit is allowed only under `locator-policy.md` and must
-be reported. Otherwise source changes route to Author or the product owner.
+A focused test-id source edit is allowed only under `locator-policy.md`, must
+be pre-approved by Main as an exact `allowed_write_paths` entry, and must be
+reported. Return a newly discovered path to Main for approval and redispatch;
+otherwise source changes route to Author or the product owner.
 
 ## Reporting and cleanup
 

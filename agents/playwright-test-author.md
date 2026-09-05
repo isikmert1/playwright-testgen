@@ -102,7 +102,8 @@ Before any file mutation, including shell output, `Edit`, or `Write`, verify all
 of these:
 
 - Every criterion maps to a necessary action and a meaningful observable
-  assertion, or to an explicit blocker.
+  assertion inside its exact `testgen:criterion:<criterion-id>` step, or to an
+  explicit blocker.
 - Every planned assertion passes the evidence, loop, and comparison guards in
   `vacuity-policy.md`.
 - Each locator passed the count-one and visibility gate.
@@ -111,8 +112,9 @@ of these:
 - The spec is independently runnable, uses test-owned data and existing safe
   cleanup where required, and follows the target repository's compatible
   conventions.
-- The planned edit is limited to the assigned spec, a genuinely shared existing
-  helper, or a focused source test-id allowed by `locator-policy.md`.
+- The planned edit is limited to the assigned spec or an exact existing helper
+  or source path pre-approved by Main in `allowed_write_paths`. A newly
+  discovered helper or test-id need returns to Main for approval and redispatch.
 - No step invokes the Playwright test runner.
 
 If any check fails, repair the plan or return the blocker. Never write a known
@@ -122,7 +124,11 @@ weak spec.
 
 Write the smallest spec that satisfies `test-policy.md`. Do not create
 speculative helpers, fixtures, page objects, directories, or configuration.
-Report any permitted source test-id addition explicitly.
+Keep each criterion step title exact and record an assertion line inside that
+step in the handoff.
+Report any permitted source test-id addition explicitly. Never create or edit
+package metadata, dependency files, Playwright configuration, or another path
+outside the run policy.
 
 Run the target repository's existing lint command against touched files only.
 One safe formatter or import autofix is allowed, followed by one final scoped

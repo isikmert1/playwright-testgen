@@ -50,8 +50,10 @@ No conclusive result is valid: skip rung 3 and continue to scoped CSS. Never
 invent a convention.
 
 Adding a test-id to product source is allowed only when the repository already
-uses that convention and only within the feature under test. Report the source
-edit explicitly; it is never the default response to ambiguity.
+uses that convention, only within the feature under test, and Main pre-approved
+the exact existing source file in `allowed_write_paths`. Report the source edit
+explicitly; it is never the default response to ambiguity. A path discovered
+after dispatch requires approval and redispatch.
 
 ## Ambiguity and escalation
 

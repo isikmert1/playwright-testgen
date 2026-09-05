@@ -12,6 +12,9 @@ const { tmpdir } = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const test = require('node:test');
+const {
+  exactPlaywrightFilter: policySpecFilter,
+} = require('../hooks/run-policy.cjs');
 
 const repositoryRoot = path.resolve(__dirname, '..');
 const hookPath = path.join(repositoryRoot, 'hooks', 'validate-bash.cjs');
@@ -35,6 +38,7 @@ function createTargetRepository() {
       approved_spec: 'tests/account.spec.ts',
       allowed_runner_options: [],
       allowed_state_paths: [],
+      allowed_write_paths: [],
       format_version: 1,
       run_id: runId,
       allowed_origins: ['http://127.0.0.1:3000'],
@@ -81,6 +85,34 @@ function runToolHook(
 
 function runHook(cwd, command, agentType = 'playwright-test-author') {
   return runToolHook(cwd, 'Bash', { command }, agentType);
+}
+
+function exactSpecFilter(repository, relative = 'tests/account.spec.ts') {
+  const absolute = path.resolve(repository, relative).replaceAll('\\', '/');
+  const escaped = absolute.replace(/[\\^$.*+?()[\]{}|/]/gu, '\\$&');
+  const flags = process.platform === 'win32' ? 'i' : '';
+  return `/^${escaped}$/${flags}`;
+}
+
+function runnerCommand(repository, output, options = '') {
+  const filter = exactSpecFilter(repository);
+  return `PLAYWRIGHT_HTML_OPEN=never npm exec --no -- playwright test '${filter}' ${options}--retries=0 --repeat-each=1 --output=${output}`;
+}
+
+test('makes exact spec filters explicit about platform case semantics', () => {
+  const filter = policySpecFilter('C:/repo/Account.spec.ts');
+
+  assert.equal(filter.startsWith('/^'), true);
+  assert.equal(
+    filter.endsWith(process.platform === 'win32' ? '$/i' : '$/'),
+    true,
+  );
+});
+
+function updatePolicy(runDirectory, values) {
+  const policyPath = path.join(runDirectory, 'command-policy.json');
+  const policy = JSON.parse(readFileSync(policyPath, 'utf8'));
+  writeFileSync(policyPath, JSON.stringify({ ...policy, ...values }));
 }
 
 test('denies malformed hook input instead of failing open', () => {
@@ -342,6 +374,7 @@ test('binds storage state to an exact Main-approved repository path', () => {
         approved_spec: 'tests/account.spec.ts',
         allowed_runner_options: [],
         allowed_state_paths: [stateArgument],
+        allowed_write_paths: [],
         format_version: 1,
         run_id: runId,
         allowed_origins: ['http://127.0.0.1:3000'],
@@ -369,7 +402,78 @@ test('allows one scoped Playwright debug attempt', () => {
       targetRepository,
       'Bash',
       {
+        command: runnerCommand(targetRepository, output, '--debug=cli '),
+        run_in_background: true,
+      },
+      'playwright-test-healer',
+    );
+
+    assert.equal(result.permissionDecision, 'allow');
+  });
+});
+
+test('requires an anchored filter for the exact approved spec', () => {
+  withTargetRepository(({ targetRepository }) => {
+    const output = `.playwright-cli/testgen/${runId}/attempt-2/test-results`;
+    const result = runToolHook(
+      targetRepository,
+      'Bash',
+      {
         command: `PLAYWRIGHT_HTML_OPEN=never npm exec --no -- playwright test tests/account.spec.ts --debug=cli --retries=0 --repeat-each=1 --output=${output}`,
+        run_in_background: true,
+      },
+      'playwright-test-healer',
+    );
+
+    assert.equal(result.permissionDecision, 'deny');
+    assert.match(
+      result.permissionDecisionReason,
+      /exact approved spec filter/iu,
+    );
+  });
+});
+
+test('requires every runner option selected by Main', () => {
+  withTargetRepository(({ runDirectory, targetRepository }) => {
+    updatePolicy(runDirectory, {
+      allowed_runner_options: [
+        '--config=playwright.config.cjs',
+        '--project=chromium',
+      ],
+    });
+    const output = `.playwright-cli/testgen/${runId}/attempt-2/test-results`;
+    const result = runToolHook(
+      targetRepository,
+      'Bash',
+      {
+        command: runnerCommand(targetRepository, output, '--debug=cli '),
+        run_in_background: true,
+      },
+      'playwright-test-healer',
+    );
+
+    assert.equal(result.permissionDecision, 'deny');
+    assert.match(
+      result.permissionDecisionReason,
+      /required.*project.*config/iu,
+    );
+  });
+});
+
+test('allows exact required runner options once', () => {
+  withTargetRepository(({ runDirectory, targetRepository }) => {
+    const options = ['--config=playwright.config.cjs', '--project=chromium'];
+    updatePolicy(runDirectory, { allowed_runner_options: options });
+    const output = `.playwright-cli/testgen/${runId}/attempt-2/test-results`;
+    const result = runToolHook(
+      targetRepository,
+      'Bash',
+      {
+        command: runnerCommand(
+          targetRepository,
+          output,
+          `--debug=cli ${options.join(' ')} `,
+        ),
         run_in_background: true,
       },
       'playwright-test-healer',
@@ -384,7 +488,7 @@ test('requires debug runners to be background tasks', () => {
     const output = `.playwright-cli/testgen/${runId}/attempt-2/test-results`;
     const result = runHook(
       targetRepository,
-      `PLAYWRIGHT_HTML_OPEN=never npm exec --no -- playwright test tests/account.spec.ts --debug=cli --retries=0 --repeat-each=1 --output=${output}`,
+      runnerCommand(targetRepository, output, '--debug=cli '),
       'playwright-test-healer',
     );
 
@@ -400,7 +504,7 @@ test('keeps confirmation runners in the foreground', () => {
       targetRepository,
       'Bash',
       {
-        command: `PLAYWRIGHT_HTML_OPEN=never npm exec --no -- playwright test tests/account.spec.ts --retries=0 --repeat-each=1 --output=${output}`,
+        command: runnerCommand(targetRepository, output),
         run_in_background: true,
       },
       'playwright-test-healer',
@@ -453,7 +557,7 @@ test('denies reuse of an existing attempt results directory', () => {
       targetRepository,
       'Bash',
       {
-        command: `PLAYWRIGHT_HTML_OPEN=never npm exec --no -- playwright test tests/account.spec.ts --debug=cli --retries=0 --repeat-each=1 --output=${output}`,
+        command: runnerCommand(targetRepository, output, '--debug=cli '),
         run_in_background: true,
       },
       'playwright-test-healer',
@@ -468,7 +572,7 @@ test('reserves each runner attempt before the process starts', () => {
   withTargetRepository(({ runDirectory, targetRepository }) => {
     const output = `.playwright-cli/testgen/${runId}/attempt-2/test-results`;
     const toolInput = {
-      command: `PLAYWRIGHT_HTML_OPEN=never npm exec --no -- playwright test tests/account.spec.ts --debug=cli --retries=0 --repeat-each=1 --output=${output}`,
+      command: runnerCommand(targetRepository, output, '--debug=cli '),
       run_in_background: true,
     };
 
@@ -505,7 +609,7 @@ test('denies the Playwright runner to Author before the human checkpoint', () =>
     const output = `.playwright-cli/testgen/${runId}/attempt-1/test-results`;
     const result = runHook(
       targetRepository,
-      `PLAYWRIGHT_HTML_OPEN=never npm exec --no -- playwright test tests/account.spec.ts --retries=0 --repeat-each=1 --output=${output}`,
+      runnerCommand(targetRepository, output),
     );
 
     assert.equal(result.permissionDecision, 'deny');
@@ -518,7 +622,7 @@ test('denies runner output outside the policy run directory', () => {
     const output = `elsewhere/.playwright-cli/testgen/${runId}/attempt-1/test-results`;
     const result = runHook(
       targetRepository,
-      `PLAYWRIGHT_HTML_OPEN=never npm exec --no -- playwright test tests/account.spec.ts --retries=0 --repeat-each=1 --output=${output}`,
+      runnerCommand(targetRepository, output),
       'playwright-test-healer',
     );
 
@@ -539,7 +643,7 @@ test('denies runner output through an attempt junction or symlink', () => {
       const output = `.playwright-cli/testgen/${runId}/attempt-2/test-results`;
       const result = runHook(
         targetRepository,
-        `PLAYWRIGHT_HTML_OPEN=never npm exec --no -- playwright test tests/account.spec.ts --retries=0 --repeat-each=1 --output=${output}`,
+        runnerCommand(targetRepository, output),
         'playwright-test-healer',
       );
 
@@ -557,7 +661,7 @@ test('denies an additional positional spec argument', () => {
     const output = `.playwright-cli/testgen/${runId}/attempt-2/test-results`;
     const result = runHook(
       targetRepository,
-      `PLAYWRIGHT_HTML_OPEN=never npm exec --no -- playwright test tests/account.spec.ts tests/admin.spec.ts --retries=0 --repeat-each=1 --output=${output}`,
+      `PLAYWRIGHT_HTML_OPEN=never npm exec --no -- playwright test '${exactSpecFilter(targetRepository)}' '${exactSpecFilter(targetRepository, 'tests/admin.spec.ts')}' --retries=0 --repeat-each=1 --output=${output}`,
       'playwright-test-healer',
     );
 
@@ -570,8 +674,8 @@ test('denies a different spec and unapproved runner flags', () => {
   withTargetRepository(({ targetRepository }) => {
     const output = `.playwright-cli/testgen/${runId}/attempt-2/test-results`;
     for (const command of [
-      `PLAYWRIGHT_HTML_OPEN=never npm exec --no -- playwright test tests/admin.spec.ts --retries=0 --repeat-each=1 --output=${output}`,
-      `PLAYWRIGHT_HTML_OPEN=never npm exec --no -- playwright test tests/account.spec.ts --update-snapshots=all --retries=0 --repeat-each=1 --output=${output}`,
+      `PLAYWRIGHT_HTML_OPEN=never npm exec --no -- playwright test '${exactSpecFilter(targetRepository, 'tests/admin.spec.ts')}' --retries=0 --repeat-each=1 --output=${output}`,
+      runnerCommand(targetRepository, output, '--update-snapshots=all '),
     ]) {
       assert.equal(
         runHook(targetRepository, command, 'playwright-test-healer')
@@ -590,6 +694,7 @@ test('denies a policy that approves a directory instead of one spec file', () =>
         approved_spec: 'tests',
         allowed_runner_options: [],
         allowed_state_paths: [],
+        allowed_write_paths: [],
         format_version: 1,
         run_id: runId,
         allowed_origins: ['http://127.0.0.1:3000'],
@@ -600,7 +705,7 @@ test('denies a policy that approves a directory instead of one spec file', () =>
       targetRepository,
       'Bash',
       {
-        command: `PLAYWRIGHT_HTML_OPEN=never npm exec --no -- playwright test tests --debug=cli --retries=0 --repeat-each=1 --output=${output}`,
+        command: `PLAYWRIGHT_HTML_OPEN=never npm exec --no -- playwright test '${exactSpecFilter(targetRepository, 'tests')}' --debug=cli --retries=0 --repeat-each=1 --output=${output}`,
         run_in_background: true,
       },
       'playwright-test-healer',
@@ -726,24 +831,25 @@ test('denies governed agents from writing the run change manifest', () => {
   });
 });
 
-test('denies governed agents from writing the run vacuity report', () => {
+test('denies governed agents from writing Main-owned result files', () => {
   withTargetRepository(({ runDirectory, targetRepository }) => {
-    const reportPath = path.join(runDirectory, 'vacuity-report.json');
-    writeFileSync(reportPath, '{}');
+    for (const filename of ['mutation-recovery.json', 'vacuity-report.json']) {
+      const reportPath = path.join(runDirectory, filename);
+      writeFileSync(reportPath, '{}');
+      for (const agentType of [
+        'playwright-test-author',
+        'playwright-test-healer',
+      ]) {
+        const result = runToolHook(
+          targetRepository,
+          'Write',
+          { content: '{}', file_path: reportPath },
+          agentType,
+        );
 
-    for (const agentType of [
-      'playwright-test-author',
-      'playwright-test-healer',
-    ]) {
-      const result = runToolHook(
-        targetRepository,
-        'Write',
-        { content: '{}', file_path: reportPath },
-        agentType,
-      );
-
-      assert.equal(result.permissionDecision, 'deny');
-      assert.match(result.permissionDecisionReason, /Main-owned/iu);
+        assert.equal(result.permissionDecision, 'deny');
+        assert.match(result.permissionDecisionReason, /Main-owned/iu);
+      }
     }
   });
 });
@@ -795,6 +901,7 @@ test('keeps approved storage state opaque to governed agents', () => {
         approved_spec: 'tests/account.spec.ts',
         allowed_runner_options: [],
         allowed_state_paths: ['../../../playwright/.auth/user.json'],
+        allowed_write_paths: [],
         format_version: 1,
         run_id: runId,
         allowed_origins: ['http://127.0.0.1:3000'],
@@ -855,6 +962,7 @@ test('keeps approved storage state outside Grep search roots', () => {
         approved_spec: 'tests/account.spec.ts',
         allowed_runner_options: [],
         allowed_state_paths: ['../../../playwright/.auth/user.json'],
+        allowed_write_paths: [],
         format_version: 1,
         run_id: runId,
         allowed_origins: ['http://127.0.0.1:3000'],
@@ -932,6 +1040,7 @@ test('denies run ownership through a repository junction or symlink', () => {
       approved_spec: 'tests/account.spec.ts',
       allowed_runner_options: [],
       allowed_state_paths: [],
+      allowed_write_paths: [],
       format_version: 1,
       run_id: runId,
       allowed_origins: ['http://127.0.0.1:3000'],
@@ -982,6 +1091,7 @@ test('rejects absolute or directory storage-state policy entries', () => {
           approved_spec: 'tests/account.spec.ts',
           allowed_runner_options: [],
           allowed_state_paths: [statePath],
+          allowed_write_paths: [],
           format_version: 1,
           run_id: runId,
           allowed_origins: ['http://127.0.0.1:3000'],
@@ -1156,6 +1266,67 @@ test('binds artifact mutations to the role that owns each artifact', () => {
         'Edit',
         { file_path: tracePath },
         'playwright-test-healer',
+      ),
+      {},
+    );
+  });
+});
+
+test('limits governed file mutations to explicitly approved paths', () => {
+  withTargetRepository(({ runDirectory, targetRepository }) => {
+    const helperPath = path.join(targetRepository, 'tests', 'selectors.ts');
+    const packagePath = path.join(targetRepository, 'package.json');
+    writeFileSync(helperPath, 'export const account = "account";\n');
+    writeFileSync(packagePath, '{}\n');
+    updatePolicy(runDirectory, {
+      allowed_write_paths: ['tests/selectors.ts'],
+    });
+
+    assert.deepEqual(
+      runToolHook(targetRepository, 'Edit', { file_path: helperPath }),
+      {},
+    );
+    assert.deepEqual(
+      runToolHook(targetRepository, 'Edit', {
+        file_path: path.join(targetRepository, 'tests', 'account.spec.ts'),
+      }),
+      {},
+    );
+
+    const denied = runToolHook(targetRepository, 'Write', {
+      file_path: packagePath,
+    });
+    assert.equal(denied.permissionDecision, 'deny');
+    assert.match(denied.permissionDecisionReason, /approved write path/iu);
+  });
+});
+
+test('fails closed when a discovered run policy is invalid', () => {
+  withTargetRepository(({ runDirectory, targetRepository }) => {
+    const packagePath = path.join(targetRepository, 'package.json');
+    writeFileSync(packagePath, '{}\n');
+    writeFileSync(path.join(runDirectory, 'command-policy.json'), '{');
+
+    const denied = runToolHook(targetRepository, 'Edit', {
+      file_path: packagePath,
+    });
+    assert.equal(denied.permissionDecision, 'deny');
+    assert.match(denied.permissionDecisionReason, /policy.*invalid/iu);
+
+    assert.deepEqual(
+      runToolHook(
+        targetRepository,
+        'Read',
+        {
+          file_path: path.join(
+            repositoryRoot,
+            'skills',
+            'playwright-testgen',
+            'SKILL.md',
+          ),
+        },
+        'playwright-test-author',
+        { CLAUDE_PLUGIN_ROOT: repositoryRoot },
       ),
       {},
     );

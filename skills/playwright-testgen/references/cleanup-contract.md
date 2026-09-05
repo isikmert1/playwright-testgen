@@ -20,6 +20,12 @@ resource when it is created so each exit can release only run-owned resources.
 - Main owns `vacuity-report.json`. Write and validate it only when a fixed
   result reaches the post-Healer vacuity gate, retain it until its disposition
   is accepted, then remove it with the run directory.
+- Before disposable-worktree execution, the mutation checker reserves
+  Main-owned `mutation-recovery.json` with only the exact temporary root and
+  worktree paths needed for supervised recovery. An existing record blocks
+  another verification. Successful cleanup removes it; failed cleanup keeps it
+  without replacing the primary verification error. It is transient run state,
+  not a public result artifact.
 - Direct every workflow-controlled snapshot, download, trace, and debug file to
   `.playwright-cli/testgen/<run-id>/` in the target repository.
 - Run attached Playwright CLI inspection commands with that validated run
@@ -102,4 +108,6 @@ Remove them after the final disposition has been reported and accepted.
 
 A cleanup failure is reported separately with the exact owned resource still
 present. It never changes the test failure's classification or authorizes broad
-deletion.
+deletion. Main may use `mutation-recovery.json` for a supervised exact-path
+cleanup. After confirming both recorded paths and the Git worktree registration
+are gone, remove that record before any new verification attempt.

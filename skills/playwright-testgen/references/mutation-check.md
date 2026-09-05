@@ -32,8 +32,11 @@ its manifest, runner, or any adapter patch. Testgen applies the patch itself;
 the runner receives no product-mutation API.
 
 The runner is invoked in the disposable checkout with literal `--phase`,
-`--spec`, and `--criterion-id` arguments. It translates the exact approved
-spec's result into one JSON object on stdout:
+`--spec`, and `--criterion-id` arguments. It independently checks the exact
+approved spec's report and may attribute a failure only when the failed result
+contains the exact `testgen:criterion:<criterion-id>` step with its own error.
+This stable marker survives line movement during healing. The runner translates
+the result into one JSON object on stdout:
 
 ```json
 { "protocol_version": 1, "outcome": "pass", "criterion_id": null }
@@ -98,8 +101,22 @@ unrelated pre-existing dirty content. It then:
 1. requires the approved spec to pass at baseline;
 2. applies the one approved patch;
 3. verifies that exactly `affected_paths` changed;
-4. runs the same spec against the mutant; and
-5. removes the worktree in `finally` and rechecks the active checkout.
+4. runs the same spec against the mutant and requires criterion-linked failure
+   evidence from the approved target runner;
+5. verifies that neither runner changed the disposable checkout beyond the
+   approved patch; and
+6. cancels the runner process tree on timeout or interruption, removes the
+   worktree in `finally`, then rechecks the active checkout and its `HEAD`.
+
+Before execution, the checker reserves Main-owned `mutation-recovery.json` with
+the exact temporary root and worktree paths. An existing record blocks another
+verification. Successful cleanup removes the reservation; failed cleanup keeps
+it for supervised recovery under `cleanup-contract.md` while preserving the
+primary result separately.
+
+The approved target runner must not detach children. It owns normal server and
+test-process shutdown; the outer checker owns the adapter timeout and
+cancellation boundary.
 
 The worktree isolates ordinary relative writes; it is not an operating-system
 security sandbox. The approved digest therefore binds the executable runner as

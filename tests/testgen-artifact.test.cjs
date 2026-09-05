@@ -199,6 +199,7 @@ function writePolicy(repository, approvedSpec) {
       allowed_origins: ['http://127.0.0.1:3000'],
       allowed_runner_options: [],
       allowed_state_paths: [],
+      allowed_write_paths: [],
       format_version: 1,
       run_id: runId,
     }),

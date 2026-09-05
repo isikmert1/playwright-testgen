@@ -381,25 +381,16 @@ function validatePlaywright(cwd, assignments, args, toolInput) {
   const spec = args[1];
   if (spec == null || spec.startsWith('-')) {
     return deny(
-      'The runner requires the exact human-approved spec argument. Use that spec path before the attempt flags.',
+      "The runner requires the exact approved spec filter. Use Main's anchored filter before the attempt flags.",
     );
   }
-  const resolvedSpec = resolveContainedPath(
-    cwd,
-    spec,
-    loaded.policy.repositoryRoot,
-    loaded.policy.canonicalRepositoryRoot,
-  );
-  if (
-    resolvedSpec == null ||
-    !samePath(resolvedSpec.absolute, loaded.policy.approvedSpec)
-  ) {
+  if (spec !== loaded.policy.approvedSpecFilter) {
     return deny(
-      'The runner spec does not match the human-approved path. Use only approved_spec from the current command-policy.json.',
+      'The runner spec does not match the exact approved spec filter. Use the anchored, escaped absolute filter derived from approved_spec in the current command-policy.json.',
     );
   }
   try {
-    if (!statSync(resolvedSpec.absolute).isFile()) {
+    if (!statSync(loaded.policy.approvedSpec).isFile()) {
       return deny(
         'The approved runner target must be one existing spec file. Return to Main if the reviewed spec path is missing or names a directory.',
       );
@@ -415,24 +406,25 @@ function validatePlaywright(cwd, assignments, args, toolInput) {
     );
   }
 
-  const optionalRunnerOptions = [
-    '--debug=cli',
-    ...loaded.policy.allowedRunnerOptions,
-  ];
+  const optionalRunnerOptions = ['--debug=cli'];
   const allowedRunnerArguments = new Set([
     '--retries=0',
     '--repeat-each=1',
     output,
     ...optionalRunnerOptions,
+    ...loaded.policy.allowedRunnerOptions,
   ]);
   if (
     args.slice(2).some((value) => !allowedRunnerArguments.has(value)) ||
     optionalRunnerOptions.some(
       (option) => args.filter((value) => value === option).length > 1,
+    ) ||
+    loaded.policy.allowedRunnerOptions.some(
+      (option) => args.filter((value) => value === option).length !== 1,
     )
   ) {
     return deny(
-      'The runner contains an unapproved option. Use only the required attempt flags, optional --debug=cli, and exact project/config options recorded by Main.',
+      'The runner must include every required project/config option recorded by Main exactly once, plus only the attempt flags and optional --debug=cli.',
     );
   }
 

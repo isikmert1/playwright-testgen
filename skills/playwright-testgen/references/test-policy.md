@@ -31,6 +31,10 @@ win.
 - Match the target repository's established `test` and `expect` imports and
   fixture signatures.
 - Use `test.step()` only for meaningful user-flow phases, not every click.
+- Wrap each criterion's meaningful assertion in one stable
+  `test.step('testgen:criterion:<criterion-id>', async () => { ... })`. Keep
+  the exact title unchanged so post-Healer mutation evidence remains tied to
+  the written criterion even when line numbers move.
 - Keep the behavior under test and its meaningful assertions visible in the
   spec; helpers may prepare or navigate but must not hide the scenario.
 - Apply `vacuity-policy.md` to every planned assertion. A criterion is not

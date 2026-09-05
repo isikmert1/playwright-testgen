@@ -50,6 +50,7 @@ or debug.
      "approved_spec": "tests/account.spec.ts",
      "allowed_runner_options": [],
      "allowed_state_paths": [],
+     "allowed_write_paths": [],
      "format_version": 1,
      "run_id": "tg-<24hex>",
      "allowed_origins": ["https://app.example.test"]
@@ -67,6 +68,12 @@ or debug.
    state files explicitly supplied or approved for this scenario, expressed as
    exact paths relative to the run directory; keep it empty otherwise. Agents
    may pass an approved path to `state-load` but never read or copy its content.
+   `allowed_write_paths` contains at most ten exact repository-relative paths
+   to existing regular files that Main has explicitly approved for a focused
+   shared-helper or test-id edit; keep it empty otherwise. The approved spec is
+   writable separately and may be new. If Author discovers that another edit
+   is necessary, it returns the exact path and evidence to Main for approval
+   and redispatch instead of attempting the edit.
    This transient Main-owned policy binds the shared PreToolUse hook to the run.
    Author and Healer must never edit it; preserve it through Healer and never
    treat it as a handoff artifact.
@@ -101,8 +108,11 @@ or debug.
      with explicit approval, the run ID, target repository, exact approved spec
      path, original criteria, validated handoff, and known project, config,
      route, auth, environment, and test-data facts. Before delegation, Main
-     confirms `approved_spec` still names the reviewed file and records any
-     exact approved project/config arguments in `allowed_runner_options`.
+     confirms `approved_spec` still names the reviewed file, supplies Healer
+     with its anchored and regex-escaped absolute Playwright filter, and
+     records any exact approved project/config arguments in
+     `allowed_runner_options`. Every recorded option is mandatory on every
+     runner invocation; omission is not a fallback.
      When the run has a pre-Author change manifest, capture its `checkpoint`
      boundary after this human approval and before Healer delegation. A failed
      capture returns the repository-state conflict to the human and blocks the
