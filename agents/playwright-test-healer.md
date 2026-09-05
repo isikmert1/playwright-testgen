@@ -70,7 +70,7 @@ Set `PLAYWRIGHT_HTML_OPEN=never` for every runner process. For interactive
 diagnosis, start the target repository's local runner in the background:
 
 ```sh
-PLAYWRIGHT_HTML_OPEN=never npm exec --no -- playwright test '<approved-spec-filter>' --debug=cli --retries=0 --repeat-each=1 --output=<attempt-results-dir>
+PLAYWRIGHT_HTML_OPEN=never npx --no playwright test '<approved-spec-filter>' --debug=cli --retries=0 --repeat-each=1 --output=<attempt-results-dir>
 ```
 
 Each path placeholder represents one argument safely escaped for the active
@@ -88,8 +88,8 @@ instructions appear, then capture the emitted `tw-*` session identifier.
 Attach to that exact session from the run directory:
 
 ```sh
-cd <validated-run-directory> && PWTEST_CLI_GLOBAL_CONFIG=. npm exec --no -- playwright-cli attach <emitted-session>
-cd <validated-run-directory> && PWTEST_CLI_GLOBAL_CONFIG=. npm exec --no -- playwright-cli -s=<emitted-session> <inspection-command>
+cd <validated-run-directory> && PWTEST_CLI_GLOBAL_CONFIG=. playwright-cli attach <emitted-session>
+cd <validated-run-directory> && PWTEST_CLI_GLOBAL_CONFIG=. playwright-cli -s=<emitted-session> <inspection-command>
 ```
 
 Associate the emitted session and its runner process with the supplied run ID;
@@ -174,7 +174,7 @@ After the last permitted edit, reserve an attempt for the same approved scope
 without `--debug=cli` and run it in the foreground:
 
 ```sh
-PLAYWRIGHT_HTML_OPEN=never npm exec --no -- playwright test '<approved-spec-filter>' --retries=0 --repeat-each=1 --output=<attempt-results-dir>
+PLAYWRIGHT_HTML_OPEN=never npx --no playwright test '<approved-spec-filter>' --retries=0 --repeat-each=1 --output=<attempt-results-dir>
 ```
 
 Only that passing non-debug run can produce `fixed`. If the initial execution

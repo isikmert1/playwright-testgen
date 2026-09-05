@@ -13,7 +13,6 @@
     "test:e2e": "playwright test"
   },
   "devDependencies": {
-    "@playwright/cli": "0.1.19",
     "@playwright/test": "1.62.1",
     "playwright": "1.62.1"
   }

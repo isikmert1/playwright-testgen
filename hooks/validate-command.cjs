@@ -19,7 +19,7 @@ const {
 
 const ENVIRONMENT_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/u;
 const RUNTIME_PREFLIGHT =
-  "for (const id of ['playwright/package.json','@playwright/test/package.json','@playwright/cli/package.json']) require.resolve(id)";
+  "for (const id of ['playwright/package.json','@playwright/test/package.json']) require.resolve(id)";
 
 function hasUnsupportedShellSyntax(command) {
   if (/\r|\n/u.test(command)) return true;
@@ -203,58 +203,42 @@ function validateCommand(payload) {
     return validateCleanup(parsed.cwd, args);
   }
 
-  if (executable !== 'npm') {
-    return deny(
-      'Only the approved local npm and Node command forms are allowed. Use npm exec --no -- playwright-cli for browser work.',
+  if (executable === 'playwright-cli') {
+    return validateCli(parsed.cwd, split.assignments, args, payload.agent_type);
+  }
+
+  if (executable === 'npx' && args[0] === '--no' && args[1] === 'playwright') {
+    const packageArgs = args.slice(2);
+    if (!payload.agent_type.endsWith('playwright-test-healer')) {
+      return deny(
+        'Author never executes or debugs the spec. Return the candidate to Main for the human checkpoint; only Healer may run the approved spec after run approval.',
+      );
+    }
+    if (packageArgs[0] === 'trace') {
+      if (split.assignments.length !== 0) {
+        return deny(
+          'Trace inspection does not accept environment assignments. Run npx --no playwright trace from the validated run directory.',
+        );
+      }
+      return validateTrace(parsed.cwd, packageArgs.slice(1));
+    }
+    return validatePlaywright(
+      parsed.cwd,
+      split.assignments,
+      packageArgs,
+      payload.tool_input,
     );
   }
 
-  if (args[0] === 'run') {
+  if (executable === 'npm' && args[0] === 'run') {
     return decision(
       'ask',
       "This hook cannot inspect repository-defined npm scripts. Approve only the target repository's existing scoped lint or formatter with touched-file arguments; otherwise deny and report the lint prerequisite.",
     );
   }
 
-  if (
-    args[0] !== 'exec' ||
-    args[1] !== '--no' ||
-    args[2] !== '--' ||
-    !['playwright', 'playwright-cli'].includes(args[3])
-  ) {
-    return deny(
-      "This npm command is outside the workflow allowlist. Use npm exec --no -- playwright-cli for browser work or the target repository's existing scoped lint script with approval.",
-    );
-  }
-
-  const packageName = args[3];
-  const packageArgs = args.slice(4);
-  if (packageName === 'playwright-cli') {
-    return validateCli(
-      parsed.cwd,
-      split.assignments,
-      packageArgs,
-      payload.agent_type,
-    );
-  }
-  if (!payload.agent_type.endsWith('playwright-test-healer')) {
-    return deny(
-      'Author never executes or debugs the spec. Return the candidate to Main for the human checkpoint; only Healer may run the approved spec after run approval.',
-    );
-  }
-  if (packageArgs[0] === 'trace') {
-    if (split.assignments.length !== 0) {
-      return deny(
-        'Trace inspection does not accept environment assignments. Run npm exec --no -- playwright trace from the validated run directory.',
-      );
-    }
-    return validateTrace(parsed.cwd, packageArgs.slice(1));
-  }
-  return validatePlaywright(
-    parsed.cwd,
-    split.assignments,
-    packageArgs,
-    payload.tool_input,
+  return deny(
+    "This command is outside the workflow allowlist. Use playwright-cli directly for browser work, npx --no playwright for the target repository runner or trace inspection, or the target repository's existing scoped npm lint script with approval.",
   );
 }
 

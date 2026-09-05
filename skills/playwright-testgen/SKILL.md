@@ -13,28 +13,31 @@ application proves what actually renders.
 ## Runtime boundary
 
 Run the workflow inside the target repository. That repository must already
-provide its required Playwright runtime, including `playwright`,
-`@playwright/test`, and `@playwright/cli`. Never install or resolve those
-packages from this plugin repository.
+provide its local `playwright` and `@playwright/test` runtime. The current
+official `@playwright/cli` must be installed globally so its documented
+`playwright-cli` command is available without depending on the target's
+`node_modules` layout. Never install or resolve these dependencies from this
+plugin repository.
 
 Main runs this read-only preflight from the target package directory before
 every generation, even when a `/setup` profile exists:
 
 ```sh
-node -e "for (const id of ['playwright/package.json','@playwright/test/package.json','@playwright/cli/package.json']) require.resolve(id)"
-npm exec --no -- playwright-cli --help
+node -e "for (const id of ['playwright/package.json','@playwright/test/package.json']) require.resolve(id)"
+playwright-cli --help
 ```
 
-The help output must identify an installed, current official `playwright-cli`
-skill. If any package or the skill is missing or outdated, stop before Author.
+The help command must complete without a missing or outdated official-skill
+warning. If any package, CLI, or skill is missing or outdated, stop before
+Author.
 When `/setup` is available, it owns guided detection and approved remediation;
 its prior result never replaces this runtime preflight. Until `/setup` ships,
-Main offers one explicit manual choice for the skill:
+Main offers only the relevant official remediation:
 
-- project-local: `npm exec --no -- playwright-cli install --skills`
-- user-global: `npm exec --no -- playwright-cli install --skills=agents -g`
+- install or update the CLI: `npm install -g @playwright/cli@latest`
+- install the skill for the target repository: `playwright-cli install --skills`
 
-Never run either installation without user approval. Author never installs or
+Never run an installation without user approval. Author never installs or
 updates packages or skills. The official skill owns CLI command mechanics only.
 This skill owns criteria, orchestration, checkpoints, handoffs, and healing,
 and wins when the workflows differ.

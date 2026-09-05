@@ -147,12 +147,12 @@ function validateCli(cwd, assignments, args, agentType) {
   if (args.length === 1 && args[0] === '--help') {
     if (assignments.length !== 0) {
       return deny(
-        'The read-only playwright-cli help check does not accept environment assignments. Run npm exec --no -- playwright-cli --help.',
+        'The read-only playwright-cli help check does not accept environment assignments. Run playwright-cli --help.',
       );
     }
     return decision(
       'allow',
-      "Read-only check of the target repository's local playwright-cli.",
+      'Read-only check of the official global playwright-cli.',
     );
   }
 
@@ -178,7 +178,7 @@ function validateCli(cwd, assignments, args, agentType) {
   if (loaded.result != null) return loaded.result;
   if (!samePath(cwd, loaded.policy.runDirectory)) {
     return deny(
-      'Playwright CLI must run from the exact policy-owned directory so generated evidence stays in run scratch. Use cd .playwright-cli/testgen/<run_id> && PWTEST_CLI_GLOBAL_CONFIG=. npm exec --no -- playwright-cli <command>.',
+      'Playwright CLI must run from the exact policy-owned directory so generated evidence stays in run scratch. Use cd .playwright-cli/testgen/<run_id> && PWTEST_CLI_GLOBAL_CONFIG=. playwright-cli <command>.',
     );
   }
   if (
@@ -297,7 +297,7 @@ function validateCli(cwd, assignments, args, agentType) {
 function validatePlaywright(cwd, assignments, args, toolInput) {
   if (args[0] !== 'test') {
     return deny(
-      'Only the scoped Playwright test runner is allowed here. Use npm exec --no -- playwright test <approved-spec> with the required attempt flags.',
+      'Only the scoped Playwright test runner is allowed here. Use npx --no playwright test <approved-spec> with the required attempt flags.',
     );
   }
   if (!assignments.includes('PLAYWRIGHT_HTML_OPEN=never')) {

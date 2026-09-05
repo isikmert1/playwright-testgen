@@ -35,9 +35,9 @@ For each diagnostic attempt:
    does not open a browser window, then run:
 
    ```sh
-   PLAYWRIGHT_HTML_OPEN=never npm exec --no -- playwright test '<approved-spec-filter>' --debug=cli --retries=0 --repeat-each=1 --output=<attempt-results-dir>
-   cd <validated-run-directory> && PWTEST_CLI_GLOBAL_CONFIG=. npm exec --no -- playwright-cli attach <emitted-session>
-   cd <validated-run-directory> && PWTEST_CLI_GLOBAL_CONFIG=. npm exec --no -- playwright-cli -s=<emitted-session> <inspection-command>
+   PLAYWRIGHT_HTML_OPEN=never npx --no playwright test '<approved-spec-filter>' --debug=cli --retries=0 --repeat-each=1 --output=<attempt-results-dir>
+   cd <validated-run-directory> && PWTEST_CLI_GLOBAL_CONFIG=. playwright-cli attach <emitted-session>
+   cd <validated-run-directory> && PWTEST_CLI_GLOBAL_CONFIG=. playwright-cli -s=<emitted-session> <inspection-command>
    ```
 
    Main supplies `<approved-spec-filter>` as one anchored, regex-escaped
@@ -76,11 +76,11 @@ For each diagnostic attempt:
    run directory:
 
    ```sh
-   cd <validated-run-directory> && npm exec --no -- playwright trace open <current-attempt-trace>
-   cd <validated-run-directory> && npm exec --no -- playwright trace actions --grep=<bounded-query>
-   cd <validated-run-directory> && npm exec --no -- playwright trace action <action-id>
-   cd <validated-run-directory> && npm exec --no -- playwright trace snapshot <action-id> --name <before-or-after>
-   cd <validated-run-directory> && npm exec --no -- playwright trace close
+   cd <validated-run-directory> && npx --no playwright trace open <current-attempt-trace>
+   cd <validated-run-directory> && npx --no playwright trace actions --grep=<bounded-query>
+   cd <validated-run-directory> && npx --no playwright trace action <action-id>
+   cd <validated-run-directory> && npx --no playwright trace snapshot <action-id> --name <before-or-after>
+   cd <validated-run-directory> && npx --no playwright trace close
    ```
 
    Open only one trace at a time and close it before cleanup.

@@ -48,9 +48,9 @@ servers, profiles, ports, or files.
 ## Browser and process cleanup
 
 - A session opened by the workflow ends with
-  `cd <validated-run-directory> && PWTEST_CLI_GLOBAL_CONFIG=. npm exec --no -- playwright-cli -s=<session> close`.
+  `cd <validated-run-directory> && PWTEST_CLI_GLOBAL_CONFIG=. playwright-cli -s=<session> close`.
 - A session attached to an external or debug-owned browser ends with
-  `cd <validated-run-directory> && PWTEST_CLI_GLOBAL_CONFIG=. npm exec --no -- playwright-cli -s=<session> detach`;
+  `cd <validated-run-directory> && PWTEST_CLI_GLOBAL_CONFIG=. playwright-cli -s=<session> detach`;
   then stop only the background test process that created the debug session.
 - If a scoped close fails, report the remaining session and process identifiers.
   Do not use `close-all` or `kill-all`, because they can terminate unrelated

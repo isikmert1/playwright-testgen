@@ -65,10 +65,9 @@ observable outcome, stop with the missing fact instead of guessing.
 
 ## Explore live
 
-Run every browser command through the target repository's local executable:
-translate official examples from `playwright-cli ...` to
-`npm exec --no -- playwright-cli ...`. Run them as
-`cd .playwright-cli/testgen/<run_id> && PWTEST_CLI_GLOBAL_CONFIG=. npm exec --no -- playwright-cli ...`
+Run every browser command through the official global `playwright-cli`
+executable. Run it as
+`cd .playwright-cli/testgen/<run_id> && PWTEST_CLI_GLOBAL_CONFIG=. playwright-cli ...`
 so automatic output stays in run-owned scratch and automatic home/repository
 CLI config-file loading is suppressed. Never create a CLI config inside the run
 directory. The hook also rejects inherited `PLAYWRIGHT_MCP_*` configuration and

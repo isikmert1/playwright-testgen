@@ -89,7 +89,7 @@ test('owned semantic-only target serves controls without test IDs', async (t) =>
   assert.doesNotMatch(`${html}\n${javascript}`, /data-test(?:id|-id)?\s*=/iu);
 });
 
-test('owned target declares its Playwright tooling locally', () => {
+test('owned target keeps only its Playwright test runner dependencies local', () => {
   const targetRoot = path.join(targetsRoot, 'semantic-only');
   const descriptor = readJson(path.join(targetRoot, 'target.json'));
   const packageJson = readJson(
@@ -104,11 +104,8 @@ test('owned target declares its Playwright tooling locally', () => {
     true,
   );
   assert.equal(packageJson.scripts.lint, 'node --check');
-  for (const dependency of [
-    '@playwright/cli',
-    '@playwright/test',
-    'playwright',
-  ]) {
+  assert.equal('@playwright/cli' in packageJson.devDependencies, false);
+  for (const dependency of ['@playwright/test', 'playwright']) {
     assert.match(packageJson.devDependencies[dependency], /^\d+\.\d+\.\d+$/u);
   }
 });

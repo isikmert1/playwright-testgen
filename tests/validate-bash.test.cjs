@@ -96,7 +96,7 @@ function exactSpecFilter(repository, relative = 'tests/account.spec.ts') {
 
 function runnerCommand(repository, output, options = '') {
   const filter = exactSpecFilter(repository);
-  return `PLAYWRIGHT_HTML_OPEN=never npm exec --no -- playwright test '${filter}' ${options}--retries=0 --repeat-each=1 --output=${output}`;
+  return `PLAYWRIGHT_HTML_OPEN=never npx --no playwright test '${filter}' ${options}--retries=0 --repeat-each=1 --output=${output}`;
 }
 
 test('makes exact spec filters explicit about platform case semantics', () => {
@@ -152,10 +152,69 @@ test('allows main-thread calls without an agent type to remain ungoverned', () =
 function runCliHook(cwd, command, agentType = 'playwright-test-author') {
   return runHook(
     cwd,
-    `cd .playwright-cli/testgen/${runId} && PWTEST_CLI_GLOBAL_CONFIG=. npm exec --no -- playwright-cli ${command}`,
+    `cd .playwright-cli/testgen/${runId} && PWTEST_CLI_GLOBAL_CONFIG=. playwright-cli ${command}`,
     agentType,
   );
 }
+
+test('allows the official global Playwright CLI invocation', () => {
+  withTargetRepository(({ targetRepository }) => {
+    const result = runHook(
+      targetRepository,
+      `cd .playwright-cli/testgen/${runId} && PWTEST_CLI_GLOBAL_CONFIG=. playwright-cli -s=${runId} snapshot`,
+    );
+
+    assert.equal(result.permissionDecision, 'allow');
+  });
+});
+
+test('allows the official global Playwright CLI preflight', () => {
+  withTargetRepository(({ targetRepository }) => {
+    assert.equal(
+      runHook(targetRepository, 'playwright-cli --help').permissionDecision,
+      'allow',
+    );
+  });
+});
+
+test('allows the official local Playwright runner without implicit installs', () => {
+  withTargetRepository(({ targetRepository }) => {
+    const output = `.playwright-cli/testgen/${runId}/attempt-2/test-results`;
+    const filter = exactSpecFilter(targetRepository);
+    const result = runToolHook(
+      targetRepository,
+      'Bash',
+      {
+        command: `PLAYWRIGHT_HTML_OPEN=never npx --no playwright test '${filter}' --debug=cli --retries=0 --repeat-each=1 --output=${output}`,
+        run_in_background: true,
+      },
+      'playwright-test-healer',
+    );
+
+    assert.equal(result.permissionDecision, 'allow');
+  });
+});
+
+test('denies npm wrappers that can consume Playwright CLI options', () => {
+  withTargetRepository(({ targetRepository }) => {
+    const result = runHook(
+      targetRepository,
+      `cd .playwright-cli/testgen/${runId} && PWTEST_CLI_GLOBAL_CONFIG=. npm exec --no -- playwright-cli -s=${runId} snapshot`,
+    );
+
+    assert.equal(result.permissionDecision, 'deny');
+    assert.match(result.permissionDecisionReason, /playwright-cli directly/iu);
+  });
+});
+
+test('denies npx Playwright execution that could install a missing package', () => {
+  withTargetRepository(({ targetRepository }) => {
+    const result = runHook(targetRepository, 'npx playwright test --help');
+
+    assert.equal(result.permissionDecision, 'deny');
+    assert.match(result.permissionDecisionReason, /npx --no playwright/iu);
+  });
+});
 
 function withTargetRepository(callback) {
   const target = createTargetRepository();
@@ -175,7 +234,7 @@ test('allows a quoted CSS selector containing href$=', () => {
       assert.equal(
         runHook(
           targetRepository,
-          `cd .playwright-cli/testgen/${runId} && PWTEST_CLI_GLOBAL_CONFIG=. npm exec --no -- playwright-cli -s=${runId} click ${selector}`,
+          `cd .playwright-cli/testgen/${runId} && PWTEST_CLI_GLOBAL_CONFIG=. playwright-cli -s=${runId} click ${selector}`,
         ).permissionDecision,
         'allow',
       );
@@ -186,14 +245,11 @@ test('allows a quoted CSS selector containing href$=', () => {
 test('allows required snapshot search and navigation commands', () => {
   withTargetRepository(({ targetRepository }) => {
     for (const command of [
-      `npm exec --no -- playwright-cli -s=${runId} find 'Add to cart'`,
-      `npm exec --no -- playwright-cli -s=${runId} go-forward`,
+      `-s=${runId} find 'Add to cart'`,
+      `-s=${runId} go-forward`,
     ]) {
       assert.equal(
-        runCliHook(
-          targetRepository,
-          command.replace('npm exec --no -- playwright-cli ', ''),
-        ).permissionDecision,
+        runCliHook(targetRepository, command).permissionDecision,
         'allow',
       );
     }
@@ -215,9 +271,9 @@ test('denies a real pipe and names the single-command alternative', () => {
 test('denies shell syntax that shell-quote leaves inside word tokens', () => {
   withTargetRepository(({ targetRepository }) => {
     for (const command of [
-      `npm exec --no -- playwright-cli -s=${runId} click foo\nid`,
-      `npm exec --no -- playwright-cli -s=${runId} click \`id\``,
-      `PLAYWRIGHT_HTML_OPEN=never npm exec --no -- playwright test tests/{account,admin}.spec.ts --retries=0 --repeat-each=1 --output=.playwright-cli/testgen/${runId}/attempt-1/test-results`,
+      `playwright-cli -s=${runId} click foo\nid`,
+      `playwright-cli -s=${runId} click \`id\``,
+      `PLAYWRIGHT_HTML_OPEN=never npx --no playwright test tests/{account,admin}.spec.ts --retries=0 --repeat-each=1 --output=.playwright-cli/testgen/${runId}/attempt-1/test-results`,
     ]) {
       assert.equal(
         runHook(targetRepository, command).permissionDecision,
@@ -264,7 +320,7 @@ test('denies shell home expansion in a trace path', () => {
   withTargetRepository(({ targetRepository }) => {
     const result = runHook(
       targetRepository,
-      `cd .playwright-cli/testgen/${runId} && npm exec --no -- playwright trace open ~/outside.zip`,
+      `cd .playwright-cli/testgen/${runId} && npx --no playwright trace open ~/outside.zip`,
       'playwright-test-healer',
     );
 
@@ -317,8 +373,8 @@ test('allows navigation on the approved origin', () => {
 test('denies Playwright CLI outside its isolated run directory', () => {
   withTargetRepository(({ targetRepository }) => {
     for (const command of [
-      `PWTEST_CLI_GLOBAL_CONFIG=. npm exec --no -- playwright-cli -s=${runId} snapshot`,
-      `cd .playwright-cli/testgen/${runId} && npm exec --no -- playwright-cli -s=${runId} snapshot`,
+      `PWTEST_CLI_GLOBAL_CONFIG=. playwright-cli -s=${runId} snapshot`,
+      `cd .playwright-cli/testgen/${runId} && playwright-cli -s=${runId} snapshot`,
     ]) {
       const result = runHook(targetRepository, command);
       assert.equal(result.permissionDecision, 'deny');
@@ -419,7 +475,7 @@ test('requires an anchored filter for the exact approved spec', () => {
       targetRepository,
       'Bash',
       {
-        command: `PLAYWRIGHT_HTML_OPEN=never npm exec --no -- playwright test tests/account.spec.ts --debug=cli --retries=0 --repeat-each=1 --output=${output}`,
+        command: `PLAYWRIGHT_HTML_OPEN=never npx --no playwright test tests/account.spec.ts --debug=cli --retries=0 --repeat-each=1 --output=${output}`,
         run_in_background: true,
       },
       'playwright-test-healer',
@@ -518,7 +574,7 @@ test('keeps confirmation runners in the foreground', () => {
 test('denies unsandboxed governed Bash commands', () => {
   withTargetRepository(({ targetRepository }) => {
     const result = runToolHook(targetRepository, 'Bash', {
-      command: `cd .playwright-cli/testgen/${runId} && PWTEST_CLI_GLOBAL_CONFIG=. npm exec --no -- playwright-cli -s=${runId} snapshot`,
+      command: `cd .playwright-cli/testgen/${runId} && PWTEST_CLI_GLOBAL_CONFIG=. playwright-cli -s=${runId} snapshot`,
       dangerouslyDisableSandbox: true,
     });
 
@@ -538,7 +594,7 @@ test('denies inherited Playwright CLI configuration', () => {
         targetRepository,
         'Bash',
         {
-          command: `cd .playwright-cli/testgen/${runId} && PWTEST_CLI_GLOBAL_CONFIG=. npm exec --no -- playwright-cli -s=${runId} snapshot`,
+          command: `cd .playwright-cli/testgen/${runId} && PWTEST_CLI_GLOBAL_CONFIG=. playwright-cli -s=${runId} snapshot`,
         },
         'playwright-test-author',
         environment,
@@ -661,7 +717,7 @@ test('denies an additional positional spec argument', () => {
     const output = `.playwright-cli/testgen/${runId}/attempt-2/test-results`;
     const result = runHook(
       targetRepository,
-      `PLAYWRIGHT_HTML_OPEN=never npm exec --no -- playwright test '${exactSpecFilter(targetRepository)}' '${exactSpecFilter(targetRepository, 'tests/admin.spec.ts')}' --retries=0 --repeat-each=1 --output=${output}`,
+      `PLAYWRIGHT_HTML_OPEN=never npx --no playwright test '${exactSpecFilter(targetRepository)}' '${exactSpecFilter(targetRepository, 'tests/admin.spec.ts')}' --retries=0 --repeat-each=1 --output=${output}`,
       'playwright-test-healer',
     );
 
@@ -674,7 +730,7 @@ test('denies a different spec and unapproved runner flags', () => {
   withTargetRepository(({ targetRepository }) => {
     const output = `.playwright-cli/testgen/${runId}/attempt-2/test-results`;
     for (const command of [
-      `PLAYWRIGHT_HTML_OPEN=never npm exec --no -- playwright test '${exactSpecFilter(targetRepository, 'tests/admin.spec.ts')}' --retries=0 --repeat-each=1 --output=${output}`,
+      `PLAYWRIGHT_HTML_OPEN=never npx --no playwright test '${exactSpecFilter(targetRepository, 'tests/admin.spec.ts')}' --retries=0 --repeat-each=1 --output=${output}`,
       runnerCommand(targetRepository, output, '--update-snapshots=all '),
     ]) {
       assert.equal(
@@ -705,7 +761,7 @@ test('denies a policy that approves a directory instead of one spec file', () =>
       targetRepository,
       'Bash',
       {
-        command: `PLAYWRIGHT_HTML_OPEN=never npm exec --no -- playwright test '${exactSpecFilter(targetRepository, 'tests')}' --debug=cli --retries=0 --repeat-each=1 --output=${output}`,
+        command: `PLAYWRIGHT_HTML_OPEN=never npx --no playwright test '${exactSpecFilter(targetRepository, 'tests')}' --debug=cli --retries=0 --repeat-each=1 --output=${output}`,
         run_in_background: true,
       },
       'playwright-test-healer',
@@ -720,11 +776,11 @@ test('allows trace inspection for the current run', () => {
   withTargetRepository(({ targetRepository }) => {
     const enterRun = `cd .playwright-cli/testgen/${runId} &&`;
     for (const command of [
-      `${enterRun} npm exec --no -- playwright trace open attempt-1/test-results/trace.zip`,
-      `${enterRun} npm exec --no -- playwright trace actions --grep=expect`,
-      `${enterRun} npm exec --no -- playwright trace action 9`,
-      `${enterRun} npm exec --no -- playwright trace snapshot 9 --name after`,
-      `${enterRun} npm exec --no -- playwright trace close`,
+      `${enterRun} npx --no playwright trace open attempt-1/test-results/trace.zip`,
+      `${enterRun} npx --no playwright trace actions --grep=expect`,
+      `${enterRun} npx --no playwright trace action 9`,
+      `${enterRun} npx --no playwright trace snapshot 9 --name after`,
+      `${enterRun} npx --no playwright trace close`,
     ]) {
       assert.equal(
         runHook(targetRepository, command, 'playwright-test-healer')
@@ -1149,7 +1205,7 @@ test('allows only the canonical read-only package preflight', () => {
   });
 });
 
-test('denies an unapproved executable and names the local npm alternative', () => {
+test('denies an unapproved executable and names the global CLI alternative', () => {
   withTargetRepository(({ targetRepository }) => {
     const result = runHook(
       targetRepository,
@@ -1159,7 +1215,7 @@ test('denies an unapproved executable and names the local npm alternative', () =
     assert.equal(result.permissionDecision, 'deny');
     assert.match(
       result.permissionDecisionReason,
-      /use npm exec --no -- playwright-cli/iu,
+      /use playwright-cli directly/iu,
     );
   });
 });
