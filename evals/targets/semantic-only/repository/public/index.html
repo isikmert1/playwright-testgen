@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Order review</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Order review</h1>
+      <p>Add an order, review it in the table, and open its details.</p>
+
+      <section aria-labelledby="add-order-heading">
+        <h2 id="add-order-heading">Add order</h2>
+        <form id="order-form">
+          <label for="item-name">Item name</label>
+          <input id="item-name" name="item" required autocomplete="off" />
+
+          <label for="item-quantity">Quantity</label>
+          <input
+            id="item-quantity"
+            name="quantity"
+            type="number"
+            min="1"
+            value="1"
+            required
+          />
+
+          <button type="submit">Add order</button>
+        </form>
+        <p id="order-status" role="status" aria-live="polite"></p>
+      </section>
+
+      <section aria-labelledby="orders-heading">
+        <h2 id="orders-heading">Orders</h2>
+        <table>
+          <thead>
+            <tr>
+              <th scope="col">Item</th>
+              <th scope="col">Quantity</th>
+              <th scope="col">Status</th>
+              <th scope="col">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="orders"></tbody>
+        </table>
+      </section>
+    </main>
+
+    <dialog id="order-dialog" aria-labelledby="dialog-heading">
+      <h2 id="dialog-heading">Order details</h2>
+      <p id="dialog-description"></p>
+      <form method="dialog">
+        <button>Close</button>
+      </form>
+    </dialog>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,23 @@
+{
+  "schema_version": "evaluation-target.v1",
+  "target_id": "cypress-realworld-app",
+  "source": {
+    "kind": "git",
+    "url": "https://github.com/cypress-io/cypress-realworld-app.git",
+    "revision": "79aa5b126fdd951aab2263c8201b52aeb5f2a43c"
+  },
+  "setup": {
+    "package_manager": "yarn@1.22.22",
+    "command": "yarn install --frozen-lockfile"
+  },
+  "start": {
+    "command": "yarn dev",
+    "origin": "http://127.0.0.1:3000"
+  },
+  "reset": {
+    "strategy": "restart-from-committed-seed",
+    "source": "data/database-seed.json",
+    "warning": "Never run yarn db:seed during a measured run."
+  },
+  "locator_convention": "data-test"
+}

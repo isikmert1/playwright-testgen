@@ -1,0 +1,20 @@
+{
+  "name": "testgen-semantic-only-target",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Deterministic browser target without test IDs for Playwright Testgen validation.",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "lint": "node --check",
+    "start": "node server.cjs",
+    "test:e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/cli": "0.1.19",
+    "@playwright/test": "1.62.1",
+    "playwright": "1.62.1"
+  }
+}

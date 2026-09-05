@@ -9,4 +9,10 @@ module.exports = [
       globals: globals.node,
     },
   },
+  {
+    files: ['evals/targets/**/public/**/*.js'],
+    languageOptions: {
+      globals: globals.browser,
+    },
+  },
 ];

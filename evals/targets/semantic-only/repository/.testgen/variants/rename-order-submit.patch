@@ -1,0 +1,12 @@
+diff --git a/public/index.html b/public/index.html
+--- a/public/index.html
++++ b/public/index.html
+@@ -27,7 +27,7 @@
+             required
+           />
+ 
+-          <button type="submit">Add order</button>
++          <button type="submit">Create order</button>
+         </form>
+         <p id="order-status" role="status" aria-live="polite"></p>
+       </section>

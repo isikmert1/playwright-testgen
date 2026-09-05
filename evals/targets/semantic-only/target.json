@@ -1,0 +1,20 @@
+{
+  "schema_version": "evaluation-target.v1",
+  "target_id": "semantic-only",
+  "source": {
+    "kind": "owned",
+    "path": "repository"
+  },
+  "setup": {
+    "package_manager": "npm",
+    "command": "npm ci"
+  },
+  "start": {
+    "command": "npm start",
+    "origin": "http://127.0.0.1:4173"
+  },
+  "reset": {
+    "strategy": "fresh-checkout"
+  },
+  "locator_convention": null
+}

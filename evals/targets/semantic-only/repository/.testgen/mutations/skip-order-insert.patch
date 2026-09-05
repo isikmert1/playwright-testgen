@@ -1,0 +1,11 @@
+diff --git a/public/app.js b/public/app.js
+--- a/public/app.js
++++ b/public/app.js
+@@ -39,7 +39,6 @@ form.addEventListener('submit', (event) => {
+     quantity: Number(quantityInput.value),
+     status: 'Pending',
+   };
+-  orders.push(order);
+   renderOrders();
+   form.reset();
+   quantityInput.value = '1';
