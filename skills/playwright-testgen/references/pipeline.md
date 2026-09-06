@@ -39,7 +39,7 @@ or debug.
    assigns stable local criterion identifiers and a non-sensitive scenario
    reference, identifies the target repository and proposed spec path, and
    creates the run ID with
-   `node "${CLAUDE_PLUGIN_ROOT}/scripts/create-testgen-run-id.cjs"` under
+   `node "$PLAYWRIGHT_TESTGEN_ROOT/scripts/create-testgen-run-id.cjs"` under
    `artifact-contract.md` before Author starts.
 
    Complete pre-Author setup in this order:
@@ -49,7 +49,8 @@ or debug.
    2. create the run ID and write the run policy;
    3. ask whether to run the matching mutation check;
    4. capture the `pre-author` boundary when that check is approved; and
-   5. delegate Author with the concrete values and readiness facts.
+   5. delegate Author with the concrete values and readiness facts, including
+      `runtime preflight: passed`.
 
    Main derives the scenario reference; never require the human to supply one.
    An explicit spec path wins. Otherwise, inspect existing Playwright specs and
@@ -100,8 +101,8 @@ or debug.
    treat it as a handoff artifact.
 
    Before enabling mutation verification, Main identifies one exact
-   criterion-linked adapter entry and digest under `mutation-check.md` and gets
-   explicit human approval. If several entries could apply, ask now; never
+   criterion-linked adapter entry and digest under `mutation-check.md` and uses
+   its exact user-first approval question. If several entries could apply, ask now; never
    choose one implicitly. When that approval exists, Main captures the
    `pre-author` boundary with the exact command in `artifact-contract.md`. Do
    this after the policy exists and before delegating Author. If an approved
@@ -114,7 +115,8 @@ or debug.
 3. Main delegates the Author stage to
    `playwright-testgen:playwright-test-author` with the run ID, actual derived
    `scenario_ref`, original criteria, target repository, proposed spec path,
-   and known route, auth, and data facts. Before delegation, Main confirms the
+   and known route, auth, and data facts. State `runtime preflight: passed` so
+   Author does not repeat it. Before delegation, Main confirms the
    target application is already running at the approved origin and supplies
    the known browser-runtime state. Author never derives a required value,
    starts the application, or installs a browser or package. Author grounds in
@@ -131,13 +133,23 @@ or debug.
    - `run`: available only after lint succeeds; freeze the reviewed candidate
      and delegate `playwright-testgen:playwright-test-healer` in fresh context
      with explicit approval, the run ID, target repository, exact approved spec
-     path, original criteria, validated handoff, and known project, config,
-     route, auth, environment, and test-data facts. Before delegation, Main
-     confirms `approved_spec` still names the reviewed file, supplies Healer
-     with its anchored and regex-escaped absolute Playwright filter, and
-     records any exact approved project/config arguments in
+     path, original criteria, validated handoff, `runtime preflight: passed`,
+     and known project, config, route, auth, environment, and test-data facts.
+     Before delegation, Main confirms `approved_spec` still names the reviewed
+     file and obtains its shell-safe approved spec filter argument from the
+     target repository root:
+
+     ```sh
+     node "$PLAYWRIGHT_TESTGEN_ROOT/scripts/print-approved-spec-filter.cjs" <run_id>
+     ```
+
+     Pass the output to Healer unchanged; neither role reconstructs the regex.
+     Main records any exact approved project/config arguments in
      `allowed_runner_options`. Every recorded option is mandatory on every
      runner invocation; omission is not a fallback.
+     Supply only facts active in this run. Do not mention inactive fixture
+     variants, mutation patches, or adapter internals in the Healer dispatch;
+     the post-Healer mutation check remains Main-owned.
      When the run has a pre-Author change manifest, capture its `checkpoint`
      boundary after this human approval and before Healer delegation. A failed
      capture returns the repository-state conflict to the human and blocks the
@@ -148,6 +160,7 @@ or debug.
      This Main-owned placeholder gives Healer's `Edit`-only mutation boundary a
      declared trace file; it is not an artifact and no consumer may read or
      report it until Healer replaces it and validation succeeds.
+
    - `skip`: end as `generated-unverified` and say exactly, "Explored live;
      spec never executed."
    - `adjust`: return the original scenario, current spec, and exact human

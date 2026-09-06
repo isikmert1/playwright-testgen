@@ -1,8 +1,9 @@
-const { existsSync } = require('node:fs');
+const { existsSync, readdirSync } = require('node:fs');
 const path = require('node:path');
 const parse = require('shell-quote/parse');
 const { decision, deny } = require('./hook-result.cjs');
 const {
+  RUN_ID,
   loadPolicy,
   runIdFromOwnedPath,
   samePath,
@@ -20,6 +21,23 @@ const {
 const ENVIRONMENT_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/u;
 const RUNTIME_PREFLIGHT =
   "for (const id of ['playwright/package.json','@playwright/test/package.json']) require.resolve(id)";
+
+function hasPolicyAtRepositoryRoot(cwd) {
+  let entries;
+  try {
+    entries = readdirSync(path.join(cwd, '.playwright-cli', 'testgen'), {
+      withFileTypes: true,
+    });
+  } catch {
+    return false;
+  }
+
+  return entries.some((entry) => {
+    if (!entry.isDirectory() || !RUN_ID.test(entry.name)) return false;
+    const policy = loadPolicy(cwd, entry.name);
+    return policy != null && samePath(path.resolve(cwd), policy.repositoryRoot);
+  });
+}
 
 function hasUnsupportedShellSyntax(command) {
   if (/\r|\n/u.test(command)) return true;
@@ -69,11 +87,13 @@ function hasUnsupportedShellSyntax(command) {
 
 function parseCommand(command, cwd) {
   const validator = pluginValidatorPath();
+  const pluginRoot =
+    validator == null ? null : path.dirname(path.dirname(validator));
   let tokens;
   try {
     tokens = parse(command, (name) =>
-      name === 'CLAUDE_PLUGIN_ROOT' && validator != null
-        ? path.dirname(path.dirname(validator))
+      name === 'PLAYWRIGHT_TESTGEN_ROOT' && pluginRoot != null
+        ? pluginRoot
         : name === ''
           ? '$'
           : { expansion: name },
@@ -118,7 +138,7 @@ function parseCommand(command, cwd) {
     }
     return {
       result: deny(
-        'The working-directory wrapper must enter the exact policy-owned run directory. Use cd .playwright-cli/testgen/<run_id> && <one allowlisted command>.',
+        'Run target-repository commands directly from the current repository root. A cd wrapper is allowed only when it enters .playwright-cli/testgen/<run_id> for one run-owned CLI or trace command.',
       ),
     };
   }
@@ -170,6 +190,13 @@ function validateCommand(payload) {
   if (payload.tool_input.dangerouslyDisableSandbox === true) {
     return deny(
       'Governed Testgen commands must remain sandboxed. Retry without dangerouslyDisableSandbox or return the sandbox prerequisite to Main.',
+    );
+  }
+  if (
+    /\$(?:\{)?CLAUDE_PLUGIN_ROOT(?:\}|\/)/u.test(payload.tool_input.command)
+  ) {
+    return deny(
+      'CLAUDE_PLUGIN_ROOT is unavailable to governed Bash commands. Use $PLAYWRIGHT_TESTGEN_ROOT from the SessionStart hook; if it is missing, restart Claude Code after installing or reloading the plugin.',
     );
   }
 
@@ -239,9 +266,14 @@ function validateCommand(payload) {
   }
 
   if (executable === 'npm' && args[0] === 'run') {
+    if (!hasPolicyAtRepositoryRoot(parsed.cwd)) {
+      return deny(
+        'Target repository validation scripts must run from the exact target repository root that owns the current Testgen policy.',
+      );
+    }
     return decision(
       'ask',
-      'Approve this repository command? Choose Yes only if you trust the shown npm script and it is scoped to the shown touched files. Otherwise choose No.',
+      "Approve this target repository's validation script? Testgen cannot inspect an npm script's behavior. Choose Yes only if the displayed command is a trusted lint, typecheck, collection check, or formatter scoped to the touched files; otherwise choose No.",
     );
   }
 

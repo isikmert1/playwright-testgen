@@ -12,12 +12,18 @@ const { tmpdir } = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const test = require('node:test');
+const { parse } = require('shell-quote');
 const {
   exactPlaywrightFilter: policySpecFilter,
 } = require('../hooks/run-policy.cjs');
 
 const repositoryRoot = path.resolve(__dirname, '..');
 const hookPath = path.join(repositoryRoot, 'hooks', 'validate-bash.cjs');
+const specFilterPath = path.join(
+  repositoryRoot,
+  'scripts',
+  'print-approved-spec-filter.cjs',
+);
 const runId = 'tg-0123456789abcdef01234567';
 
 function createTargetRepository() {
@@ -107,6 +113,20 @@ test('makes exact spec filters explicit about platform case semantics', () => {
     filter.endsWith(process.platform === 'win32' ? '$/i' : '$/'),
     true,
   );
+});
+
+test('prints the approved spec filter as one shell-safe argument', () => {
+  withTargetRepository(({ targetRepository }) => {
+    const result = spawnSync(process.execPath, [specFilterPath, runId], {
+      cwd: targetRepository,
+      encoding: 'utf8',
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(parse(result.stdout.trim()), [
+      exactSpecFilter(targetRepository),
+    ]);
+  });
 });
 
 function updatePolicy(runDirectory, values) {
@@ -601,6 +621,23 @@ test('keeps confirmation runners in the foreground', () => {
   });
 });
 
+test('requires Playwright runners to start at the target repository root', () => {
+  withTargetRepository(({ runDirectory, targetRepository }) => {
+    const nestedDirectory = path.join(targetRepository, 'tests');
+    const output = path
+      .join(runDirectory, 'attempt-2', 'test-results')
+      .replaceAll('\\', '/');
+    const result = runHook(
+      nestedDirectory,
+      runnerCommand(targetRepository, output),
+      'playwright-test-healer',
+    );
+
+    assert.equal(result.permissionDecision, 'deny');
+    assert.match(result.permissionDecisionReason, /target repository root/iu);
+  });
+});
+
 test('denies unsandboxed governed Bash commands', () => {
   withTargetRepository(({ targetRepository }) => {
     const result = runToolHook(targetRepository, 'Bash', {
@@ -854,6 +891,32 @@ test('reserves full run removal for Main', () => {
       runHook(targetRepository, `rm -rf -- ${exactRun}/.playwright-cli`)
         .permissionDecision,
       'allow',
+    );
+  });
+});
+
+test('allows Author to remove generated browser scratch from the run directory', () => {
+  withTargetRepository(({ runDirectory, targetRepository }) => {
+    mkdirSync(path.join(runDirectory, '.playwright-cli'));
+    const result = runHook(
+      runDirectory,
+      'rm -rf -- .playwright-cli',
+      'playwright-test-author',
+    );
+
+    assert.equal(result.permissionDecision, 'allow');
+
+    const fullRun = runHook(
+      runDirectory,
+      'rm -rf -- .',
+      'playwright-test-author',
+    );
+    assert.equal(fullRun.permissionDecision, 'deny');
+    assert.match(fullRun.permissionDecisionReason, /Main-owned/iu);
+
+    assert.equal(
+      path.dirname(runDirectory),
+      path.join(targetRepository, '.playwright-cli', 'testgen'),
     );
   });
 });
@@ -1203,9 +1266,23 @@ test('asks before running a target repository script', () => {
     assert.equal(result.permissionDecision, 'ask');
     assert.match(
       result.permissionDecisionReason,
-      /Approve this repository command/iu,
+      /Approve this target repository's validation script/iu,
     );
     assert.match(result.permissionDecisionReason, /Choose Yes only if/iu);
+  });
+});
+
+test('denies target validation scripts outside the repository root', () => {
+  withTargetRepository(({ runDirectory, targetRepository }) => {
+    for (const cwd of [path.join(targetRepository, 'tests'), runDirectory]) {
+      const result = runHook(
+        cwd,
+        'npm run check:tests -- tests/account.spec.ts',
+      );
+
+      assert.equal(result.permissionDecision, 'deny');
+      assert.match(result.permissionDecisionReason, /target repository root/iu);
+    }
   });
 });
 
@@ -1255,14 +1332,17 @@ test('allows only the matching role to validate its exact run artifact', () => {
   withTargetRepository(({ targetRepository }) => {
     const pluginRoot = repositoryRoot;
     const validator =
-      '"$CLAUDE_PLUGIN_ROOT/scripts/validate-testgen-artifact.cjs"';
+      '"$PLAYWRIGHT_TESTGEN_ROOT/scripts/validate-testgen-artifact.cjs"';
     const command = `node ${validator} --repo . --type handoff --run-id ${runId} .playwright-cli/testgen/${runId}/handoff.json`;
     const allowed = runToolHook(
       targetRepository,
       'Bash',
       { command },
       'playwright-test-author',
-      { CLAUDE_PLUGIN_ROOT: pluginRoot },
+      {
+        CLAUDE_PLUGIN_ROOT: pluginRoot,
+        PLAYWRIGHT_TESTGEN_ROOT: pluginRoot,
+      },
     );
 
     assert.equal(allowed.permissionDecision, 'allow');
@@ -1273,7 +1353,10 @@ test('allows only the matching role to validate its exact run artifact', () => {
       'Bash',
       { command: healerCommand },
       'playwright-test-healer',
-      { CLAUDE_PLUGIN_ROOT: pluginRoot },
+      {
+        CLAUDE_PLUGIN_ROOT: pluginRoot,
+        PLAYWRIGHT_TESTGEN_ROOT: pluginRoot,
+      },
     );
 
     assert.equal(healerAllowed.permissionDecision, 'allow');
@@ -1299,10 +1382,26 @@ test('allows only the matching role to validate its exact run artifact', () => {
   });
 });
 
+test('rejects the unavailable Claude plugin root in governed Bash commands', () => {
+  withTargetRepository(({ targetRepository }) => {
+    const command = `node "$CLAUDE_PLUGIN_ROOT/scripts/validate-testgen-artifact.cjs" --repo . --type handoff --run-id ${runId} .playwright-cli/testgen/${runId}/handoff.json`;
+    const result = runToolHook(
+      targetRepository,
+      'Bash',
+      { command },
+      'playwright-test-author',
+      { CLAUDE_PLUGIN_ROOT: repositoryRoot },
+    );
+
+    assert.equal(result.permissionDecision, 'deny');
+    assert.match(result.permissionDecisionReason, /PLAYWRIGHT_TESTGEN_ROOT/u);
+  });
+});
+
 test('denies validator role or artifact-type mismatches', () => {
   withTargetRepository(({ targetRepository }) => {
     const validator =
-      '"$CLAUDE_PLUGIN_ROOT/scripts/validate-testgen-artifact.cjs"';
+      '"$PLAYWRIGHT_TESTGEN_ROOT/scripts/validate-testgen-artifact.cjs"';
     for (const [agentType, type, filename] of [
       ['playwright-test-author', 'trace', 'healer-trace.json'],
       ['playwright-test-healer', 'handoff', 'handoff.json'],
@@ -1314,7 +1413,10 @@ test('denies validator role or artifact-type mismatches', () => {
           command: `node ${validator} --repo . --type ${type} --run-id ${runId} .playwright-cli/testgen/${runId}/${filename}`,
         },
         agentType,
-        { CLAUDE_PLUGIN_ROOT: repositoryRoot },
+        {
+          CLAUDE_PLUGIN_ROOT: repositoryRoot,
+          PLAYWRIGHT_TESTGEN_ROOT: repositoryRoot,
+        },
       );
 
       assert.equal(result.permissionDecision, 'deny');

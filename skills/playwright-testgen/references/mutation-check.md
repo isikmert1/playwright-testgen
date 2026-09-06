@@ -54,7 +54,8 @@ environment values, and secrets never enter this protocol.
 
 ## Approval
 
-Present a short decision in user terms before the technical identifiers:
+Use this exact user-first question and choices, then append the technical
+identifiers:
 
 > **Run mutation check after the generated test passes?**
 >
@@ -74,7 +75,7 @@ automatically.
 Compute the digest for a proposed entry with:
 
 ```sh
-node "${CLAUDE_PLUGIN_ROOT}/scripts/mutation-check.cjs" digest --repo . --adapter <manifest> --mutation-id <mutation_id>
+node "$PLAYWRIGHT_TESTGEN_ROOT/scripts/mutation-check.cjs" digest --repo . --adapter <manifest> --mutation-id <mutation_id>
 ```
 
 Use 64 lowercase zeroes as the draft `definition_digest`, replace that
@@ -94,7 +95,7 @@ trace and a criterion retained in the validated handoff. With an approved
 adapter, run this after all three change-manifest boundaries are valid:
 
 ```sh
-node "${CLAUDE_PLUGIN_ROOT}/scripts/mutation-check.cjs" verify --repo . --run-id <run_id> --adapter <manifest> --mutation-id <mutation_id> --criterion-id <criterion_id> --approval-digest <sha256>
+node "$PLAYWRIGHT_TESTGEN_ROOT/scripts/mutation-check.cjs" verify --repo . --run-id <run_id> --adapter <manifest> --mutation-id <mutation_id> --criterion-id <criterion_id> --approval-digest <sha256>
 ```
 
 The mutation ID, criterion ID, and digest must bind the same approved entry. If

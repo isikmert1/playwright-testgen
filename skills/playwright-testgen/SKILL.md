@@ -19,6 +19,12 @@ official `@playwright/cli` must be installed globally so its documented
 `node_modules` layout. Never install or resolve these dependencies from this
 plugin repository.
 
+The SessionStart hook exports `PLAYWRIGHT_TESTGEN_ROOT` as the installed plugin
+directory for Bash commands. Use `$PLAYWRIGHT_TESTGEN_ROOT/scripts/...` for
+every bundled script. If it is missing, stop and ask the human to restart
+Claude Code after installing or reloading the plugin. Never infer it from
+`SKILL.md`, search for another checkout, or hardcode a development path.
+
 Main runs this read-only preflight from the target package directory before
 every generation:
 
@@ -62,7 +68,8 @@ chooses `run`, `skip`, or `adjust`; never auto-advance. `skip` ends with the spe
 unverified, `adjust` returns the scenario to Author, and only `run` lets Main
 delegate a fresh-context `playwright-testgen:playwright-test-healer` with the
 run ID, target repository, exact approved spec, original criteria, validated
-handoff, and known runner, route, auth, environment, and data facts. Healer
+handoff, passed-preflight fact, approved spec-filter argument, and known runner,
+route, auth, environment, and data facts. Healer
 executes, diagnoses, makes bounded repairs, and reports its trace; Main never
 performs Healer work. A validated `fixed` trace enters Main's vacuity gate:
 Main runs one approved criterion-linked product mutation when available,

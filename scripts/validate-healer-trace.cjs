@@ -101,8 +101,16 @@ function validateTrace(artifact, repository, handoffCriteria, errors) {
       );
       if (attempt.number !== index + 1)
         errors.push('trace-nonsequential-attempt');
-      if (!['debug-run', 'confirmation-run'].includes(attempt.kind))
+      if (
+        !['verification-run', 'debug-run', 'confirmation-run'].includes(
+          attempt.kind,
+        )
+      )
         errors.push('trace-invalid-attempt-kind');
+      if (index === 0 && attempt.kind !== 'verification-run')
+        errors.push('trace-first-attempt-not-verification');
+      if (index > 0 && attempt.kind === 'verification-run')
+        errors.push('trace-verification-run-not-first');
       if (
         !isText(attempt.hypothesis, 200) ||
         !isText(attempt.evidence_summary, 240)
@@ -152,6 +160,17 @@ function validateTrace(artifact, repository, handoffCriteria, errors) {
     );
     if (terminalIndex >= 0 && terminalIndex !== artifact.attempts.length - 1)
       errors.push('trace-attempt-after-terminal-classification');
+    const passingNonDebugIndex = artifact.attempts.findIndex(
+      (attempt) =>
+        isObject(attempt) &&
+        ['verification-run', 'confirmation-run'].includes(attempt.kind) &&
+        attempt.outcome === 'pass',
+    );
+    if (
+      passingNonDebugIndex >= 0 &&
+      passingNonDebugIndex !== artifact.attempts.length - 1
+    )
+      errors.push('trace-attempt-after-terminal-pass');
   }
   if (!Array.isArray(artifact.repairs) || artifact.repairs.length > 10) {
     errors.push('trace-invalid-repairs');
@@ -265,8 +284,15 @@ function validateTrace(artifact, repository, handoffCriteria, errors) {
   if (
     artifact.disposition === 'fixed' &&
     (!isObject(finalAttempt) ||
-      finalAttempt.kind !== 'confirmation-run' ||
+      !['verification-run', 'confirmation-run'].includes(finalAttempt.kind) ||
       finalAttempt.outcome !== 'pass')
+  )
+    errors.push('fixed-requires-non-debug-pass');
+  if (
+    artifact.disposition === 'fixed' &&
+    Array.isArray(artifact.repairs) &&
+    artifact.repairs.length > 0 &&
+    finalAttempt?.kind !== 'confirmation-run'
   )
     errors.push('fixed-requires-confirmation');
   if (

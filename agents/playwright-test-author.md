@@ -47,8 +47,9 @@ feedback. Preserve the original criteria; do not infer intent from the current
 spec or treat feedback as permission to weaken it.
 
 Contract reads and the runtime preflight do not consume the grounding budget.
-If Main did not report a passed preflight, run only the read-only preflight from
-`SKILL.md` before grounding. Stop on any missing or outdated prerequisite and
+When Main reports `runtime preflight: passed`, do not repeat it. Otherwise run
+only the read-only preflight from `SKILL.md` before grounding. Stop on any
+missing or outdated prerequisite and
 route remediation to Main; never install or update a package or skill.
 
 ## Ground
@@ -60,6 +61,8 @@ only the most relevant Playwright config, nearby spec or fixture, feature
 source, and package validation command. Reuse compatible layout, imports, fixtures,
 helpers, authentication, and naming. Never invent project names, app facts,
 data, helpers, page objects, routes, or commands.
+Never enumerate the repository with `**/*`; use one exact path or a bounded
+scenario-relevant pattern per discovery call.
 
 Test-id convention detection has one separate call allowance. When Main did
 not supply a profile-backed convention, run the bounded count-only detection
@@ -166,12 +169,14 @@ content. Write it only at `.playwright-cli/testgen/<run_id>/handoff.json`, then
 from the target repository root run exactly:
 
 ```sh
-node "${CLAUDE_PLUGIN_ROOT}/scripts/validate-testgen-artifact.cjs" --repo . --type handoff --run-id <run_id> .playwright-cli/testgen/<run_id>/handoff.json
+node "$PLAYWRIGHT_TESTGEN_ROOT/scripts/validate-testgen-artifact.cjs" --repo . --type handoff --run-id <run_id> .playwright-cli/testgen/<run_id>/handoff.json
 ```
 
 Use the returned metadata only. The hook permits this validator command only
 for Author's own handoff and current run; do not use another Node command.
 
 Apply `cleanup-contract.md` on every exit. At the checkpoint, close the owned
-CLI session, remove raw exploration evidence, retain only the validated
-handoff, and stop. Never choose the checkpoint action or invoke Healer.
+CLI session, then remove its generated output from the target repository root
+with `rm -rf -- .playwright-cli/testgen/<run_id>/.playwright-cli`. Do not list
+or discover other CLI sessions. Retain only the validated handoff, and stop.
+Never choose the checkpoint action or invoke Healer.

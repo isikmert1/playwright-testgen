@@ -75,7 +75,7 @@ function trace(run = runId) {
     attempts: [
       {
         number: 1,
-        kind: 'confirmation-run',
+        kind: 'verification-run',
         hypothesis: 'the approved spec passes unchanged',
         failure_signature: null,
         evidence_summary: 'runner completed successfully',
@@ -99,9 +99,10 @@ function trace(run = runId) {
 
 function repairedTrace(paths) {
   const artifact = trace();
+  artifact.attempts[0].kind = 'confirmation-run';
   artifact.attempts.unshift({
     number: 1,
-    kind: 'debug-run',
+    kind: 'verification-run',
     hypothesis: 'the saved locator no longer matches the control',
     failure_signature: 'save-button-not-found',
     evidence_summary: 'one renamed Save changes control was visible',
@@ -157,7 +158,7 @@ function vacuityReport(run = runId) {
 function productFindingAttempt() {
   return {
     number: 1,
-    kind: 'debug-run',
+    kind: 'verification-run',
     hypothesis: 'the save action completed but the required state was absent',
     failure_signature: 'saved-state-absent',
     evidence_summary: 'the expected precondition and action were observed',
@@ -938,10 +939,86 @@ test('rejects artifacts whose embedded run ID differs from the command', () => {
   });
 });
 
-test('requires a final passing confirmation before accepting a fixed trace', () => {
+test('requires a final non-debug pass before accepting a fixed trace', () => {
   withRepository((repository) => {
     const artifact = trace();
     artifact.attempts[0].kind = 'debug-run';
+    const artifactPath = writeArtifact(
+      repository,
+      runId,
+      'healer-trace.json',
+      artifact,
+    );
+    const result = validate(repository, 'trace', runId, artifactPath);
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /fixed-requires-non-debug-pass/iu);
+  });
+});
+
+test('accepts one passing verification run when no repair was made', () => {
+  withRepository((repository) => {
+    const artifact = trace();
+    artifact.attempts[0].kind = 'verification-run';
+    const artifactPath = writeArtifact(
+      repository,
+      runId,
+      'healer-trace.json',
+      artifact,
+    );
+    const result = validate(repository, 'trace', runId, artifactPath);
+
+    assert.equal(result.status, 0, result.stderr);
+  });
+});
+
+test('rejects a trace whose first attempt is mislabeled as confirmation', () => {
+  withRepository((repository) => {
+    const artifact = trace();
+    artifact.attempts[0].kind = 'confirmation-run';
+    const artifactPath = writeArtifact(
+      repository,
+      runId,
+      'healer-trace.json',
+      artifact,
+    );
+    const result = validate(repository, 'trace', runId, artifactPath);
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /first-attempt-not-verification/iu);
+  });
+});
+
+test('rejects another attempt after the initial verification passes', () => {
+  withRepository((repository) => {
+    const artifact = trace();
+    artifact.attempts.push({
+      number: 2,
+      kind: 'confirmation-run',
+      hypothesis: 'the approved spec still passes',
+      failure_signature: null,
+      evidence_summary: 'the redundant run also completed successfully',
+      classification: null,
+      action: null,
+      outcome: 'pass',
+    });
+    const artifactPath = writeArtifact(
+      repository,
+      runId,
+      'healer-trace.json',
+      artifact,
+    );
+    const result = validate(repository, 'trace', runId, artifactPath);
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /attempt-after-terminal-pass/iu);
+  });
+});
+
+test('still requires confirmation after a repair', () => {
+  withRepository((repository) => {
+    const artifact = repairedTrace(['tests/account.spec.ts']);
+    artifact.attempts.at(-1).kind = 'verification-run';
     const artifactPath = writeArtifact(
       repository,
       runId,
@@ -957,26 +1034,7 @@ test('requires a final passing confirmation before accepting a fixed trace', () 
 
 test('preserves the last failure classification after a repaired trace passes', () => {
   withRepository((repository) => {
-    const artifact = trace();
-    artifact.attempts.unshift({
-      number: 1,
-      kind: 'debug-run',
-      hypothesis: 'the saved locator no longer matches the control',
-      failure_signature: 'save-button-not-found',
-      evidence_summary: 'one renamed Save changes control was visible',
-      classification: 'selector-drift',
-      action: 'updated the approved spec locator',
-      outcome: 'fail',
-    });
-    artifact.attempts[1].number = 2;
-    artifact.repairs = [
-      {
-        attempt_number: 1,
-        paths: ['tests/account.spec.ts'],
-        reason: 'matched the renamed visible control',
-      },
-    ];
-    artifact.final_classification = 'selector-drift';
+    const artifact = repairedTrace(['tests/account.spec.ts']);
     const artifactPath = writeArtifact(
       repository,
       runId,

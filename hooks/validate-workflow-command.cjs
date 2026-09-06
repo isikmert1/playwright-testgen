@@ -323,7 +323,7 @@ function validatePlaywright(cwd, assignments, args, toolInput) {
   }
   if (!debugging && background) {
     return deny(
-      'The final confirmation runner must stay in the foreground so its pass or failure is observed before reporting. Retry without run_in_background.',
+      'The verification or confirmation runner must stay in the foreground so its pass or failure is observed before reporting. Retry without run_in_background.',
     );
   }
 
@@ -342,6 +342,11 @@ function validatePlaywright(cwd, assignments, args, toolInput) {
 
   const loaded = requirePolicy(cwd, outputRunId);
   if (loaded.result != null) return loaded.result;
+  if (!samePath(path.resolve(cwd), loaded.policy.repositoryRoot)) {
+    return deny(
+      'Playwright test runners must start from the exact target repository root so its approved configuration and package context apply.',
+    );
+  }
   const expectedOutput = path.join(
     loaded.policy.runDirectory,
     outputMatch[1],
@@ -555,10 +560,10 @@ function validateCleanup(cwd, args) {
     args.length === 3 && ['-rf', '-fr'].includes(args[0]) && args[1] === '--'
       ? args.slice(2)
       : [];
-  const runId = runIdFromOwnedPath(values[0] ?? '');
+  const runId = runIdFromOwnedPath(values[0] ?? '') ?? runIdFromOwnedPath(cwd);
   if (runId == null) {
     return deny(
-      'Cleanup requires the exact run directory. Use rm -rf -- .playwright-cli/testgen/<run_id> after closing or detaching its session.',
+      'Cleanup must name a generated child of the exact run directory for the current Testgen run. From the target root use rm -rf -- .playwright-cli/testgen/<run_id>/.playwright-cli; from the exact run root use rm -rf -- .playwright-cli.',
     );
   }
   const loaded = requirePolicy(cwd, runId);
@@ -589,7 +594,7 @@ function validateCleanup(cwd, args) {
     ].includes(relative)
   ) {
     return deny(
-      'Cleanup may remove only the exact run directory or its generated .playwright-cli/attempt directories. Use the run-owned path named by command-policy.json, never its parent or another child.',
+      'Cleanup may remove only the generated .playwright-cli or attempt-1 through attempt-5 directories inside the current run. Never remove the run root, its parent, or another child.',
     );
   }
 

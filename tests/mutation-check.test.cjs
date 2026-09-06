@@ -131,7 +131,7 @@ function trace() {
     attempts: [
       {
         number: 1,
-        kind: 'debug-run',
+        kind: 'verification-run',
         hypothesis: 'the expected status text changed',
         failure_signature: 'status-text-mismatch',
         evidence_summary: 'the verified locator resolved to one status element',
@@ -217,7 +217,7 @@ function passingTrace() {
   value.attempts = [
     {
       number: 1,
-      kind: 'confirmation-run',
+      kind: 'verification-run',
       hypothesis: 'the approved spec passes unchanged',
       failure_signature: null,
       evidence_summary: 'the approved spec completed successfully',
@@ -236,7 +236,7 @@ function blockedTrace() {
   value.attempts = [
     {
       number: 1,
-      kind: 'debug-run',
+      kind: 'verification-run',
       hypothesis: 'authentication is required before the scenario can run',
       failure_signature: 'authentication-required',
       evidence_summary: 'the application redirected to its login route',

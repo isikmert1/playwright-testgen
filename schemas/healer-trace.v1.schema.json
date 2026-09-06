@@ -41,7 +41,9 @@
         ],
         "properties": {
           "number": { "type": "integer", "minimum": 1, "maximum": 5 },
-          "kind": { "enum": ["debug-run", "confirmation-run"] },
+          "kind": {
+            "enum": ["verification-run", "debug-run", "confirmation-run"]
+          },
           "hypothesis": { "type": "string", "minLength": 1, "maxLength": 200 },
           "failure_signature": { "type": ["string", "null"], "maxLength": 160 },
           "evidence_summary": {
