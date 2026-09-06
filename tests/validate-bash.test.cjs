@@ -306,6 +306,60 @@ test('allows required snapshot search and navigation commands', () => {
   });
 });
 
+test('allows bounded console levels documented by Playwright CLI', () => {
+  withTargetRepository(({ targetRepository }) => {
+    for (const command of [
+      `-s=${runId} console`,
+      `-s=${runId} console error`,
+      `-s=${runId} console warning`,
+      `-s=${runId} console info`,
+      `-s=${runId} console debug`,
+    ]) {
+      assert.equal(
+        runCliHook(targetRepository, command).permissionDecision,
+        'allow',
+      );
+    }
+
+    for (const command of [
+      `-s=${runId} console verbose`,
+      `-s=${runId} console error extra`,
+    ]) {
+      const result = runCliHook(targetRepository, command);
+      assert.equal(result.permissionDecision, 'deny');
+      assert.match(
+        result.permissionDecisionReason,
+        /error.*warning.*info.*debug/iu,
+      );
+    }
+  });
+});
+
+test('keeps snapshots to the page or one current element ref', () => {
+  withTargetRepository(({ targetRepository }) => {
+    for (const command of [
+      `-s=${runId} snapshot`,
+      `-s=${runId} snapshot e12`,
+      `-s=${runId} snapshot --depth=4`,
+      `-s=${runId} snapshot e12 --depth=4`,
+    ]) {
+      assert.equal(
+        runCliHook(targetRepository, command).permissionDecision,
+        'allow',
+      );
+    }
+
+    for (const command of [
+      `-s=${runId} snapshot "getByRole('row')"`,
+      `-s=${runId} snapshot e12 e13`,
+    ]) {
+      const result = runCliHook(targetRepository, command);
+      assert.equal(result.permissionDecision, 'deny');
+      assert.match(result.permissionDecisionReason, /find.*generate-locator/iu);
+    }
+  });
+});
+
 test('denies a real pipe and names the single-command alternative', () => {
   withTargetRepository(({ targetRepository }) => {
     const result = runCliHook(targetRepository, `-s=${runId} snapshot | more`);
@@ -1437,6 +1491,23 @@ test('denies arbitrary Node commands for governed roles', () => {
   });
 });
 
+test('rejects plugin-root probes with the direct-use recovery', () => {
+  withTargetRepository(({ targetRepository }) => {
+    for (const command of [
+      'echo "$PLAYWRIGHT_TESTGEN_ROOT"',
+      'node -e "console.log(process.env.PLAYWRIGHT_TESTGEN_ROOT)"',
+      `cd .playwright-cli/testgen/${runId} && PWTEST_CLI_GLOBAL_CONFIG=. playwright-cli -s=${runId} find '$PLAYWRIGHT_TESTGEN_ROOT/scripts/validate-testgen-artifact.cjs'`,
+    ]) {
+      const result = runHook(targetRepository, command);
+      assert.equal(result.permissionDecision, 'deny');
+      assert.match(
+        result.permissionDecisionReason,
+        /already exported.*do not.*probe/iu,
+      );
+    }
+  });
+});
+
 test('binds artifact mutations to the role that owns each artifact', () => {
   withTargetRepository(({ runDirectory, targetRepository }) => {
     const handoffPath = path.join(runDirectory, 'handoff.json');
@@ -1472,11 +1543,101 @@ test('binds artifact mutations to the role that owns each artifact', () => {
       runToolHook(
         targetRepository,
         'Edit',
-        { file_path: tracePath },
+        {
+          file_path: tracePath,
+          old_string: '{}',
+          new_string: '{"schema_version":"healer-trace.v1"}',
+        },
         'playwright-test-healer',
       ),
       {},
     );
+    writeFileSync(tracePath, '{}');
+    const partialTraceEdit = runToolHook(
+      targetRepository,
+      'Edit',
+      {
+        file_path: tracePath,
+        old_string: '{',
+        new_string: '{"schema_version":"healer-trace.v1"}',
+      },
+      'playwright-test-healer',
+    );
+    assert.equal(partialTraceEdit.permissionDecision, 'deny');
+    assert.match(
+      partialTraceEdit.permissionDecisionReason,
+      /entire current contents/iu,
+    );
+    const traceWrite = runToolHook(
+      targetRepository,
+      'Write',
+      { file_path: tracePath },
+      'playwright-test-healer',
+    );
+    assert.equal(traceWrite.permissionDecision, 'deny');
+    assert.match(traceWrite.permissionDecisionReason, /already exists.*Edit/iu);
+
+    const rejectedTrace = '{"schema_version":"bad"}';
+    writeFileSync(tracePath, rejectedTrace);
+    assert.deepEqual(
+      runToolHook(
+        targetRepository,
+        'Edit',
+        {
+          file_path: tracePath,
+          old_string: rejectedTrace,
+          new_string: '{"schema_version":"healer-trace.v1"}',
+        },
+        'playwright-test-healer',
+      ),
+      {},
+    );
+
+    rmSync(tracePath);
+    const missingTraceEdit = runToolHook(
+      targetRepository,
+      'Edit',
+      {
+        file_path: tracePath,
+        old_string: '{}',
+        new_string: '{"schema_version":"healer-trace.v1"}',
+      },
+      'playwright-test-healer',
+    );
+    assert.equal(missingTraceEdit.permissionDecision, 'deny');
+    assert.match(missingTraceEdit.permissionDecisionReason, /unavailable/iu);
+  });
+});
+
+test('rejects non-regular and oversized trace drafts before reading', () => {
+  withTargetRepository(({ runDirectory, targetRepository }) => {
+    const tracePath = path.join(runDirectory, 'healer-trace.json');
+    const edit = {
+      file_path: tracePath,
+      old_string: '{}',
+      new_string: '{"schema_version":"healer-trace.v1"}',
+    };
+
+    writeFileSync(tracePath, 'x'.repeat(64 * 1024 + 1));
+    let result = runToolHook(
+      targetRepository,
+      'Edit',
+      edit,
+      'playwright-test-healer',
+    );
+    assert.equal(result.permissionDecision, 'deny');
+    assert.match(result.permissionDecisionReason, /regular file.*64 KiB/iu);
+
+    rmSync(tracePath);
+    mkdirSync(tracePath);
+    result = runToolHook(
+      targetRepository,
+      'Edit',
+      edit,
+      'playwright-test-healer',
+    );
+    assert.equal(result.permissionDecision, 'deny');
+    assert.match(result.permissionDecisionReason, /regular file.*64 KiB/iu);
   });
 });
 

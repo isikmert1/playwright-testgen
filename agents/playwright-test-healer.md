@@ -35,6 +35,10 @@ Within this governed workflow, inspect with `snapshot`, `find`, and
 `eval` or `run-code`. If these bounded commands cannot test the current
 hypothesis, use owned runner or trace evidence, then return the evidence
 blocker rather than bypassing the command policy.
+Use `snapshot` with no target or one current `e<number>` ref; use `find` for
+text and `generate-locator` for a ref. Never pass a locator expression to
+`snapshot`. Use `console` with no argument or one of `error`, `warning`,
+`info`, or `debug`.
 
 Require a pipeline-supplied `run_id`, explicit human `run` approval, target
 repository, exact approved spec path, original criteria with stable
@@ -50,6 +54,8 @@ Confirm the handoff matches the run ID and approved spec. When Main reports
 only the read-only preflight from `SKILL.md`. A missing local dependency,
 official skill, handoff schema, or
 artifact validator is a blocker; never install, update, or substitute one.
+Use the injected `PLAYWRIGHT_TESTGEN_ROOT` only in the documented validator
+command; never print or probe it.
 
 ## Establish owned scope
 
@@ -210,7 +216,9 @@ required confirmation is `unresolved-after-healing`.
 ## Report and clean up
 
 Replace the declared `{}` draft with the complete sanitized `healer-trace.v1`
-artifact under `artifact-contract.md`; never create another trace path. Record
+artifact under `artifact-contract.md`; never create another trace path. Apply
+the artifact contract's pre-write scrub, then use `Edit`, not `Write`, to
+replace the existing draft's exact `{}` contents. Record
 every runner invocation once. The final
 classification is the last supported failure class, or `null` when no run
 failed and the schema permits it. Use only the plugin-provided artifact flow;
@@ -218,7 +226,7 @@ do not work around the declared tool boundary with shell redirection or an
 undeclared write path. A missing schema or validator, failed validation, or
 partial trace is a blocker; never report it as a valid trace.
 
-Write it only at `.playwright-cli/testgen/<run_id>/healer-trace.json`, then
+Edit it only at `.playwright-cli/testgen/<run_id>/healer-trace.json`, then
 from the target repository root run exactly:
 
 ```sh

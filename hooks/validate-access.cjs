@@ -1,4 +1,10 @@
-const { existsSync, readdirSync, realpathSync, statSync } = require('node:fs');
+const {
+  existsSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  statSync,
+} = require('node:fs');
 const path = require('node:path');
 const { deny } = require('./hook-result.cjs');
 const {
@@ -170,6 +176,45 @@ function validateFileAccess(payload) {
         return deny(
           'This run artifact belongs to the other role or an aliased path. Mutate only the exact role-owned artifact: Author owns handoff.json and Healer owns healer-trace.json.',
         );
+      }
+      if (filename === 'healer-trace.json' && payload.tool_name !== 'Edit') {
+        return deny(
+          'The Main-created healer-trace.json draft already exists. Healer must use Edit to replace its exact {} contents; do not use Write.',
+        );
+      }
+      if (filename === 'healer-trace.json') {
+        let traceStats;
+        try {
+          traceStats = statSync(absolute);
+        } catch {
+          return deny(
+            'The declared healer-trace.json draft is unavailable. Return to Main instead of creating another trace path.',
+          );
+        }
+        if (!traceStats.isFile() || traceStats.size > 64 * 1024) {
+          return deny(
+            'The declared healer-trace.json draft must be a regular file no larger than 64 KiB. Return to Main instead of reading or replacing it.',
+          );
+        }
+        let current;
+        try {
+          current = readFileSync(absolute, 'utf8');
+        } catch {
+          return deny(
+            'The declared healer-trace.json draft is unavailable. Return to Main instead of creating another trace path.',
+          );
+        }
+        if (
+          payload.tool_input.old_string !== current ||
+          typeof payload.tool_input.new_string !== 'string' ||
+          payload.tool_input.new_string.length === 0 ||
+          payload.tool_input.new_string === current ||
+          payload.tool_input.replace_all === true
+        ) {
+          return deny(
+            'Healer trace edits must replace the entire current contents with one complete artifact. Use old_string equal to the full current file and do not use replace_all.',
+          );
+        }
       }
       return {};
     }

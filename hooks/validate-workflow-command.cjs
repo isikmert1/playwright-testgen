@@ -20,7 +20,6 @@ const DEBUG_SESSION = /^tw-[A-Za-z0-9-]+$/u;
 const NAVIGATION_COMMANDS = new Set(['goto', 'open', 'tab-new']);
 const SIMPLE_COMMANDS = new Set([
   'close',
-  'console',
   'detach',
   'go-back',
   'go-forward',
@@ -31,6 +30,9 @@ const SIMPLE_COMMANDS = new Set([
   'step-over',
   'tab-list',
 ]);
+const CONSOLE_LEVELS = new Set(['error', 'warning', 'info', 'debug']);
+const SNAPSHOT_REF = /^e\d+$/u;
+const SNAPSHOT_DEPTH = /^--depth=\d+$/u;
 const TARGET_COMMANDS = new Set([
   'check',
   'click',
@@ -50,6 +52,7 @@ const ALLOWED_CLI_COMMANDS = new Set([
   ...SIMPLE_COMMANDS,
   ...TARGET_COMMANDS,
   'attach',
+  'console',
   'find',
   'snapshot',
   'state-load',
@@ -248,6 +251,13 @@ function validateCli(cwd, assignments, args, agentType) {
     return deny(
       `${subcommand} does not accept arguments in this workflow. Use the command without extra arguments.`,
     );
+  } else if (
+    subcommand === 'console' &&
+    (args.length > 1 || (args.length === 1 && !CONSOLE_LEVELS.has(args[0])))
+  ) {
+    return deny(
+      'console accepts no argument or one minimum level: error, warning, info, or debug.',
+    );
   } else if (TARGET_COMMANDS.has(subcommand) && args.length === 0) {
     return deny(
       `${subcommand} requires an explicit target or value. Use a ref or verified quoted locator from the current snapshot.`,
@@ -263,13 +273,17 @@ function validateCli(cwd, assignments, args, agentType) {
       'find requires a text or regular-expression query. Use a quoted query from the current scenario.',
     );
   } else if (subcommand === 'snapshot') {
+    const refs = args.filter((value) => SNAPSHOT_REF.test(value));
+    const depths = args.filter((value) => SNAPSHOT_DEPTH.test(value));
     if (
+      refs.length > 1 ||
+      depths.length > 1 ||
       args.some(
-        (value) => value.startsWith('-') && !/^--depth=\d+$/u.test(value),
+        (value) => !SNAPSHOT_REF.test(value) && !SNAPSHOT_DEPTH.test(value),
       )
     ) {
       return deny(
-        'snapshot accepts only a ref and optional --depth=<number>. Use run-owned automatic snapshot output.',
+        'snapshot accepts no target or one current e<number> ref, plus optional --depth=<number>. Use find for text and generate-locator for locator expressions.',
       );
     }
   } else if (subcommand === 'state-load') {

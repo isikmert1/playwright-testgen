@@ -814,7 +814,7 @@ test('rejects secret-bearing artifacts without echoing the value', () => {
 
     assert.equal(result.status, 1);
     assert.doesNotMatch(result.stderr, /do-not-repeat-this-value/iu);
-    assert.match(result.stderr, /prohibited-content/iu);
+    assert.match(result.stderr, /handoff-assumptions-prohibited-content/iu);
   });
 });
 
@@ -846,8 +846,27 @@ test('rejects environment assignments and raw snapshots', () => {
       const result = validate(repository, 'handoff', runId, artifactPath);
 
       assert.equal(result.status, 1);
-      assert.match(result.stderr, /prohibited-content/iu);
+      assert.match(result.stderr, /handoff-assumptions-prohibited-content/iu);
     }
+  });
+});
+
+test('identifies the safe trace section containing prohibited content', () => {
+  withRepository((repository) => {
+    const artifact = trace();
+    artifact.attempts[0].evidence_summary =
+      'snapshot: raw page state must remain in scratch';
+    const artifactPath = writeArtifact(
+      repository,
+      runId,
+      'healer-trace.json',
+      artifact,
+    );
+    const result = validate(repository, 'trace', runId, artifactPath);
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /trace-attempts-prohibited-content/iu);
+    assert.doesNotMatch(result.stderr, /raw page state/iu);
   });
 });
 

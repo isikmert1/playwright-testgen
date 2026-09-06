@@ -199,6 +199,16 @@ function validateCommand(payload) {
       'CLAUDE_PLUGIN_ROOT is unavailable to governed Bash commands. Use $PLAYWRIGHT_TESTGEN_ROOT from the SessionStart hook; if it is missing, restart Claude Code after installing or reloading the plugin.',
     );
   }
+  if (
+    /PLAYWRIGHT_TESTGEN_ROOT/u.test(payload.tool_input.command) &&
+    !/^node\s+"\$(?:PLAYWRIGHT_TESTGEN_ROOT|\{PLAYWRIGHT_TESTGEN_ROOT\})\/scripts\/validate-testgen-artifact\.cjs"\s+/u.test(
+      payload.tool_input.command,
+    )
+  ) {
+    return deny(
+      'PLAYWRIGHT_TESTGEN_ROOT is already exported for the documented artifact validator. Use it directly there; do not print, resolve, or probe it.',
+    );
+  }
 
   const parsed = parseCommand(payload.tool_input.command, payload.cwd);
   if (parsed.result != null) return parsed.result;

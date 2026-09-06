@@ -21,7 +21,8 @@ plugin repository.
 
 The SessionStart hook exports `PLAYWRIGHT_TESTGEN_ROOT` as the installed plugin
 directory for Bash commands. Use `$PLAYWRIGHT_TESTGEN_ROOT/scripts/...` for
-every bundled script. If it is missing, stop and ask the human to restart
+every bundled script without printing, resolving, or probing the variable. If a
+documented script call reports it missing, stop and ask the human to restart
 Claude Code after installing or reloading the plugin. Never infer it from
 `SKILL.md`, search for another checkout, or hardcode a development path.
 

@@ -35,7 +35,8 @@ function main() {
     report(false, null, ['invalid-arguments']);
     return;
   }
-  if (loadSchema(options.type) == null) {
+  const schema = loadSchema(options.type);
+  if (schema == null) {
     report(false, options.type, ['schema-unavailable']);
     return;
   }
@@ -104,8 +105,14 @@ function main() {
     report(false, options.type, ['artifact-not-object']);
     return;
   }
-  if (containsProhibited(artifact)) {
-    report(false, options.type, ['prohibited-content']);
+  const prohibitedErrors = Object.entries(artifact).flatMap(([key, value]) => {
+    if (!containsProhibited(value, key)) return [];
+    return Object.hasOwn(schema.properties, key)
+      ? [`${options.type}-${key.replaceAll('_', '-')}-prohibited-content`]
+      : ['prohibited-content'];
+  });
+  if (prohibitedErrors.length > 0) {
+    report(false, options.type, prohibitedErrors);
     return;
   }
   const errors = [];

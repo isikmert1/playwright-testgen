@@ -13,8 +13,9 @@ Author's reasoning transcript.
 
 ## Preconditions
 
-- Confirm the target repository already resolves `playwright`,
-  `@playwright/test`, and `@playwright/cli`. Never install them from this plugin.
+- Confirm the target repository already resolves local `playwright` and
+  `@playwright/test`, and that the official global `playwright-cli` command is
+  available. Never install them from this plugin.
 - Confirm the exact approved spec path and handoff. Unknown project, auth, or
   environment choices remain unknown and route to the human.
 - When Main reports `runtime preflight: passed`, do not repeat it. Use supplied
