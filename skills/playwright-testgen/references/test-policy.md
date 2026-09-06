@@ -44,10 +44,11 @@ win.
   spec; helpers may prepare or navigate but must not hide the scenario.
 - Apply `vacuity-policy.md` to every planned assertion. A criterion is not
   covered unless its assertion can fail when the required behavior is absent.
-- Author runs the repository's existing scoped lint against every touched spec
-  and helper. When no compatible linter exists, an existing collection-only
-  check may validate the selected spec. Author records the result and never
-  executes the spec.
+- Author uses the repository's existing package manager and lint convention,
+  scoped to touched files when supported. A normal repository-wide lint may be
+  used with approval. When no compatible linter exists, the exact
+  policy-approved spec may be collected through local Playwright with `--list`.
+  Author never invents a package script or executes the spec.
 
 ## Waiting and navigation
 

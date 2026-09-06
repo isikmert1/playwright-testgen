@@ -46,7 +46,8 @@ or debug.
 
    1. derive the concrete scenario reference, criteria, spec path, origin, and
       readiness facts;
-   2. create the run ID and write the run policy;
+   2. create the run ID, write the run policy, and obtain its exact approved
+      spec filter;
    3. ask whether to run the matching mutation check;
    4. capture the `pre-author` boundary when that check is approved; and
    5. delegate Author with the concrete values and readiness facts, including
@@ -100,6 +101,19 @@ or debug.
    Author and Healer must never edit it; preserve it through Healer and never
    treat it as a handoff artifact.
 
+   From the target repository root, Main obtains the shell-safe approved spec
+   filter after writing the policy:
+
+   ```sh
+   node "$PLAYWRIGHT_TESTGEN_ROOT/scripts/print-approved-spec-filter.cjs" <run_id>
+   ```
+
+   Main passes that output unchanged to Author for the collection-only fallback
+   and later regenerates it before Healer execution. Neither role reconstructs
+   the regex. The fallback is available only while this is the repository's one
+   active Testgen run policy. Concurrent runs may use a compatible target
+   linter or serialize collection; never remove another run's policy.
+
    Before enabling mutation verification, Main identifies one exact
    criterion-linked adapter entry and digest under `mutation-check.md` and uses
    its exact user-first approval question. If several entries could apply, ask now; never
@@ -115,15 +129,16 @@ or debug.
 3. Main delegates the Author stage to
    `playwright-testgen:playwright-test-author` with the run ID, actual derived
    `scenario_ref`, original criteria, target repository, proposed spec path,
-   and known route, auth, and data facts. State `runtime preflight: passed` so
+   exact approved spec filter, every approved project or config option, and
+   known route, auth, and data facts. State `runtime preflight: passed` so
    Author does not repeat it. Before delegation, Main confirms the
    target application is already running at the approved origin and supplies
    the known browser-runtime state. Author never derives a required value,
    starts the application, or installs a browser or package. Author grounds in
    relevant source and nearby tests, explores the running app with Playwright
-   CLI, verifies its locator choices, self-checks, writes one spec, lints every
-   touched test file, emits the Author handoff, and stops. Author never runs the
-   spec.
+   CLI, verifies its locator choices, self-checks, writes one spec, validates
+   touched test files under `test-policy.md`, emits the Author handoff, and
+   stops. Author never runs the spec.
 4. Main validates `.playwright-cli/testgen/<run_id>/handoff.json` before
    reporting it, using the exact validator command in `artifact-contract.md`,
    and presents the candidate path, covered

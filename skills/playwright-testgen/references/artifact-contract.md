@@ -137,10 +137,10 @@ artifacts, never in the generated spec. Criterion assertion locations name a
 contained declared repository path and line inside that stable step. They
 remain human audit metadata; the post-Healer mutation runner uses `step_title`
 because healing may move lines.
-The `lint` record may describe the target's scoped linter or, when none is
-compatible, an existing collection-only check. Its status may be `pass`,
-`fixed`, `failed`, or `command-failed`; failure blocks `run` but still permits
-the pipeline's `adjust` or `skip` checkpoint.
+The `lint` record may describe the target's normal linter, scoped when
+supported, or the policy-bound local Playwright collection fallback. Its
+status may be `pass`, `fixed`, `failed`, or `command-failed`; failure blocks
+`run` but still permits the pipeline's `adjust` or `skip` checkpoint.
 
 ## Healer trace
 

@@ -29,6 +29,7 @@ error, not a killed mutation. Runners must stop every server they start and must
 not detach child processes; the outer verifier owns timeout and cancellation
 teardown.
 
-The semantic-only target's `check:tests` script asks Playwright to collect the
-exact generated spec without executing it. This checks TypeScript loading and
-test discovery; it is deliberately not named or presented as a linter.
+The semantic-only target exposes only its normal Playwright runner. Testgen's
+policy-bound local `playwright test <exact-spec> --list` fallback checks
+TypeScript loading and discovery without requiring a special package script or
+executing the test callback.

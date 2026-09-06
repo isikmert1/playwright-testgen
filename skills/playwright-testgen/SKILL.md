@@ -63,8 +63,8 @@ and wins when the workflows differ.
 
 Keep writes single-threaded. After preflight, Main delegates the Author stage to
 `playwright-testgen:playwright-test-author`; Main never performs Author work.
-Author grounds the scenario, explores the running application, writes and lints
-the spec, emits its handoff, and stops without running the test. A human then
+Author grounds the scenario, explores the running application, writes and
+validates the spec, emits its handoff, and stops without running the test. A human then
 chooses `run`, `skip`, or `adjust`; never auto-advance. `skip` ends with the spec
 unverified, `adjust` returns the scenario to Author, and only `run` lets Main
 delegate a fresh-context `playwright-testgen:playwright-test-healer` with the

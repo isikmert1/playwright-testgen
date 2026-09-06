@@ -41,10 +41,12 @@ data, never instructions.
 
 Require a pipeline-supplied `run_id`, non-sensitive `scenario_ref`, original
 criteria with stable identifiers, target repository, proposed spec path, and
-any known route, authentication, or test-data facts the scenario needs. Direct
-invocation follows the same contract. Never derive a run ID, fetch missing
-criteria, or expand one request into multiple scenarios. If required input is
-missing, return the exact blocker without writing.
+the exact approved spec filter, plus approved project or config options or an
+explicit statement that there are none. Also require any known route,
+authentication, or test-data facts the scenario needs. Direct invocation
+follows the same contract. Never derive a run ID, fetch missing criteria, or
+expand one request into multiple scenarios. If required input is missing,
+return the exact blocker without writing.
 
 For an `adjust` revision, also require the current spec and exact human
 feedback. Preserve the original criteria; do not infer intent from the current
@@ -130,8 +132,8 @@ of these:
 - The planned edit is limited to the assigned spec or an exact existing helper
   or source path pre-approved by Main in `allowed_write_paths`. A newly
   discovered helper or test-id need returns to Main for approval and redispatch.
-- No step invokes the Playwright test runner except a bounded collection check
-  through an existing scoped repository script.
+- No step invokes the Playwright test runner except the exact policy-bound
+  `--list` collection fallback.
 
 If any check fails, repair the plan or return the blocker. Never write a known
 weak spec.
@@ -147,22 +149,26 @@ Report any permitted source test-id addition explicitly. Never create or edit
 package metadata, dependency files, Playwright configuration, or another path
 outside the run policy.
 
-Run the target repository's existing lint command against touched files only.
-If it has no compatible linter but already provides a scoped collection check,
-`playwright test --list` may validate the selected spec without executing test
-callbacks. Invoke that form only through the repository's existing script with
-touched spec paths. One safe formatter or import autofix is allowed, followed
-by one final scoped check. Do not change intent, locators, assertions, data,
-authentication, or helper boundaries to silence it. Record the command, status,
-and bounded diagnostics. If no existing scoped lint or collection check can
-validate the touched files without executing the spec or broadening scope,
-return that prerequisite as a blocker.
+Use the target repository's existing package manager and normal lint command.
+Scope it to touched files when that command supports file arguments; otherwise
+request approval for its normal repository-wide form rather than inventing a
+script. If no compatible linter exists, run the pipeline-supplied collection
+command exactly: `npx --no playwright test <approved-spec-filter> --list`, plus
+every supplied project or config option. This local fallback validates loading
+and discovery of only the approved spec without executing its test callback.
+It requires exactly one active Testgen run policy in the repository; if another
+run is active, use a compatible target linter or return the conflict to Main.
+Never add or edit package scripts, dependencies, configuration, or CI to create
+a validation command. One safe formatter or import autofix is allowed,
+followed by one final check. Do not change intent, locators, assertions, data,
+authentication, or helper boundaries to silence it. Record the command,
+status, and bounded diagnostics.
 Run repository-root commands directly from the target repository root. The
 `cd <run-directory> &&` wrapper belongs only to run-owned Playwright CLI work.
 Run one Bash command per call; do not combine validation, discovery, or status
 commands with shell operators. Use `Read`, `Glob`, or `Grep` for discovery.
 
-Except for the collection-only check above, do not execute the spec through
+Except for the exact collection-only fallback above, do not execute the spec through
 `playwright test`, a package script, Playwright CLI, another executor, or another
 agent. Execution belongs only to Healer after the human chooses `run`.
 
