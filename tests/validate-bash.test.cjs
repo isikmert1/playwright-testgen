@@ -1203,8 +1203,9 @@ test('asks before running a target repository script', () => {
     assert.equal(result.permissionDecision, 'ask');
     assert.match(
       result.permissionDecisionReason,
-      /existing scoped lint, typecheck, collection check, or formatter/iu,
+      /Approve this repository command/iu,
     );
+    assert.match(result.permissionDecisionReason, /Choose Yes only if/iu);
   });
 });
 
@@ -1276,6 +1277,25 @@ test('allows only the matching role to validate its exact run artifact', () => {
     );
 
     assert.equal(healerAllowed.permissionDecision, 'allow');
+
+    for (const absoluteValidator of [
+      path.join(repositoryRoot, 'scripts', 'validate-testgen-artifact.cjs'),
+      path
+        .join(repositoryRoot, 'scripts', 'validate-testgen-artifact.cjs')
+        .replaceAll('\\', '/'),
+    ]) {
+      const substituted = runToolHook(
+        targetRepository,
+        'Bash',
+        {
+          command: `node "${absoluteValidator}" --repo . --type handoff --run-id ${runId} .playwright-cli/testgen/${runId}/handoff.json`,
+        },
+        'playwright-test-author',
+        { CLAUDE_PLUGIN_ROOT: pluginRoot },
+      );
+
+      assert.equal(substituted.permissionDecision, 'allow');
+    }
   });
 });
 

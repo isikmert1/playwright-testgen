@@ -49,8 +49,7 @@ spec or treat feedback as permission to weaken it.
 Contract reads and the runtime preflight do not consume the grounding budget.
 If Main did not report a passed preflight, run only the read-only preflight from
 `SKILL.md` before grounding. Stop on any missing or outdated prerequisite and
-route remediation to Main or `/setup` when available; never install or update a
-package or skill.
+route remediation to Main; never install or update a package or skill.
 
 ## Ground
 
@@ -151,6 +150,8 @@ validate the touched files without executing the spec or broadening scope,
 return that prerequisite as a blocker.
 Run repository-root commands directly from the target repository root. The
 `cd <run-directory> &&` wrapper belongs only to run-owned Playwright CLI work.
+Run one Bash command per call; do not combine validation, discovery, or status
+commands with shell operators. Use `Read`, `Glob`, or `Grep` for discovery.
 
 Except for the collection-only check above, do not execute the spec through
 `playwright test`, an npm script, Playwright CLI, another executor, or another
@@ -165,7 +166,7 @@ content. Write it only at `.playwright-cli/testgen/<run_id>/handoff.json`, then
 from the target repository root run exactly:
 
 ```sh
-node "$CLAUDE_PLUGIN_ROOT/scripts/validate-testgen-artifact.cjs" --repo . --type handoff --run-id <run_id> .playwright-cli/testgen/<run_id>/handoff.json
+node "${CLAUDE_PLUGIN_ROOT}/scripts/validate-testgen-artifact.cjs" --repo . --type handoff --run-id <run_id> .playwright-cli/testgen/<run_id>/handoff.json
 ```
 
 Use the returned metadata only. The hook permits this validator command only

@@ -241,7 +241,7 @@ function validateCommand(payload) {
   if (executable === 'npm' && args[0] === 'run') {
     return decision(
       'ask',
-      'This hook cannot inspect repository-defined npm scripts. Approve only an existing scoped lint, typecheck, collection check, or formatter with touched-file arguments; otherwise deny and report the validation prerequisite.',
+      'Approve this repository command? Choose Yes only if you trust the shown npm script and it is scoped to the shown touched files. Otherwise choose No.',
     );
   }
 

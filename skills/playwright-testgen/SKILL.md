@@ -20,7 +20,7 @@ official `@playwright/cli` must be installed globally so its documented
 plugin repository.
 
 Main runs this read-only preflight from the target package directory before
-every generation, even when a `/setup` profile exists:
+every generation:
 
 ```sh
 node --version
@@ -29,15 +29,20 @@ playwright-cli --version
 playwright-cli --help
 ```
 
-The CLI must be version 0.1.19 or newer, and its help must list `attach`,
-`find`, `generate-locator`, and `requests` without a missing or outdated
-official-skill warning. If any package, CLI capability, or skill is missing or
-outdated, stop before Author. Run the official install from the same Node/npm
-environment that launches the agent; a different global npm prefix does not
-satisfy this check.
-When `/setup` is available, it owns guided detection and approved remediation;
-its prior result never replaces this runtime preflight. Until `/setup` ships,
-Main offers only the relevant official remediation:
+Run each line as a separate Bash call from the target repository root. Do not
+prefix it with `cd`, combine it with another command, or append discovery
+probes. Use `Read`, `Glob`, or `Grep` separately for repository discovery.
+
+The CLI must be version 0.1.19 or newer. Its help must list `attach`, `find`,
+`generate-locator`, and `requests`, and print an `Agent skill:` path. Treat the
+warning `The playwright-cli skill at '<path>' does not match the tool version.`
+as outdated. If any package, CLI capability, or skill is missing or outdated,
+stop before Author. Run the official install from the same Node/npm environment
+that launches the agent; a different global npm prefix does not satisfy this
+check.
+
+`/setup` is planned but not shipped. Until it exists, Main offers only the
+relevant official remediation:
 
 - install or update the CLI: `npm install -g @playwright/cli@latest`
 - install the skill for the target repository: `playwright-cli install --skills`

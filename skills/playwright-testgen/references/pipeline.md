@@ -32,18 +32,24 @@ or debug.
 
 ## Ordered flow
 
-1. Main runs the read-only runtime preflight from `SKILL.md`. A `/setup`
-   profile never replaces this check. Missing or outdated prerequisites stop
-   the flow before Author and route to `/setup` when available; generation
-   never installs them.
+1. Main runs each read-only runtime preflight command from `SKILL.md` in its own
+   Bash call from the target repository root. Missing or outdated prerequisites
+   stop the flow before Author; generation never installs them.
 2. Main receives one written scenario, preserves its acceptance criteria,
    assigns stable local criterion identifiers and a non-sensitive scenario
    reference, identifies the target repository and proposed spec path, and
    creates the run ID with
-   `node "$CLAUDE_PLUGIN_ROOT/scripts/create-testgen-run-id.cjs"` under
-   `artifact-contract.md` before Author starts. Main
-   also writes `.playwright-cli/testgen/<run_id>/command-policy.json` with only
-   this shape:
+   `node "${CLAUDE_PLUGIN_ROOT}/scripts/create-testgen-run-id.cjs"` under
+   `artifact-contract.md` before Author starts.
+
+   Complete pre-Author setup in this order:
+
+   1. derive the concrete scenario reference, criteria, spec path, origin, and
+      readiness facts;
+   2. create the run ID and write the run policy;
+   3. ask whether to run the matching mutation check;
+   4. capture the `pre-author` boundary when that check is approved; and
+   5. delegate Author with the concrete values and readiness facts.
 
    Main derives the scenario reference; never require the human to supply one.
    An explicit spec path wins. Otherwise, inspect existing Playwright specs and
@@ -52,6 +58,11 @@ or debug.
    convention. When no Playwright specs exist, default to a descriptive
    TypeScript `.spec.ts` file in the configured test directory. Ask before
    creating the policy when conventions or the selected config are ambiguous.
+   Playwright transforms `.spec.ts` files without a target `tsconfig` or direct
+   `typescript` dependency; this does not replace a repository's own typecheck.
+
+   Main writes `.playwright-cli/testgen/<run_id>/command-policy.json` with only
+   this shape:
 
    ```json
    {
@@ -69,9 +80,9 @@ or debug.
    the proposed repository-relative spec path. Each allowed origin is an exact
    HTTP(S) scheme, host, and port without a path or credentials. Include only
    origins explicitly supplied or confirmed for the target application. Main
-   may inspect an existing selected Playwright config or `/setup` profile for a
-   candidate origin, but discovery is not approval. If no single candidate is
-   known and confirmed, stop and ask rather than starting Author.
+   may inspect an existing selected Playwright config for a candidate origin,
+   but discovery is not approval. If no single candidate is known and
+   confirmed, stop and ask rather than starting Author.
    `allowed_runner_options` is initially empty and may contain only exact
    `--project=<name>` or `--config=<path>` arguments explicitly selected by
    Main. `allowed_state_paths` contains only existing target-repository storage
@@ -101,12 +112,16 @@ or debug.
    repository-state baseline.
 
 3. Main delegates the Author stage to
-   `playwright-testgen:playwright-test-author` with the run ID, original
-   criteria, target repository, proposed spec path, and known route, auth, and
-   data facts. Author grounds in relevant source and nearby tests, explores the
-   running app with Playwright CLI, verifies its locator choices, self-checks,
-   writes one spec, lints every touched test file, emits the Author handoff, and
-   stops. Author never runs the spec.
+   `playwright-testgen:playwright-test-author` with the run ID, actual derived
+   `scenario_ref`, original criteria, target repository, proposed spec path,
+   and known route, auth, and data facts. Before delegation, Main confirms the
+   target application is already running at the approved origin and supplies
+   the known browser-runtime state. Author never derives a required value,
+   starts the application, or installs a browser or package. Author grounds in
+   relevant source and nearby tests, explores the running app with Playwright
+   CLI, verifies its locator choices, self-checks, writes one spec, lints every
+   touched test file, emits the Author handoff, and stops. Author never runs the
+   spec.
 4. Main validates `.playwright-cli/testgen/<run_id>/handoff.json` before
    reporting it, using the exact validator command in `artifact-contract.md`,
    and presents the candidate path, covered

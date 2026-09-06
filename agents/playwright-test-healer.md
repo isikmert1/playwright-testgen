@@ -204,7 +204,7 @@ Write it only at `.playwright-cli/testgen/<run_id>/healer-trace.json`, then
 from the target repository root run exactly:
 
 ```sh
-node "$CLAUDE_PLUGIN_ROOT/scripts/validate-testgen-artifact.cjs" --repo . --type trace --run-id <run_id> .playwright-cli/testgen/<run_id>/healer-trace.json
+node "${CLAUDE_PLUGIN_ROOT}/scripts/validate-testgen-artifact.cjs" --repo . --type trace --run-id <run_id> .playwright-cli/testgen/<run_id>/healer-trace.json
 ```
 
 Use the returned metadata only. The hook permits this validator command only
