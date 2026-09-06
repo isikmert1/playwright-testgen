@@ -13,7 +13,7 @@ Author's reasoning transcript.
 
 ## Preconditions
 
-- Confirm the target repository already resolves local `playwright` and
+- Confirm the repository already resolves local `playwright` and
   `@playwright/test`, and that the official global `playwright-cli` command is
   available. Never install them from this plugin.
 - Confirm the exact approved spec path and handoff. Unknown project, auth, or
@@ -29,7 +29,7 @@ Author's reasoning transcript.
 An attempt is one test execution, including the first reproduction. The maximum
 is five attempts.
 
-Start from the target repository root with one foreground verification run:
+Start from the repository root with one foreground verification run:
 
 ```sh
 PLAYWRIGHT_HTML_OPEN=never npx --no playwright test <approved-spec-filter-argument> --retries=0 --repeat-each=1 --output=<attempt-results-dir>
@@ -38,7 +38,7 @@ PLAYWRIGHT_HTML_OPEN=never npx --no playwright test <approved-spec-filter-argume
 Main supplies `<approved-spec-filter-argument>` as the shell-safe output of
 `print-approved-spec-filter.cjs`. Use it unchanged and do not add quotes, derive
 another filter, or add a title `--grep`. Do not prefix a runner command with
-`cd`; the current working directory is already the target repository root.
+`cd`; the current working directory is already the repository root.
 Include every project/config option recorded by Main. Record this first attempt
 as `verification-run`. If it passes before any repair or debug run, report
 `fixed` without running it again.
@@ -50,7 +50,7 @@ diagnostic attempt:
 2. Prefer evidence from the current attempt before rerunning. Never select an
    artifact because it is the newest result.
 3. When interactive evidence is required, reproduce the approved spec through
-   the target repository's local runner.
+   the repository's local runner.
    Set `PLAYWRIGHT_HTML_OPEN=never` for the runner process so the HTML reporter
    does not open a browser window, then run:
 
@@ -60,7 +60,7 @@ diagnostic attempt:
    cd <validated-run-directory> && PWTEST_CLI_GLOBAL_CONFIG=. playwright-cli -s=<emitted-session> <inspection-command>
    ```
 
-   Run from the target repository. `--no` refuses npm's fallback package
+   Run from the repository. `--no` refuses npm's fallback package
    installation; a missing local executable is a prerequisite failure. Start
    the runner in the background, wait for its debugging instructions, and
    attach only to the `tw-*` session identifier it emits. Track that session

@@ -12,10 +12,10 @@ application proves what actually renders.
 
 ## Runtime boundary
 
-Run the workflow inside the target repository. That repository must already
+Run the workflow inside the repository being tested. It must already
 provide its local `playwright` and `@playwright/test` runtime. The current
 official `@playwright/cli` must be installed globally so its documented
-`playwright-cli` command is available without depending on the target's
+`playwright-cli` command is available without depending on the repository's
 `node_modules` layout. Never install or resolve these dependencies from this
 plugin repository.
 
@@ -26,7 +26,7 @@ documented script call reports it missing, stop and ask the human to restart
 Claude Code after installing or reloading the plugin. Never infer it from
 `SKILL.md`, search for another checkout, or hardcode a development path.
 
-Main runs this read-only preflight from the target package directory before
+Main runs this read-only preflight from the repository's package directory before
 every generation:
 
 ```sh
@@ -36,7 +36,7 @@ playwright-cli --version
 playwright-cli --help
 ```
 
-Run each line as a separate Bash call from the target repository root. Do not
+Run each line as a separate Bash call from the repository root. Do not
 prefix it with `cd`, combine it with another command, or append discovery
 probes. Use `Read`, `Glob`, or `Grep` separately for repository discovery.
 
@@ -52,7 +52,7 @@ check.
 relevant official remediation:
 
 - install or update the CLI: `npm install -g @playwright/cli@latest`
-- install the skill for the target repository: `playwright-cli install --skills`
+- install the skill from the repository: `playwright-cli install --skills`
 
 Never run an installation without user approval. Author never installs or
 updates packages or skills. The official skill owns CLI command mechanics only.
@@ -68,7 +68,7 @@ validates the spec, emits its handoff, and stops without running the test. A hum
 chooses `run`, `skip`, or `adjust`; never auto-advance. `skip` ends with the spec
 unverified, `adjust` returns the scenario to Author, and only `run` lets Main
 delegate a fresh-context `playwright-testgen:playwright-test-healer` with the
-run ID, target repository, exact approved spec, original criteria, validated
+run ID, repository root, exact approved spec, original criteria, validated
 handoff, passed-preflight fact, approved spec-filter argument, and known runner,
 route, auth, environment, and data facts. Healer
 executes, diagnoses, makes bounded repairs, and reports its trace; Main never

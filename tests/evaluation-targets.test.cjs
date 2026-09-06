@@ -409,7 +409,7 @@ test('mutation runner stops its server after an invalid startup handshake', (t) 
   assert.throws(() => process.kill(Number(readFileSync(pidFile, 'utf8')), 0));
 });
 
-test('mutation runner rejects a spec path outside its target repository', () => {
+test('mutation runner rejects a spec path outside its repository', () => {
   const targetRoot = path.join(targetsRoot, 'semantic-only', 'repository');
   const result = spawnSync(
     process.execPath,

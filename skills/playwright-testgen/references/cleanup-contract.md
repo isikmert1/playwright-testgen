@@ -27,7 +27,7 @@ resource when it is created so each exit can release only run-owned resources.
   without replacing the primary verification error. It is transient run state,
   not a public result artifact.
 - Direct every workflow-controlled snapshot, download, trace, and debug file to
-  `.playwright-cli/testgen/<run-id>/` in the target repository.
+  `.playwright-cli/testgen/<run-id>/` in the repository.
 - Run attached Playwright CLI inspection commands with that validated run
   directory as their working directory so auto-generated CLI output remains a
   child of run-owned scratch.
@@ -36,7 +36,7 @@ resource when it is created so each exit can release only run-owned resources.
   its shape and run-directory use, while Healer owns the provenance check
   against the captured runner output.
 - Track test-owned product data separately; its teardown follows
-  `test-policy.md` and the target repository's fixtures.
+  `test-policy.md` and the repository's fixtures.
 - The mutation checker owns its OS-temporary detached worktree. It removes the
   exact worktree in `finally`, verifies that its registration and directory are
   gone, and rechecks the active checkout fingerprints. Never clean that
@@ -65,8 +65,8 @@ servers, profiles, ports, or files.
 
 Resolve the exact run directory and verify it is a child of
 `.playwright-cli/testgen/` before removal. Delete only that run directory;
-never delete `.playwright-cli/`, the target repository, generated specs, or
-other durable files. From the target repository, the bounded command is
+never delete `.playwright-cli/`, the repository, generated specs, or other
+durable files. From the repository, the bounded command is
 `rm -rf -- .playwright-cli/testgen/<run-id>`; do not omit the run ID or replace
 the path with a glob. Full run-directory removal belongs to Main after the
 result is accepted. Governed agents may remove only the generated children
@@ -79,8 +79,8 @@ or use a wildcard.
 
 Raw snapshots, screenshots, videos, trace archives, DOM dumps, downloads, and
 runner logs controlled by this workflow are transient and belong in the run
-directory. When the target runner creates configured output elsewhere, report
-its repository-relative path and leave it target-owned rather than deleting
+directory. When the project runner creates configured output elsewhere, report
+its repository-relative path and leave it repository-owned rather than deleting
 outside the validated boundary. The validated handoff, trace, and vacuity
 report may remain only while the run is active or paused for a human decision.
 Remove them after the final disposition has been reported and accepted.

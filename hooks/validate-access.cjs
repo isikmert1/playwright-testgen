@@ -323,7 +323,7 @@ function validateGrepAccess(payload) {
   );
   if (policies.length === 0) {
     return deny(
-      'Scope Grep to a source or test path inside the target repository authorized by command-policy.json.',
+      'Scope Grep to a source or test path inside the repository authorized by command-policy.json.',
     );
   }
 

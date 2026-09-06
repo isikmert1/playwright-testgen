@@ -21,7 +21,7 @@ Use the first rung that can be verified:
 
 1. Role plus accessible name, such as `getByRole`.
 2. Associated label, placeholder, or visible text.
-3. The target repository's existing test-id convention, but only when grounded
+3. The repository's existing test-id convention, but only when grounded
    evidence identifies it. It may be `data-testid`, `data-test`, `data-cy`,
    `test-id`, or another bare custom attribute. Use configured
    `testIdAttribute` or a narrowly scoped `page.locator()` when

@@ -156,7 +156,7 @@ test('workflow guidance removes avoidable pre-Author ambiguity', () => {
   assert.match(skill, /does not match the tool version/iu);
   assert.match(pipeline, /actual derived\s+`scenario_ref`/iu);
   assert.match(pipeline, /application is already running/iu);
-  assert.match(pipeline, /without a target `tsconfig`/iu);
+  assert.match(pipeline, /without a project `tsconfig`/iu);
   assert.match(pipeline, /runtime preflight: passed/iu);
   assert.match(pipeline, /approved spec filter argument/iu);
   assert.match(mutationCheck, /Run mutation check/iu);

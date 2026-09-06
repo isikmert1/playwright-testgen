@@ -1,7 +1,7 @@
 # Test policy
 
 This file owns the shape and quality of generated specs and helpers. Compatible
-target-repository conventions control layout, imports, fixtures, and naming.
+Repository conventions control layout, imports, fixtures, and naming.
 Written criteria, safety rules, and explicit prohibitions in this skill always
 win.
 
@@ -26,12 +26,12 @@ win.
 - Keep one independently runnable scenario per spec.
 - Keep logic inline unless a plain helper is already reusable by two specs. Do
   not create speculative page objects, fixtures, directories, or abstractions.
-- Use page objects only when the target repository already does or the human
+- Use page objects only when the repository already does or the human
   explicitly requests them.
 
 ## Spec shape
 
-- Match the target repository's established `test` and `expect` imports and
+- Match the repository's established `test` and `expect` imports and
   fixture signatures.
 - Use `test.step()` only for meaningful user-flow phases, not every click.
 - Wrap each criterion's meaningful assertion in one stable `test.step()` with
@@ -73,7 +73,7 @@ win.
   blocker instead of creating a polluting test.
 - Reuse documented authentication state. Never type credentials or copy login
   steps into an unrelated feature spec.
-- Product-data teardown belongs in the target test's established fixture or
+- Product-data teardown belongs in the test's established fixture or
   `finally` path. Browser and scratch cleanup follows `cleanup-contract.md`.
 
 Comments explain only a non-obvious why, a concrete `fixme`/`skip`, or an

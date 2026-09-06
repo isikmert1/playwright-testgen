@@ -15,7 +15,7 @@ dispositions. The workflow handles exactly one written scenario at a time.
 | Work                                                              | Owner                      |
 | ----------------------------------------------------------------- | -------------------------- |
 | Coordinate the run and present decisions                          | Main session               |
-| Validate target runtime prerequisites before generation           | Main session               |
+| Validate project runtime prerequisites before generation          | Main session               |
 | Ground the scenario and explore the live app                      | Author                     |
 | Write and lint the candidate spec                                 | Author                     |
 | Approve, skip, or redirect the candidate                          | Human                      |
@@ -33,11 +33,11 @@ or debug.
 ## Ordered flow
 
 1. Main runs each read-only runtime preflight command from `SKILL.md` in its own
-   Bash call from the target repository root. Missing or outdated prerequisites
+   Bash call from the repository root. Missing or outdated prerequisites
    stop the flow before Author; generation never installs them.
 2. Main receives one written scenario, preserves its acceptance criteria,
    assigns stable local criterion identifiers and a non-sensitive scenario
-   reference, identifies the target repository and proposed spec path, and
+   reference, identifies the repository root and proposed spec path, and
    creates the run ID with
    `node "$PLAYWRIGHT_TESTGEN_ROOT/scripts/create-testgen-run-id.cjs"` under
    `artifact-contract.md` before Author starts.
@@ -60,7 +60,7 @@ or debug.
    convention. When no Playwright specs exist, default to a descriptive
    TypeScript `.spec.ts` file in the configured test directory. Ask before
    creating the policy when conventions or the selected config are ambiguous.
-   Playwright transforms `.spec.ts` files without a target `tsconfig` or direct
+   Playwright transforms `.spec.ts` files without a project `tsconfig` or direct
    `typescript` dependency; this does not replace a repository's own typecheck.
 
    Main writes `.playwright-cli/testgen/<run_id>/command-policy.json` with only
@@ -87,7 +87,7 @@ or debug.
    confirmed, stop and ask rather than starting Author.
    `allowed_runner_options` is initially empty and may contain only exact
    `--project=<name>` or `--config=<path>` arguments explicitly selected by
-   Main. `allowed_state_paths` contains only existing target-repository storage
+   Main. `allowed_state_paths` contains only existing repository storage
    state files explicitly supplied or approved for this scenario, expressed as
    exact paths relative to the run directory; keep it empty otherwise. Agents
    may pass an approved path to `state-load` but never read or copy its content.
@@ -101,7 +101,7 @@ or debug.
    Author and Healer must never edit it; preserve it through Healer and never
    treat it as a handoff artifact.
 
-   From the target repository root, Main obtains the shell-safe approved spec
+   From the repository root, Main obtains the shell-safe approved spec
    filter after writing the policy:
 
    ```sh
@@ -111,7 +111,7 @@ or debug.
    Main passes that output unchanged to Author for the collection-only fallback
    and later regenerates it before Healer execution. Neither role reconstructs
    the regex. The fallback is available only while this is the repository's one
-   active Testgen run policy. Concurrent runs may use a compatible target
+   active Testgen run policy. Concurrent runs may use a compatible repository
    linter or serialize collection; never remove another run's policy.
 
    Before enabling mutation verification, Main identifies one exact
@@ -128,7 +128,7 @@ or debug.
 
 3. Main delegates the Author stage to
    `playwright-testgen:playwright-test-author` with the run ID, actual derived
-   `scenario_ref`, original criteria, target repository, proposed spec path,
+   `scenario_ref`, original criteria, repository root, proposed spec path,
    exact approved spec filter, every approved project or config option, and
    known route, auth, and data facts. State `runtime preflight: passed` so
    Author does not repeat it. Before delegation, Main confirms the
@@ -147,12 +147,12 @@ or debug.
 5. The human chooses exactly one checkpoint action:
    - `run`: available only after lint succeeds; freeze the reviewed candidate
      and delegate `playwright-testgen:playwright-test-healer` in fresh context
-     with explicit approval, the run ID, target repository, exact approved spec
+     with explicit approval, the run ID, repository root, exact approved spec
      path, original criteria, validated handoff, `runtime preflight: passed`,
      and known project, config, route, auth, environment, and test-data facts.
      Before delegation, Main confirms `approved_spec` still names the reviewed
      file and obtains its shell-safe approved spec filter argument from the
-     target repository root:
+     repository root:
 
      ```sh
      node "$PLAYWRIGHT_TESTGEN_ROOT/scripts/print-approved-spec-filter.cjs" <run_id>

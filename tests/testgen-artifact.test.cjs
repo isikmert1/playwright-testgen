@@ -493,7 +493,7 @@ test('rejects symlinks as mutation affected paths', () => {
   });
 });
 
-test('accepts the target repository test filename and test-id convention', () => {
+test('accepts the repository test filename and test-id convention', () => {
   withRepository((repository) => {
     const specPath = 'e2e/account-flow.e2e.ts';
     mkdirSync(path.join(repository, 'e2e'));

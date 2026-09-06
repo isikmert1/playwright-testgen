@@ -48,7 +48,7 @@ function hasPolicyAtRepositoryRoot(cwd) {
 function validateAuthorCollection(cwd, assignments, args, toolInput) {
   if (assignments.length !== 0 || toolInput.run_in_background === true) {
     return deny(
-      'Author collection must run in the foreground from the target repository root without environment assignments. Only Healer may execute the spec after the human checkpoint.',
+      'Author collection must run in the foreground from the repository root without environment assignments. Only Healer may execute the spec after the human checkpoint.',
     );
   }
 
@@ -218,7 +218,7 @@ function parseCommand(command, cwd) {
     }
     return {
       result: deny(
-        'Run target-repository commands directly from the current repository root. A cd wrapper is allowed only when it enters .playwright-cli/testgen/<run_id> for one run-owned CLI or trace command.',
+        'Run repository commands directly from the current repository root. A cd wrapper is allowed only when it enters .playwright-cli/testgen/<run_id> for one run-owned CLI or trace command.',
       ),
     };
   }
@@ -264,7 +264,7 @@ function validateCommand(payload) {
     payload.tool_input.command.length === 0
   ) {
     return deny(
-      'Hook input is incomplete. Retry the operation through a normal governed tool call from the target repository.',
+      'Hook input is incomplete. Retry the operation through a normal governed tool call from the repository.',
     );
   }
   if (payload.tool_input.dangerouslyDisableSandbox === true) {
@@ -313,7 +313,7 @@ function validateCommand(payload) {
   ) {
     return decision(
       'allow',
-      "Read-only resolution check for the target repository's Playwright packages.",
+      "Read-only resolution check for the repository's Playwright packages.",
     );
   }
 
@@ -365,7 +365,7 @@ function validateCommand(payload) {
   ) {
     if (!hasPolicyAtRepositoryRoot(parsed.cwd)) {
       return deny(
-        'Target repository validation scripts must run from the exact target repository root that owns the current Testgen policy.',
+        'Validation scripts must run from the exact repository root that owns the current Testgen policy.',
       );
     }
     const scriptName = args[1];
@@ -380,17 +380,17 @@ function validateCommand(payload) {
     }
     if (!hasDeclaredPackageScript(parsed.cwd, scriptName)) {
       return deny(
-        'Validation must use an existing declared package.json script from the target repository. Use the repository package manager with the explicit <manager> run <script> form.',
+        'Validation must use an existing declared package.json script from the repository. Use its package manager with the explicit <manager> run <script> form.',
       );
     }
     return decision(
       'ask',
-      "Approve this target repository's validation script? A package script may execute arbitrary commands, including lifecycle hooks. Choose Yes only if the script and arguments match the repository's trusted lint, typecheck, or formatter convention; prefer touched-file scope when that command supports it.",
+      "Approve this repository's validation script? A package script may execute arbitrary commands, including lifecycle hooks. Choose Yes only if the script and arguments match the repository's trusted lint, typecheck, or formatter convention; prefer touched-file scope when that command supports it.",
     );
   }
 
   return deny(
-    'This command is outside the workflow allowlist. Use playwright-cli directly for browser work, npx --no playwright for the target repository runner or trace inspection, or an existing scoped package script through npm, Yarn, pnpm, or Bun with approval.',
+    'This command is outside the workflow allowlist. Use playwright-cli directly for browser work, npx --no playwright for the repository runner or trace inspection, or an existing scoped package script through npm, Yarn, pnpm, or Bun with approval.',
   );
 }
 

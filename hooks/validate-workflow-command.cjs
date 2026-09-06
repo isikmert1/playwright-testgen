@@ -305,7 +305,7 @@ function validateCli(cwd, assignments, args, agentType) {
       )
     ) {
       return deny(
-        "state-load requires one exact Main-approved state path inside the target repository. Ask Main to add the existing run-relative path to allowed_state_paths, or use the target repository's normal unauthenticated setup.",
+        "state-load requires one exact Main-approved state path inside the repository. Ask Main to add the existing run-relative path to allowed_state_paths, or use the repository's normal unauthenticated setup.",
       );
     }
   }
@@ -358,7 +358,7 @@ function validatePlaywright(cwd, assignments, args, toolInput) {
   if (loaded.result != null) return loaded.result;
   if (!samePath(path.resolve(cwd), loaded.policy.repositoryRoot)) {
     return deny(
-      'Playwright test runners must start from the exact target repository root so its approved configuration and package context apply.',
+      'Playwright test runners must start from the exact repository root so its approved configuration and package context apply.',
     );
   }
   const expectedOutput = path.join(
@@ -577,7 +577,7 @@ function validateCleanup(cwd, args) {
   const runId = runIdFromOwnedPath(values[0] ?? '') ?? runIdFromOwnedPath(cwd);
   if (runId == null) {
     return deny(
-      'Cleanup must name a generated child of the exact run directory for the current Testgen run. From the target root use rm -rf -- .playwright-cli/testgen/<run_id>/.playwright-cli; from the exact run root use rm -rf -- .playwright-cli.',
+      'Cleanup must name a generated child of the exact run directory for the current Testgen run. From the repository root use rm -rf -- .playwright-cli/testgen/<run_id>/.playwright-cli; from the exact run root use rm -rf -- .playwright-cli.',
     );
   }
   const loaded = requirePolicy(cwd, runId);
@@ -648,7 +648,7 @@ function validateArtifactValidator(cwd, args, agentType) {
   if (loaded.result != null) return loaded.result;
   if (!samePath(cwd, loaded.policy.repositoryRoot)) {
     return deny(
-      'Artifact validation must run from the target repository root. Use the documented validator command with --repo . after writing the run-owned artifact.',
+      'Artifact validation must run from the repository root. Use the documented validator command with --repo . after writing the run-owned artifact.',
     );
   }
   const expectedArtifact = path.join(

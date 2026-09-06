@@ -789,7 +789,7 @@ test('keeps confirmation runners in the foreground', () => {
   });
 });
 
-test('requires Playwright runners to start at the target repository root', () => {
+test('requires Playwright runners to start at the repository root', () => {
   withTargetRepository(({ runDirectory, targetRepository }) => {
     const nestedDirectory = path.join(targetRepository, 'tests');
     const output = path
@@ -802,7 +802,7 @@ test('requires Playwright runners to start at the target repository root', () =>
     );
 
     assert.equal(result.permissionDecision, 'deny');
-    assert.match(result.permissionDecisionReason, /target repository root/iu);
+    assert.match(result.permissionDecisionReason, /repository root/iu);
   });
 });
 
@@ -1435,7 +1435,7 @@ test('asks before running a declared script through a supported package manager'
       assert.equal(result.permissionDecision, 'ask', manager);
       assert.match(
         result.permissionDecisionReason,
-        /Approve this target repository's validation script/iu,
+        /Approve this repository's validation script/iu,
       );
       assert.match(result.permissionDecisionReason, /Choose Yes only if/iu);
     }
@@ -1538,13 +1538,13 @@ test('denies package scripts when package.json cannot be trusted', () => {
   });
 });
 
-test('denies target validation scripts outside the repository root', () => {
+test('denies validation scripts outside the repository root', () => {
   withTargetRepository(({ runDirectory, targetRepository }) => {
     for (const cwd of [path.join(targetRepository, 'tests'), runDirectory]) {
       const result = runHook(cwd, 'npm run lint -- tests/account.spec.ts');
 
       assert.equal(result.permissionDecision, 'deny');
-      assert.match(result.permissionDecisionReason, /target repository root/iu);
+      assert.match(result.permissionDecisionReason, /repository root/iu);
     }
   });
 });

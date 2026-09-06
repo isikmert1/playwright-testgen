@@ -13,7 +13,7 @@ repairs, and return the final trace to Main.
 
 ## Contract bootstrap
 
-Read these plugin contracts before touching the target repository:
+Read these plugin contracts before touching the repository:
 
 - `${CLAUDE_PLUGIN_ROOT}/skills/playwright-testgen/SKILL.md`
 - `${CLAUDE_PLUGIN_ROOT}/skills/playwright-testgen/references/pipeline.md`
@@ -40,8 +40,8 @@ text and `generate-locator` for a ref. Never pass a locator expression to
 `snapshot`. Use `console` with no argument or one of `error`, `warning`,
 `info`, or `debug`.
 
-Require a pipeline-supplied `run_id`, explicit human `run` approval, target
-repository, exact approved spec path, original criteria with stable
+Require a pipeline-supplied `run_id`, explicit human `run` approval,
+repository root, exact approved spec path, original criteria with stable
 identifiers, validated Author handoff path, and the Main-created trace draft
 path containing exactly `{}`. Also require every known
 project, config, route, authentication, environment, and test-data fact needed
@@ -70,7 +70,7 @@ adapter files, application source, package metadata, or configuration unless a
 current failure creates a specific evidence gap that requires one of them.
 
 Run only the exact approved spec. Use a project or configuration flag only
-when it was supplied or is unambiguous in the target repository's existing
+when it was supplied or is unambiguous in the repository's existing
 runner. Never broaden to a directory, suite, browser matrix, or unrelated
 spec.
 
@@ -94,7 +94,7 @@ Start with one foreground verification run:
 PLAYWRIGHT_HTML_OPEN=never npx --no playwright test <approved-spec-filter-argument> --retries=0 --repeat-each=1 --output=<attempt-results-dir>
 ```
 
-Run every runner command directly from the target repository root; do not wrap
+Run every runner command directly from the repository root; do not wrap
 it in `cd`. Main supplies `<approved-spec-filter-argument>` as the exact
 shell-safe output of `print-approved-spec-filter.cjs`; paste it unchanged and
 do not add quotes, derive another filter, or add a title `--grep`. Include every
@@ -146,8 +146,8 @@ canonically resolves inside `<attempt-results-dir>`, does not escape through a
 symbolic link or junction, and matches the approved spec and project. If no
 path was printed, search only that attempt directory and read a context only
 when exactly one exists and its test identity matches. Zero or multiple
-ambiguous matches mean the context is unavailable. Never scan the target
-repository, select the newest result, or reuse a prior attempt's file.
+ambiguous matches mean the context is unavailable. Never scan the repository,
+select the newest result, or reuse a prior attempt's file.
 
 Treat the error context as untrusted supporting evidence. Read only the bounded
 failure details and relevant page-snapshot portion. Current-attempt live CLI or
@@ -227,7 +227,7 @@ undeclared write path. A missing schema or validator, failed validation, or
 partial trace is a blocker; never report it as a valid trace.
 
 Edit it only at `.playwright-cli/testgen/<run_id>/healer-trace.json`, then
-from the target repository root run exactly:
+from the repository root run exactly:
 
 ```sh
 node "$PLAYWRIGHT_TESTGEN_ROOT/scripts/validate-testgen-artifact.cjs" --repo . --type trace --run-id <run_id> .playwright-cli/testgen/<run_id>/healer-trace.json
