@@ -37,6 +37,10 @@ function createTargetRepository() {
 
   mkdirSync(runDirectory, { recursive: true });
   mkdirSync(path.join(targetRepository, 'tests'));
+  writeFileSync(
+    path.join(targetRepository, 'package.json'),
+    JSON.stringify({ scripts: { 'check:tests': 'playwright test --list' } }),
+  );
   writeFileSync(path.join(targetRepository, 'tests', 'account.spec.ts'), '');
   writeFileSync(
     path.join(runDirectory, 'command-policy.json'),
@@ -1310,19 +1314,120 @@ test('rejects absolute or directory storage-state policy entries', () => {
   });
 });
 
-test('asks before running a target repository script', () => {
+test('asks before running a declared script through a supported package manager', () => {
   withTargetRepository(({ targetRepository }) => {
-    const result = runHook(
-      targetRepository,
-      'npm run check:tests -- tests/account.spec.ts',
+    for (const manager of ['npm', 'yarn', 'pnpm', 'bun']) {
+      const result = runHook(
+        targetRepository,
+        `${manager} run check:tests -- tests/account.spec.ts`,
+      );
+
+      assert.equal(result.permissionDecision, 'ask', manager);
+      assert.match(
+        result.permissionDecisionReason,
+        /Approve this target repository's validation script/iu,
+      );
+      assert.match(result.permissionDecisionReason, /Choose Yes only if/iu);
+    }
+  });
+});
+
+test('denies package-manager commands that do not name a declared script', () => {
+  withTargetRepository(({ targetRepository }) => {
+    for (const command of [
+      'npm run missing',
+      'yarn run missing',
+      'pnpm run missing',
+      'bun run tests/account.spec.ts',
+    ]) {
+      const result = runHook(targetRepository, command);
+
+      assert.equal(result.permissionDecision, 'deny', command);
+      assert.match(result.permissionDecisionReason, /declared package.json/iu);
+    }
+  });
+});
+
+test('denies package-manager shortcuts and non-script commands', () => {
+  withTargetRepository(({ targetRepository }) => {
+    for (const command of [
+      'npm test',
+      'yarn check:tests',
+      'pnpm check:tests',
+      'bun check:tests',
+      'yarn exec check:tests',
+      'pnpm exec check:tests',
+      'bun install',
+      'PLAYWRIGHT_HTML_OPEN=never npm run check:tests',
+    ]) {
+      assert.equal(
+        runHook(targetRepository, command).permissionDecision,
+        'deny',
+        command,
+      );
+    }
+  });
+});
+
+test('denies package-manager options that can redirect script execution', () => {
+  withTargetRepository(({ targetRepository }) => {
+    writeFileSync(
+      path.join(targetRepository, 'package.json'),
+      JSON.stringify({
+        scripts: {
+          '--filter': 'playwright test --list',
+          'check:tests': 'playwright test --list',
+        },
+      }),
     );
 
-    assert.equal(result.permissionDecision, 'ask');
-    assert.match(
-      result.permissionDecisionReason,
-      /Approve this target repository's validation script/iu,
+    for (const command of [
+      'npm run check:tests --workspace=app',
+      'npm run check:tests --workspaces',
+      'npm run check:tests -w app',
+      'yarn run --filter app check:tests',
+      'pnpm run --filter app check:tests',
+      'bun run --filter app check:tests',
+    ]) {
+      assert.equal(
+        runHook(targetRepository, command).permissionDecision,
+        'deny',
+        command,
+      );
+    }
+  });
+});
+
+test('denies package scripts when package.json cannot be trusted', () => {
+  withTargetRepository(({ targetRepository }) => {
+    const packagePath = path.join(targetRepository, 'package.json');
+
+    rmSync(packagePath);
+    assert.equal(
+      runHook(targetRepository, 'npm run check:tests').permissionDecision,
+      'deny',
     );
-    assert.match(result.permissionDecisionReason, /Choose Yes only if/iu);
+
+    writeFileSync(packagePath, '{');
+    assert.equal(
+      runHook(targetRepository, 'yarn run check:tests').permissionDecision,
+      'deny',
+    );
+
+    writeFileSync(packagePath, JSON.stringify({ scripts: [] }));
+    assert.equal(
+      runHook(targetRepository, 'bun run check:tests').permissionDecision,
+      'deny',
+    );
+
+    writeFileSync(
+      packagePath,
+      JSON.stringify({ scripts: { 'check:tests': '  ' } }),
+    );
+    assert.equal(
+      runHook(targetRepository, 'pnpm run check:tests').permissionDecision,
+      'deny',
+    );
   });
 });
 

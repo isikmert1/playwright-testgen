@@ -163,7 +163,7 @@ Run one Bash command per call; do not combine validation, discovery, or status
 commands with shell operators. Use `Read`, `Glob`, or `Grep` for discovery.
 
 Except for the collection-only check above, do not execute the spec through
-`playwright test`, an npm script, Playwright CLI, another executor, or another
+`playwright test`, a package script, Playwright CLI, another executor, or another
 agent. Execution belongs only to Healer after the human chooses `run`.
 
 Write and validate the complete `author-handoff.v1` artifact under

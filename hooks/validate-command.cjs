@@ -1,4 +1,4 @@
-const { existsSync, readdirSync } = require('node:fs');
+const { existsSync, readFileSync, readdirSync } = require('node:fs');
 const path = require('node:path');
 const parse = require('shell-quote/parse');
 const { decision, deny } = require('./hook-result.cjs');
@@ -19,6 +19,7 @@ const {
 } = require('./validate-workflow-command.cjs');
 
 const ENVIRONMENT_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/u;
+const PACKAGE_SCRIPT_RUNNERS = new Set(['bun', 'npm', 'pnpm', 'yarn']);
 const RUNTIME_PREFLIGHT =
   "for (const id of ['playwright/package.json','@playwright/test/package.json']) require.resolve(id)";
 
@@ -37,6 +38,27 @@ function hasPolicyAtRepositoryRoot(cwd) {
     const policy = loadPolicy(cwd, entry.name);
     return policy != null && samePath(path.resolve(cwd), policy.repositoryRoot);
   });
+}
+
+function hasDeclaredPackageScript(cwd, scriptName) {
+  if (typeof scriptName !== 'string' || scriptName.length === 0) return false;
+
+  try {
+    const manifest = JSON.parse(
+      readFileSync(path.join(cwd, 'package.json'), 'utf8'),
+    );
+    const scripts = manifest?.scripts;
+    return (
+      scripts != null &&
+      typeof scripts === 'object' &&
+      !Array.isArray(scripts) &&
+      Object.hasOwn(scripts, scriptName) &&
+      typeof scripts[scriptName] === 'string' &&
+      scripts[scriptName].trim().length > 0
+    );
+  } catch {
+    return false;
+  }
 }
 
 function hasUnsupportedShellSyntax(command) {
@@ -275,20 +297,39 @@ function validateCommand(payload) {
     );
   }
 
-  if (executable === 'npm' && args[0] === 'run') {
+  if (
+    PACKAGE_SCRIPT_RUNNERS.has(executable) &&
+    split.assignments.length === 0 &&
+    args[0] === 'run'
+  ) {
     if (!hasPolicyAtRepositoryRoot(parsed.cwd)) {
       return deny(
         'Target repository validation scripts must run from the exact target repository root that owns the current Testgen policy.',
       );
     }
+    const scriptName = args[1];
+    if (
+      typeof scriptName !== 'string' ||
+      scriptName.startsWith('-') ||
+      (executable === 'npm' && args.length > 2 && args[2] !== '--')
+    ) {
+      return deny(
+        'Package-manager options and script shortcuts are not allowed. Use the explicit <manager> run <script> form; for npm script arguments, add -- after the script name.',
+      );
+    }
+    if (!hasDeclaredPackageScript(parsed.cwd, scriptName)) {
+      return deny(
+        'Validation must use an existing declared package.json script from the target repository. Use the repository package manager with the explicit <manager> run <script> form.',
+      );
+    }
     return decision(
       'ask',
-      "Approve this target repository's validation script? Testgen cannot inspect an npm script's behavior. Choose Yes only if the displayed command is a trusted lint, typecheck, collection check, or formatter scoped to the touched files; otherwise choose No.",
+      "Approve this target repository's validation script? A package script may execute arbitrary commands, including lifecycle hooks. Choose Yes only if it is a trusted lint, typecheck, collection check, or formatter scoped to the touched files; otherwise choose No.",
     );
   }
 
   return deny(
-    'This command is outside the workflow allowlist. Use playwright-cli directly for browser work, npx --no playwright for the target repository runner or trace inspection, or an existing scoped npm validation script with approval.',
+    'This command is outside the workflow allowlist. Use playwright-cli directly for browser work, npx --no playwright for the target repository runner or trace inspection, or an existing scoped package script through npm, Yarn, pnpm, or Bun with approval.',
   );
 }
 
