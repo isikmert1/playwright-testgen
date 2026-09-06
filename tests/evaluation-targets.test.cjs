@@ -109,12 +109,13 @@ test('owned target keeps only its Playwright test runner dependencies local', ()
   }
 });
 
-test('owned target collects generated TypeScript without executing it', () => {
+test('owned target exposes its normal Playwright runner without a special collection script', () => {
   const packageJson = readJson(
     path.join(targetsRoot, 'semantic-only', 'repository', 'package.json'),
   );
 
-  assert.equal(packageJson.scripts['check:tests'], 'playwright test --list');
+  assert.equal('check:tests' in packageJson.scripts, false);
+  assert.equal(packageJson.scripts['test:e2e'], 'playwright test');
   assert.equal('lint' in packageJson.scripts, false);
 });
 

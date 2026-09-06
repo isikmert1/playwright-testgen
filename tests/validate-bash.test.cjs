@@ -39,7 +39,7 @@ function createTargetRepository() {
   mkdirSync(path.join(targetRepository, 'tests'));
   writeFileSync(
     path.join(targetRepository, 'package.json'),
-    JSON.stringify({ scripts: { 'check:tests': 'playwright test --list' } }),
+    JSON.stringify({ scripts: { lint: 'eslint .' } }),
   );
   writeFileSync(path.join(targetRepository, 'tests', 'account.spec.ts'), '');
   writeFileSync(
@@ -246,6 +246,116 @@ test('allows the official local Playwright runner without implicit installs', ()
     );
 
     assert.equal(result.permissionDecision, 'allow');
+  });
+});
+
+test('allows Author to collect only the policy-approved spec', () => {
+  withTargetRepository(({ targetRepository }) => {
+    writeFileSync(
+      path.join(targetRepository, 'package.json'),
+      JSON.stringify({ scripts: { 'test:e2e': 'playwright test' } }),
+    );
+    const filter = exactSpecFilter(targetRepository);
+    const result = runHook(
+      targetRepository,
+      `npx --no playwright test '${filter}' --list`,
+    );
+
+    assert.equal(result.permissionDecision, 'allow');
+  });
+});
+
+test('requires Main-approved runner options for Author collection', () => {
+  withTargetRepository(({ runDirectory, targetRepository }) => {
+    updatePolicy(runDirectory, {
+      allowed_runner_options: ['--project=chromium'],
+    });
+    const filter = exactSpecFilter(targetRepository);
+
+    assert.equal(
+      runHook(targetRepository, `npx --no playwright test '${filter}' --list`)
+        .permissionDecision,
+      'deny',
+    );
+    assert.equal(
+      runHook(
+        targetRepository,
+        `npx --no playwright test '${filter}' --list --project=chromium`,
+      ).permissionDecision,
+      'allow',
+    );
+  });
+});
+
+test('keeps Author collection exact, foreground, and non-executing', () => {
+  withTargetRepository(({ runDirectory, targetRepository }) => {
+    const filter = exactSpecFilter(targetRepository);
+    const commands = [
+      `npx --no playwright test '${filter}'`,
+      `npx --no playwright test tests/account.spec.ts --list`,
+      `npx --no playwright test '${filter}' --list --debug=cli`,
+      `npx --no playwright test '${filter}' --list --output=results`,
+      `PLAYWRIGHT_HTML_OPEN=never npx --no playwright test '${filter}' --list`,
+    ];
+
+    for (const command of commands) {
+      assert.equal(
+        runHook(targetRepository, command).permissionDecision,
+        'deny',
+        command,
+      );
+    }
+
+    assert.equal(
+      runToolHook(targetRepository, 'Bash', {
+        command: `npx --no playwright test '${filter}' --list`,
+        run_in_background: true,
+      }).permissionDecision,
+      'deny',
+    );
+    for (const cwd of [path.join(targetRepository, 'tests'), runDirectory]) {
+      assert.equal(
+        runHook(cwd, `npx --no playwright test '${filter}' --list`)
+          .permissionDecision,
+        'deny',
+      );
+    }
+  });
+});
+
+test('fails Author collection closed when run policies are ambiguous', () => {
+  withTargetRepository(({ runDirectory, targetRepository }) => {
+    const filter = exactSpecFilter(targetRepository);
+    const command = `npx --no playwright test '${filter}' --list`;
+    const otherRunId = 'tg-aaaaaaaaaaaaaaaaaaaaaaaa';
+    const otherRunDirectory = path.join(
+      targetRepository,
+      '.playwright-cli',
+      'testgen',
+      otherRunId,
+    );
+    mkdirSync(otherRunDirectory);
+    const policy = JSON.parse(
+      readFileSync(path.join(runDirectory, 'command-policy.json'), 'utf8'),
+    );
+    writeFileSync(
+      path.join(otherRunDirectory, 'command-policy.json'),
+      JSON.stringify({ ...policy, run_id: otherRunId }),
+    );
+
+    assert.equal(runHook(targetRepository, command).permissionDecision, 'deny');
+
+    rmSync(otherRunDirectory, { recursive: true });
+    const invalidRunDirectory = path.join(
+      targetRepository,
+      '.playwright-cli',
+      'testgen',
+      'tg-bbbbbbbbbbbbbbbbbbbbbbbb',
+    );
+    mkdirSync(invalidRunDirectory);
+    writeFileSync(path.join(invalidRunDirectory, 'command-policy.json'), '{}');
+
+    assert.equal(runHook(targetRepository, command).permissionDecision, 'deny');
   });
 });
 
@@ -1319,7 +1429,7 @@ test('asks before running a declared script through a supported package manager'
     for (const manager of ['npm', 'yarn', 'pnpm', 'bun']) {
       const result = runHook(
         targetRepository,
-        `${manager} run check:tests -- tests/account.spec.ts`,
+        `${manager} run lint -- tests/account.spec.ts`,
       );
 
       assert.equal(result.permissionDecision, 'ask', manager);
@@ -1352,13 +1462,13 @@ test('denies package-manager shortcuts and non-script commands', () => {
   withTargetRepository(({ targetRepository }) => {
     for (const command of [
       'npm test',
-      'yarn check:tests',
-      'pnpm check:tests',
-      'bun check:tests',
-      'yarn exec check:tests',
-      'pnpm exec check:tests',
+      'yarn lint',
+      'pnpm lint',
+      'bun lint',
+      'yarn exec lint',
+      'pnpm exec lint',
       'bun install',
-      'PLAYWRIGHT_HTML_OPEN=never npm run check:tests',
+      'PLAYWRIGHT_HTML_OPEN=never npm run lint',
     ]) {
       assert.equal(
         runHook(targetRepository, command).permissionDecision,
@@ -1376,18 +1486,18 @@ test('denies package-manager options that can redirect script execution', () => 
       JSON.stringify({
         scripts: {
           '--filter': 'playwright test --list',
-          'check:tests': 'playwright test --list',
+          lint: 'eslint .',
         },
       }),
     );
 
     for (const command of [
-      'npm run check:tests --workspace=app',
-      'npm run check:tests --workspaces',
-      'npm run check:tests -w app',
-      'yarn run --filter app check:tests',
-      'pnpm run --filter app check:tests',
-      'bun run --filter app check:tests',
+      'npm run lint --workspace=app',
+      'npm run lint --workspaces',
+      'npm run lint -w app',
+      'yarn run --filter app lint',
+      'pnpm run --filter app lint',
+      'bun run --filter app lint',
     ]) {
       assert.equal(
         runHook(targetRepository, command).permissionDecision,
@@ -1404,28 +1514,25 @@ test('denies package scripts when package.json cannot be trusted', () => {
 
     rmSync(packagePath);
     assert.equal(
-      runHook(targetRepository, 'npm run check:tests').permissionDecision,
+      runHook(targetRepository, 'npm run lint').permissionDecision,
       'deny',
     );
 
     writeFileSync(packagePath, '{');
     assert.equal(
-      runHook(targetRepository, 'yarn run check:tests').permissionDecision,
+      runHook(targetRepository, 'yarn run lint').permissionDecision,
       'deny',
     );
 
     writeFileSync(packagePath, JSON.stringify({ scripts: [] }));
     assert.equal(
-      runHook(targetRepository, 'bun run check:tests').permissionDecision,
+      runHook(targetRepository, 'bun run lint').permissionDecision,
       'deny',
     );
 
-    writeFileSync(
-      packagePath,
-      JSON.stringify({ scripts: { 'check:tests': '  ' } }),
-    );
+    writeFileSync(packagePath, JSON.stringify({ scripts: { lint: '  ' } }));
     assert.equal(
-      runHook(targetRepository, 'pnpm run check:tests').permissionDecision,
+      runHook(targetRepository, 'pnpm run lint').permissionDecision,
       'deny',
     );
   });
@@ -1434,10 +1541,7 @@ test('denies package scripts when package.json cannot be trusted', () => {
 test('denies target validation scripts outside the repository root', () => {
   withTargetRepository(({ runDirectory, targetRepository }) => {
     for (const cwd of [path.join(targetRepository, 'tests'), runDirectory]) {
-      const result = runHook(
-        cwd,
-        'npm run check:tests -- tests/account.spec.ts',
-      );
+      const result = runHook(cwd, 'npm run lint -- tests/account.spec.ts');
 
       assert.equal(result.permissionDecision, 'deny');
       assert.match(result.permissionDecisionReason, /target repository root/iu);

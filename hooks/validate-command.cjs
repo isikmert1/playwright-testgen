@@ -1,4 +1,4 @@
-const { existsSync, readFileSync, readdirSync } = require('node:fs');
+const { existsSync, readFileSync, readdirSync, statSync } = require('node:fs');
 const path = require('node:path');
 const parse = require('shell-quote/parse');
 const { decision, deny } = require('./hook-result.cjs');
@@ -23,21 +23,79 @@ const PACKAGE_SCRIPT_RUNNERS = new Set(['bun', 'npm', 'pnpm', 'yarn']);
 const RUNTIME_PREFLIGHT =
   "for (const id of ['playwright/package.json','@playwright/test/package.json']) require.resolve(id)";
 
-function hasPolicyAtRepositoryRoot(cwd) {
+function repositoryPolicies(cwd) {
   let entries;
   try {
     entries = readdirSync(path.join(cwd, '.playwright-cli', 'testgen'), {
       withFileTypes: true,
     });
   } catch {
-    return false;
+    return [];
   }
 
-  return entries.some((entry) => {
-    if (!entry.isDirectory() || !RUN_ID.test(entry.name)) return false;
-    const policy = loadPolicy(cwd, entry.name);
-    return policy != null && samePath(path.resolve(cwd), policy.repositoryRoot);
-  });
+  return entries
+    .filter((entry) => entry.isDirectory() && RUN_ID.test(entry.name))
+    .map((entry) => loadPolicy(cwd, entry.name));
+}
+
+function hasPolicyAtRepositoryRoot(cwd) {
+  return repositoryPolicies(cwd).some(
+    (policy) =>
+      policy != null && samePath(path.resolve(cwd), policy.repositoryRoot),
+  );
+}
+
+function validateAuthorCollection(cwd, assignments, args, toolInput) {
+  if (assignments.length !== 0 || toolInput.run_in_background === true) {
+    return deny(
+      'Author collection must run in the foreground from the target repository root without environment assignments. Only Healer may execute the spec after the human checkpoint.',
+    );
+  }
+
+  const policies = repositoryPolicies(cwd);
+  if (policies.length !== 1) {
+    return deny(
+      'Author collection requires exactly one active Testgen run policy in this repository. Finish or clean up other runs before using the collection fallback.',
+    );
+  }
+
+  const candidate = policies[0];
+  const expected =
+    candidate == null
+      ? []
+      : [
+          'test',
+          candidate.approvedSpecFilter,
+          '--list',
+          ...candidate.allowedRunnerOptions,
+        ];
+  let specIsFile = false;
+  if (candidate != null) {
+    try {
+      specIsFile = statSync(candidate.approvedSpec).isFile();
+    } catch {
+      specIsFile = false;
+    }
+  }
+  const policy =
+    candidate != null &&
+    samePath(path.resolve(cwd), candidate.repositoryRoot) &&
+    args.length === expected.length &&
+    args.every((value, index) => value === expected[index]) &&
+    specIsFile
+      ? candidate
+      : null;
+
+  if (policy == null) {
+    return deny(
+      "Author may only collect the exact policy-approved spec with --list and every Main-approved project or config option. Use Main's approved spec filter unchanged.",
+    );
+  }
+
+  return decision(
+    'allow',
+    'Collects the exact policy-approved spec without executing its test callback.',
+  );
 }
 
 function hasDeclaredPackageScript(cwd, scriptName) {
@@ -277,8 +335,11 @@ function validateCommand(payload) {
   if (executable === 'npx' && args[0] === '--no' && args[1] === 'playwright') {
     const packageArgs = args.slice(2);
     if (!payload.agent_type.endsWith('playwright-test-healer')) {
-      return deny(
-        'Author never executes or debugs the spec. Return the candidate to Main for the human checkpoint; only Healer may run the approved spec after run approval.',
+      return validateAuthorCollection(
+        parsed.cwd,
+        split.assignments,
+        packageArgs,
+        payload.tool_input,
       );
     }
     if (packageArgs[0] === 'trace') {
@@ -324,7 +385,7 @@ function validateCommand(payload) {
     }
     return decision(
       'ask',
-      "Approve this target repository's validation script? A package script may execute arbitrary commands, including lifecycle hooks. Choose Yes only if it is a trusted lint, typecheck, collection check, or formatter scoped to the touched files; otherwise choose No.",
+      "Approve this target repository's validation script? A package script may execute arbitrary commands, including lifecycle hooks. Choose Yes only if the script and arguments match the repository's trusted lint, typecheck, or formatter convention; prefer touched-file scope when that command supports it.",
     );
   }
 

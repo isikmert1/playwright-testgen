@@ -8,7 +8,6 @@
     "node": ">=20"
   },
   "scripts": {
-    "check:tests": "playwright test --list",
     "start": "node server.cjs",
     "test:e2e": "playwright test"
   },
