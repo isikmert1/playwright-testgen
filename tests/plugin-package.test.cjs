@@ -161,6 +161,10 @@ test('workflow guidance removes avoidable pre-Author ambiguity', () => {
   assert.match(pipeline, /approved spec filter argument/iu);
   assert.match(mutationCheck, /Run mutation check/iu);
   assert.match(mutationCheck, /checkout is not changed/iu);
+  assert.match(
+    mutationCheck,
+    /literal `--repo \.`.*repository-relative adapter path/isu,
+  );
   assert.match(author, /never enumerate the repository with `\*\*\/\*`/iu);
   assert.match(
     author,
@@ -168,4 +172,11 @@ test('workflow guidance removes avoidable pre-Author ambiguity', () => {
   );
   assert.match(healer, /do not repeat the runtime preflight/iu);
   assert.match(healer, /do not inspect inactive fixture variants/iu);
+  assert.match(healer, /exact output path returned by Bash.*use\s+`Read`/isu);
+  assert.match(healer, /pause-at.*approved spec.*positive line/isu);
+  assert.match(
+    healer,
+    /complete trace.*one whole-file `Edit`.*validate once/isu,
+  );
+  assert.match(healer, /read the current trace.*entire.*`old_string`/isu);
 });

@@ -54,6 +54,7 @@ const ALLOWED_CLI_COMMANDS = new Set([
   'attach',
   'console',
   'find',
+  'pause-at',
   'snapshot',
   'state-load',
   'tab-close',
@@ -272,6 +273,22 @@ function validateCli(cwd, assignments, args, agentType) {
     return deny(
       'find requires a text or regular-expression query. Use a quoted query from the current scenario.',
     );
+  } else if (subcommand === 'pause-at') {
+    const approvedSpec = normalizePath(
+      path.relative(loaded.policy.repositoryRoot, loaded.policy.approvedSpec),
+    );
+    const location =
+      args.length === 1 ? args[0].match(/^(.+):([1-9]\d*)$/u) : null;
+    if (
+      !healer ||
+      !DEBUG_SESSION.test(session) ||
+      location == null ||
+      location[1] !== approvedSpec
+    ) {
+      return deny(
+        `pause-at requires the approved spec and a positive line, for example ${approvedSpec}:42. Use the repository-relative approved spec, not a bare line or another file.`,
+      );
+    }
   } else if (subcommand === 'snapshot') {
     const refs = args.filter((value) => SNAPSHOT_REF.test(value));
     const depths = args.filter((value) => SNAPSHOT_DEPTH.test(value));

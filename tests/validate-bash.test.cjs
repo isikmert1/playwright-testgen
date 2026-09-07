@@ -420,6 +420,44 @@ test('allows required snapshot search and navigation commands', () => {
   });
 });
 
+test('allows Healer to pause only at the approved spec and a positive line', () => {
+  withTargetRepository(({ targetRepository }) => {
+    const allowed = runCliHook(
+      targetRepository,
+      '-s=tw-debug-123 pause-at tests/account.spec.ts:42',
+      'playwright-test-healer',
+    );
+
+    assert.equal(allowed.permissionDecision, 'allow');
+
+    for (const command of [
+      '-s=tw-debug-123 pause-at 42',
+      '-s=tw-debug-123 pause-at tests/other.spec.ts:42',
+      '-s=tw-debug-123 pause-at tests/account.spec.ts:0',
+      '-s=tw-debug-123 pause-at tests/account.spec.ts:42 extra',
+    ]) {
+      const result = runCliHook(
+        targetRepository,
+        command,
+        'playwright-test-healer',
+      );
+      assert.equal(result.permissionDecision, 'deny', command);
+      assert.match(
+        result.permissionDecisionReason,
+        /approved spec.*positive line/iu,
+      );
+    }
+
+    assert.equal(
+      runCliHook(
+        targetRepository,
+        `-s=${runId} pause-at tests/account.spec.ts:42`,
+      ).permissionDecision,
+      'deny',
+    );
+  });
+});
+
 test('allows bounded console levels documented by Playwright CLI', () => {
   withTargetRepository(({ targetRepository }) => {
     for (const command of [

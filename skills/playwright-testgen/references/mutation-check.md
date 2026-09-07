@@ -78,6 +78,11 @@ Compute the digest for a proposed entry with:
 node "$PLAYWRIGHT_TESTGEN_ROOT/scripts/mutation-check.cjs" digest --repo . --adapter <manifest> --mutation-id <mutation_id>
 ```
 
+Run every mutation-check command directly from the repository root. Pass the
+literal `--repo .` and a repository-relative adapter path such as
+`.testgen/mutation-adapter.json`; do not substitute absolute paths. The adapter
+contract rejects an absolute adapter path.
+
 Use 64 lowercase zeroes as the draft `definition_digest`, replace that
 placeholder with the command's returned digest, then commit the definition.
 The digest binds the adapter and mutation identifiers, criterion, sorted

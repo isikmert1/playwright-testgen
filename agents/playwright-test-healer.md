@@ -54,6 +54,8 @@ Confirm the handoff matches the run ID and approved spec. When Main reports
 only the read-only preflight from `SKILL.md`. A missing local dependency,
 official skill, handoff schema, or
 artifact validator is a blocker; never install, update, or substitute one.
+Treat a passed preflight as the dependency check; do not probe `node_modules`
+or dependency availability again.
 Use the injected `PLAYWRIGHT_TESTGEN_ROOT` only in the documented validator
 command; never print or probe it.
 
@@ -112,14 +114,20 @@ failure still needs interactive evidence:
 PLAYWRIGHT_HTML_OPEN=never npx --no playwright test <approved-spec-filter-argument> --debug=cli --retries=0 --repeat-each=1 --output=<attempt-results-dir>
 ```
 
-Record the Bash background task ID. Read its output until the debugging
-instructions appear, then capture the emitted `tw-*` session identifier.
+Record the Bash background task ID and exact output path returned by Bash. Use
+`Read` on that exact path until the debugging instructions appear; never poll
+with shell `sleep` or `cat`, discover temporary files, or select the newest
+output. Then capture the emitted `tw-*` session identifier.
 Attach to that exact session from the run directory:
 
 ```sh
 cd <validated-run-directory> && PWTEST_CLI_GLOBAL_CONFIG=. playwright-cli attach <emitted-session>
 cd <validated-run-directory> && PWTEST_CLI_GLOBAL_CONFIG=. playwright-cli -s=<emitted-session> <inspection-command>
+cd <validated-run-directory> && PWTEST_CLI_GLOBAL_CONFIG=. playwright-cli -s=<emitted-session> pause-at <approved-spec>:<positive-line>
 ```
+
+For `pause-at`, use the repository-relative approved spec and a positive line,
+for example `tests/account.spec.ts:42`; a bare line or another file is denied.
 
 Associate the emitted session and its runner process with the supplied run ID;
 do not derive, rename, guess, or rely on the default session. Every inspection
@@ -218,12 +226,16 @@ required confirmation is `unresolved-after-healing`.
 Replace the declared `{}` draft with the complete sanitized `healer-trace.v1`
 artifact under `artifact-contract.md`; never create another trace path. Apply
 the artifact contract's pre-write scrub, then use `Edit`, not `Write`, to
-replace the existing draft's exact `{}` contents. Record
-every runner invocation once. The final
-classification is the last supported failure class, or `null` when no run
-failed and the schema permits it. Use only the plugin-provided artifact flow;
-do not work around the declared tool boundary with shell redirection or an
-undeclared write path. A missing schema or validator, failed validation, or
+replace the existing draft's exact `{}` contents. Assemble the complete trace
+first, perform one whole-file `Edit`, then validate once. If validation fails,
+use its error codes to rebuild and replace the complete artifact; never apply a
+partial edit or retry unchanged content. Read the current trace and use its
+entire contents as the next `Edit`'s `old_string`. Record every runner invocation
+once.
+The final classification is the last supported failure class, or `null` when
+no run failed and the schema permits it. Use only the plugin-provided artifact
+flow; do not work around the declared tool boundary with shell redirection or
+an undeclared write path. A missing schema or validator, failed validation, or
 partial trace is a blocker; never report it as a valid trace.
 
 Edit it only at `.playwright-cli/testgen/<run_id>/healer-trace.json`, then
