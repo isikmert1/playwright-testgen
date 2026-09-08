@@ -15,6 +15,7 @@ const {
 function policiesAbove(cwd) {
   const policies = [];
   const seen = new Set();
+  let invalid = false;
   let directory = path.resolve(cwd);
 
   while (true) {
@@ -28,8 +29,18 @@ function policiesAbove(cwd) {
 
     for (const entry of entries) {
       if (!entry.isDirectory() || !RUN_ID.test(entry.name)) continue;
+      const policyPath = path.join(
+        runsDirectory,
+        entry.name,
+        'command-policy.json',
+      );
+      if (!existsSync(policyPath)) continue;
       const policy = loadPolicy(directory, entry.name);
-      if (policy == null || seen.has(policy.policyPath)) continue;
+      if (policy == null) {
+        invalid = true;
+        continue;
+      }
+      if (seen.has(policy.policyPath)) continue;
       seen.add(policy.policyPath);
       policies.push(policy);
     }
@@ -39,16 +50,44 @@ function policiesAbove(cwd) {
     directory = parent;
   }
 
-  return policies;
+  return { invalid, policies };
 }
 
 function policiesNear(...paths) {
-  const policies = paths.flatMap(policiesAbove);
-  return policies.filter(
-    (policy, index) =>
-      policies.findIndex((candidate) =>
-        samePath(candidate.policyPath, policy.policyPath),
-      ) === index,
+  const discovered = paths.map(policiesAbove);
+  const policies = discovered.flatMap((entry) => entry.policies);
+  return {
+    invalid: discovered.some((entry) => entry.invalid),
+    policies: policies.filter(
+      (policy, index) =>
+        policies.findIndex((candidate) =>
+          samePath(candidate.policyPath, policy.policyPath),
+        ) === index,
+    ),
+  };
+}
+
+function isPluginBootstrapRead(payload, absolute, canonical) {
+  if (payload.tool_name !== 'Read') return false;
+  const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+  if (typeof pluginRoot !== 'string' || pluginRoot.length === 0) return false;
+
+  let canonicalPluginRoot;
+  try {
+    canonicalPluginRoot = realpathSync(pluginRoot);
+  } catch {
+    return false;
+  }
+
+  return ['scripts', path.join('skills', 'playwright-testgen')].some(
+    (relative) => {
+      const lexicalRoot = path.join(path.resolve(pluginRoot), relative);
+      const canonicalRoot = path.join(canonicalPluginRoot, relative);
+      return (
+        isContained(lexicalRoot, absolute, true) &&
+        isContained(canonicalRoot, canonical, true)
+      );
+    },
   );
 }
 
@@ -79,8 +118,21 @@ function validateFileAccess(payload) {
     }
   }
 
+  if (isPluginBootstrapRead(payload, absolute, canonical)) return {};
+
   const normalized = normalizePath(canonical);
-  const nearbyPolicies = policiesNear(payload.cwd, absolute, canonical);
+  const discovered = policiesNear(payload.cwd, absolute, canonical);
+  if (discovered.invalid) {
+    return deny(
+      'A discovered Testgen run policy is invalid. Return to Main to repair or remove the invalid command-policy.json before governed access continues.',
+    );
+  }
+  const nearbyPolicies = discovered.policies;
+  if (nearbyPolicies.length === 0) {
+    return deny(
+      'No valid Testgen run policy authorizes this access. Return to Main so it can create command-policy.json before dispatching a governed agent.',
+    );
+  }
   if (
     nearbyPolicies.some((policy) =>
       policy.allowedStatePaths.some(
@@ -119,6 +171,37 @@ function validateFileAccess(payload) {
           'This run artifact belongs to the other role or an aliased path. Mutate only the exact role-owned artifact: Author owns handoff.json and Healer owns healer-trace.json.',
         );
       }
+      if (filename === 'healer-trace.json') {
+        let traceStats;
+        try {
+          traceStats = statSync(absolute);
+        } catch {
+          return deny(
+            'The declared healer-trace.json draft is unavailable. Return to Main instead of creating another trace path.',
+          );
+        }
+        if (!traceStats.isFile() || traceStats.size > 64 * 1024) {
+          return deny(
+            'The declared healer-trace.json draft must be a regular file no larger than 64 KiB. Return to Main instead of reading or replacing it.',
+          );
+        }
+        if (payload.tool_name !== 'Write') {
+          return deny(
+            'Replace the declared healer-trace.json with one whole-file Write containing the complete artifact; do not patch it with Edit.',
+          );
+        }
+        const content = payload.tool_input.content;
+        if (
+          typeof content !== 'string' ||
+          content.length === 0 ||
+          Buffer.byteLength(content, 'utf8') > 64 * 1024
+        ) {
+          return deny(
+            'Healer trace writes must contain one complete artifact no larger than 64 KiB.',
+          );
+        }
+      }
+      return {};
     }
   }
 
@@ -136,6 +219,7 @@ function validateFileAccess(payload) {
   const mainOwnedFiles = [
     'command-policy.json',
     'change-manifest.json',
+    'mutation-recovery.json',
     'vacuity-report.json',
   ];
   const namesRunOwned = mainOwnedFiles.some(
@@ -172,6 +256,26 @@ function validateFileAccess(payload) {
     }
   }
 
+  const approved = nearbyPolicies.some((policy) => {
+    const candidates = [
+      {
+        absolute: policy.approvedSpec,
+        canonical: policy.canonicalApprovedSpec,
+      },
+      ...policy.allowedWritePaths,
+    ];
+    return candidates.some(
+      (candidate) =>
+        samePath(absolute, candidate.absolute) &&
+        (!existsSync(absolute) || samePath(canonical, candidate.canonical)),
+    );
+  });
+  if (!approved) {
+    return deny(
+      'This mutation is outside the approved write paths. Edit or create only approved_spec or an exact existing helper/test-id path recorded by Main in allowed_write_paths.',
+    );
+  }
+
   return {};
 }
 
@@ -191,14 +295,20 @@ function validateGrepAccess(payload) {
     // Grep reports missing paths; lexical containment is sufficient here.
   }
 
-  const policies = policiesNear(payload.cwd, absolute, canonical).filter(
+  const discovered = policiesNear(payload.cwd, absolute, canonical);
+  if (discovered.invalid) {
+    return deny(
+      'A discovered Testgen run policy is invalid. Return to Main to repair or remove the invalid command-policy.json before governed access continues.',
+    );
+  }
+  const policies = discovered.policies.filter(
     (policy) =>
       isContained(policy.repositoryRoot, absolute, true) &&
       isContained(policy.canonicalRepositoryRoot, canonical, true),
   );
   if (policies.length === 0) {
     return deny(
-      'Scope Grep to a source or test path inside the target repository authorized by command-policy.json.',
+      'Scope Grep to a source or test path inside the repository authorized by command-policy.json.',
     );
   }
 

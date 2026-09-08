@@ -42,6 +42,7 @@ function handoff(run = runId) {
     criteria: [
       {
         id: 'criterion-1',
+        step_title: 'verify the saved profile is visible',
         assertion_location: 'tests/account.spec.ts:18',
         outcome: 'saved profile is visible',
       },
@@ -74,7 +75,7 @@ function trace(run = runId) {
     attempts: [
       {
         number: 1,
-        kind: 'confirmation-run',
+        kind: 'verification-run',
         hypothesis: 'the approved spec passes unchanged',
         failure_signature: null,
         evidence_summary: 'runner completed successfully',
@@ -86,11 +87,11 @@ function trace(run = runId) {
     repairs: [],
     final_classification: null,
     disposition: 'fixed',
-    next_owner: 'human',
+    next_owner: 'main',
     escalation: null,
     cleanup: {
-      runner: 'stopped',
-      browser_session: 'closed',
+      runner: 'not-started',
+      browser_session: 'not-opened',
       scratch: 'retained-pending-acceptance',
     },
   };
@@ -98,9 +99,10 @@ function trace(run = runId) {
 
 function repairedTrace(paths) {
   const artifact = trace();
+  artifact.attempts[0].kind = 'confirmation-run';
   artifact.attempts.unshift({
     number: 1,
-    kind: 'debug-run',
+    kind: 'verification-run',
     hypothesis: 'the saved locator no longer matches the control',
     failure_signature: 'save-button-not-found',
     evidence_summary: 'one renamed Save changes control was visible',
@@ -156,7 +158,7 @@ function vacuityReport(run = runId) {
 function productFindingAttempt() {
   return {
     number: 1,
-    kind: 'debug-run',
+    kind: 'verification-run',
     hypothesis: 'the save action completed but the required state was absent',
     failure_signature: 'saved-state-absent',
     evidence_summary: 'the expected precondition and action were observed',
@@ -199,6 +201,7 @@ function writePolicy(repository, approvedSpec) {
       allowed_origins: ['http://127.0.0.1:3000'],
       allowed_runner_options: [],
       allowed_state_paths: [],
+      allowed_write_paths: [],
       format_version: 1,
       run_id: runId,
     }),
@@ -281,6 +284,48 @@ test('accepts a valid fixed Healer trace in its run-owned location', () => {
 
     assert.equal(result.status, 0, result.stderr);
     assert.equal(JSON.parse(result.stdout).valid, true);
+  });
+});
+
+test('rejects foreground-only traces that claim background resources', () => {
+  withRepository((repository) => {
+    const artifact = trace();
+    artifact.cleanup.runner = 'stopped';
+    artifact.cleanup.browser_session = 'not-opened';
+    assertRejected(
+      repository,
+      'trace',
+      'healer-trace.json',
+      artifact,
+      /trace-foreground-runner-cleanup-invalid/iu,
+    );
+  });
+
+  withRepository((repository) => {
+    const artifact = trace();
+    artifact.cleanup.runner = 'not-started';
+    artifact.cleanup.browser_session = 'closed';
+    assertRejected(
+      repository,
+      'trace',
+      'healer-trace.json',
+      artifact,
+      /trace-foreground-browser-cleanup-invalid/iu,
+    );
+  });
+});
+
+test('routes a fixed Healer trace to Main for the vacuity gate', () => {
+  withRepository((repository) => {
+    const artifact = trace();
+    artifact.next_owner = 'human';
+    assertRejected(
+      repository,
+      'trace',
+      'healer-trace.json',
+      artifact,
+      /trace-invalid-fixed-disposition/iu,
+    );
   });
 });
 
@@ -490,7 +535,7 @@ test('rejects symlinks as mutation affected paths', () => {
   });
 });
 
-test('accepts the target repository test filename and test-id convention', () => {
+test('accepts the repository test filename and test-id convention', () => {
   withRepository((repository) => {
     const specPath = 'e2e/account-flow.e2e.ts';
     mkdirSync(path.join(repository, 'e2e'));
@@ -582,6 +627,42 @@ test('rejects criterion IDs that downstream artifacts cannot use', () => {
       'handoff.json',
       artifact,
       /handoff-invalid-criterion-id/iu,
+    );
+  });
+});
+
+test('requires unique human-readable criterion step titles', () => {
+  withRepository((repository) => {
+    for (const stepTitle of [
+      '',
+      ' verify the saved profile',
+      'verify\0the saved profile',
+      'verify\u0085the saved profile',
+      'testgen:criterion:criterion-1',
+    ]) {
+      const artifact = handoff();
+      artifact.criteria[0].step_title = stepTitle;
+      assertRejected(
+        repository,
+        'handoff',
+        'handoff.json',
+        artifact,
+        /handoff-invalid-step-title/iu,
+      );
+    }
+
+    const artifact = handoff();
+    artifact.criteria.push({
+      ...artifact.criteria[0],
+      id: 'criterion-2',
+      step_title: artifact.criteria[0].step_title,
+    });
+    assertRejected(
+      repository,
+      'handoff',
+      'handoff.json',
+      artifact,
+      /handoff-duplicate-step-title/iu,
     );
   });
 });
@@ -775,7 +856,7 @@ test('rejects secret-bearing artifacts without echoing the value', () => {
 
     assert.equal(result.status, 1);
     assert.doesNotMatch(result.stderr, /do-not-repeat-this-value/iu);
-    assert.match(result.stderr, /prohibited-content/iu);
+    assert.match(result.stderr, /handoff-assumptions-prohibited-content/iu);
   });
 });
 
@@ -807,8 +888,27 @@ test('rejects environment assignments and raw snapshots', () => {
       const result = validate(repository, 'handoff', runId, artifactPath);
 
       assert.equal(result.status, 1);
-      assert.match(result.stderr, /prohibited-content/iu);
+      assert.match(result.stderr, /handoff-assumptions-prohibited-content/iu);
     }
+  });
+});
+
+test('identifies the safe trace section containing prohibited content', () => {
+  withRepository((repository) => {
+    const artifact = trace();
+    artifact.attempts[0].evidence_summary =
+      'snapshot: raw page state must remain in scratch';
+    const artifactPath = writeArtifact(
+      repository,
+      runId,
+      'healer-trace.json',
+      artifact,
+    );
+    const result = validate(repository, 'trace', runId, artifactPath);
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /trace-attempts-prohibited-content/iu);
+    assert.doesNotMatch(result.stderr, /raw page state/iu);
   });
 });
 
@@ -900,10 +1000,86 @@ test('rejects artifacts whose embedded run ID differs from the command', () => {
   });
 });
 
-test('requires a final passing confirmation before accepting a fixed trace', () => {
+test('requires a final non-debug pass before accepting a fixed trace', () => {
   withRepository((repository) => {
     const artifact = trace();
     artifact.attempts[0].kind = 'debug-run';
+    const artifactPath = writeArtifact(
+      repository,
+      runId,
+      'healer-trace.json',
+      artifact,
+    );
+    const result = validate(repository, 'trace', runId, artifactPath);
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /fixed-requires-non-debug-pass/iu);
+  });
+});
+
+test('accepts one passing verification run when no repair was made', () => {
+  withRepository((repository) => {
+    const artifact = trace();
+    artifact.attempts[0].kind = 'verification-run';
+    const artifactPath = writeArtifact(
+      repository,
+      runId,
+      'healer-trace.json',
+      artifact,
+    );
+    const result = validate(repository, 'trace', runId, artifactPath);
+
+    assert.equal(result.status, 0, result.stderr);
+  });
+});
+
+test('rejects a trace whose first attempt is mislabeled as confirmation', () => {
+  withRepository((repository) => {
+    const artifact = trace();
+    artifact.attempts[0].kind = 'confirmation-run';
+    const artifactPath = writeArtifact(
+      repository,
+      runId,
+      'healer-trace.json',
+      artifact,
+    );
+    const result = validate(repository, 'trace', runId, artifactPath);
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /first-attempt-not-verification/iu);
+  });
+});
+
+test('rejects another attempt after the initial verification passes', () => {
+  withRepository((repository) => {
+    const artifact = trace();
+    artifact.attempts.push({
+      number: 2,
+      kind: 'confirmation-run',
+      hypothesis: 'the approved spec still passes',
+      failure_signature: null,
+      evidence_summary: 'the redundant run also completed successfully',
+      classification: null,
+      action: null,
+      outcome: 'pass',
+    });
+    const artifactPath = writeArtifact(
+      repository,
+      runId,
+      'healer-trace.json',
+      artifact,
+    );
+    const result = validate(repository, 'trace', runId, artifactPath);
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /attempt-after-terminal-pass/iu);
+  });
+});
+
+test('still requires confirmation after a repair', () => {
+  withRepository((repository) => {
+    const artifact = repairedTrace(['tests/account.spec.ts']);
+    artifact.attempts.at(-1).kind = 'verification-run';
     const artifactPath = writeArtifact(
       repository,
       runId,
@@ -919,26 +1095,7 @@ test('requires a final passing confirmation before accepting a fixed trace', () 
 
 test('preserves the last failure classification after a repaired trace passes', () => {
   withRepository((repository) => {
-    const artifact = trace();
-    artifact.attempts.unshift({
-      number: 1,
-      kind: 'debug-run',
-      hypothesis: 'the saved locator no longer matches the control',
-      failure_signature: 'save-button-not-found',
-      evidence_summary: 'one renamed Save changes control was visible',
-      classification: 'selector-drift',
-      action: 'updated the approved spec locator',
-      outcome: 'fail',
-    });
-    artifact.attempts[1].number = 2;
-    artifact.repairs = [
-      {
-        attempt_number: 1,
-        paths: ['tests/account.spec.ts'],
-        reason: 'matched the renamed visible control',
-      },
-    ];
-    artifact.final_classification = 'selector-drift';
+    const artifact = repairedTrace(['tests/account.spec.ts']);
     const artifactPath = writeArtifact(
       repository,
       runId,

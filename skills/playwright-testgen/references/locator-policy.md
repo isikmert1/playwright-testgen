@@ -14,6 +14,10 @@ Before writing a locator into the spec:
    intended actionable control.
 
 If count-one and visibility cannot be demonstrated, do not write the locator.
+`generate-locator` output is a candidate, not proof: verify the complete
+accessible text or name, uniqueness, visibility, and intended element against
+current evidence. Do not accept a truncated text prefix merely because it is
+currently unique.
 
 ## Degradation ladder
 
@@ -21,7 +25,7 @@ Use the first rung that can be verified:
 
 1. Role plus accessible name, such as `getByRole`.
 2. Associated label, placeholder, or visible text.
-3. The target repository's existing test-id convention, but only when grounded
+3. The repository's existing test-id convention, but only when grounded
    evidence identifies it. It may be `data-testid`, `data-test`, `data-cy`,
    `test-id`, or another bare custom attribute. Use configured
    `testIdAttribute` or a narrowly scoped `page.locator()` when
@@ -35,30 +39,39 @@ Never skip a stronger verified rung because a weaker selector is shorter.
 
 ## Convention detection
 
-A known convention comes from a repository profile. Without one, Author gets
-one count-only grep over repository-tracked source, test, and Playwright config
-files for the exact attribute names `data-testid`, `data-test`, `data-cy`, and
-`test-id`. Do not count `data-test` inside `data-testid`. Report counts by
-spelling, do not open the matches for further investigation, and choose a
-convention only when the result is conclusive. A bare custom attribute is
-eligible only when normal grounding already found an explicit Playwright
-`testIdAttribute` configuration; do not spend another read to hunt for one.
-Record the selected convention or an explicit no-result outcome in the
-handoff.
+A known convention comes only from an actual repository `/setup` profile.
+Evaluation metadata and Main's source guess are not profile input. Without a
+profile, Author uses the native `Grep` tool for up to four count-only scans,
+one exact attribute spelling per call: `data-testid`, `data-test`, `data-cy`,
+and `test-id`. Search only bounded application-source, test, and selected
+Playwright-config paths; exclude dependencies, generated output, documentation,
+and run scratch. Use an attribute boundary so `data-test` is not counted inside
+`data-testid`. Never use Bash, `git grep`, loops, pipes, or redirection, and do
+not open matches. These calls have a separate allowance from Author's grounding
+budget. Choose a convention only when the counts are conclusive. A bare custom
+attribute is eligible only when normal grounding already found an explicit
+Playwright `testIdAttribute`; do not spend another read to hunt for one. Record
+the convention or `none-found`.
 
 No conclusive result is valid: skip rung 3 and continue to scoped CSS. Never
 invent a convention.
 
 Adding a test-id to product source is allowed only when the repository already
-uses that convention and only within the feature under test. Report the source
-edit explicitly; it is never the default response to ambiguity.
+uses that convention, only within the feature under test, and Main pre-approved
+the exact existing source file in `allowed_write_paths`. Report the source edit
+explicitly; it is never the default response to ambiguity. A path discovered
+after dispatch requires approval and redispatch.
 
 ## Ambiguity and escalation
 
 - Scope to the owning dialog, form, navigation, row, active panel, or verified
   overlay before filtering by intent.
-- Use narrowly scoped read-only DOM inspection only when the accessibility
-  snapshot lacks required attribute or containment evidence.
+- When the accessibility snapshot lacks required attribute or containment
+  evidence, use a scoped `find` or `generate-locator --raw`. If those bounded
+  commands remain insufficient, stop with the evidence blocker.
+- Prefer literal `find` text for ordinary searches. In Windows Git Bash,
+  slash-delimited regex can be rewritten as a filesystem path; use it only when
+  a literal cannot answer the question and the runtime preserves the argument.
 - Do not mutate the DOM, dispatch events, or retrieve full-page markup to prove
   a locator.
 - If the intended element remains ambiguous, stop or route to Author. Do not

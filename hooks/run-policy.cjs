@@ -7,6 +7,13 @@ function normalizePath(value) {
   return value.replaceAll('\\', '/');
 }
 
+function exactPlaywrightFilter(value) {
+  const normalized = normalizePath(path.resolve(value));
+  const escaped = normalized.replace(/[\\^$.*+?()[\]{}|/]/gu, '\\$&');
+  const flags = process.platform === 'win32' ? 'i' : '';
+  return `/^${escaped}$/${flags}`;
+}
+
 function comparablePath(value) {
   const normalized = normalizePath(value);
   return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
@@ -141,6 +148,9 @@ function loadPolicy(cwd, runId) {
     ) ||
     new Set(policy.allowed_runner_options).size !==
       policy.allowed_runner_options.length ||
+    new Set(
+      policy.allowed_runner_options.map((value) => value.split('=', 1)[0]),
+    ).size !== policy.allowed_runner_options.length ||
     !Array.isArray(policy.allowed_state_paths) ||
     policy.allowed_state_paths.length > 4 ||
     policy.allowed_state_paths.some(
@@ -151,6 +161,16 @@ function loadPolicy(cwd, runId) {
     ) ||
     new Set(policy.allowed_state_paths).size !==
       policy.allowed_state_paths.length ||
+    !Array.isArray(policy.allowed_write_paths) ||
+    policy.allowed_write_paths.length > 10 ||
+    policy.allowed_write_paths.some(
+      (value) =>
+        typeof value !== 'string' ||
+        value.length === 0 ||
+        path.isAbsolute(value),
+    ) ||
+    new Set(policy.allowed_write_paths).size !==
+      policy.allowed_write_paths.length ||
     !Array.isArray(policy.allowed_origins) ||
     policy.allowed_origins.length === 0 ||
     policy.allowed_origins.length > 8
@@ -233,11 +253,31 @@ function loadPolicy(cwd, runId) {
     allowedStatePaths.push(resolved);
   }
 
+  const allowedWritePaths = [];
+  for (const value of policy.allowed_write_paths) {
+    const resolved = resolveContainedPath(
+      repositoryRoot,
+      value,
+      repositoryRoot,
+      canonicalRepositoryRoot,
+    );
+    if (resolved == null || !existsSync(resolved.absolute)) return null;
+    try {
+      if (!statSync(resolved.absolute).isFile()) return null;
+    } catch {
+      return null;
+    }
+    allowedWritePaths.push(resolved);
+  }
+
   return {
     allowedRunnerOptions: policy.allowed_runner_options,
     allowedStatePaths,
+    allowedWritePaths,
     allowedOrigins,
     approvedSpec: approvedSpec.absolute,
+    approvedSpecFilter: exactPlaywrightFilter(approvedSpec.absolute),
+    canonicalApprovedSpec: approvedSpec.canonical,
     canonicalRepositoryRoot,
     canonicalRunDirectory,
     policyPath,
@@ -250,6 +290,7 @@ function loadPolicy(cwd, runId) {
 module.exports = {
   RUN_ID,
   comparablePath,
+  exactPlaywrightFilter,
   isContained,
   loadPolicy,
   normalizePath,

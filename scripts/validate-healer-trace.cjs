@@ -101,8 +101,16 @@ function validateTrace(artifact, repository, handoffCriteria, errors) {
       );
       if (attempt.number !== index + 1)
         errors.push('trace-nonsequential-attempt');
-      if (!['debug-run', 'confirmation-run'].includes(attempt.kind))
+      if (
+        !['verification-run', 'debug-run', 'confirmation-run'].includes(
+          attempt.kind,
+        )
+      )
         errors.push('trace-invalid-attempt-kind');
+      if (index === 0 && attempt.kind !== 'verification-run')
+        errors.push('trace-first-attempt-not-verification');
+      if (index > 0 && attempt.kind === 'verification-run')
+        errors.push('trace-verification-run-not-first');
       if (
         !isText(attempt.hypothesis, 200) ||
         !isText(attempt.evidence_summary, 240)
@@ -152,6 +160,17 @@ function validateTrace(artifact, repository, handoffCriteria, errors) {
     );
     if (terminalIndex >= 0 && terminalIndex !== artifact.attempts.length - 1)
       errors.push('trace-attempt-after-terminal-classification');
+    const passingNonDebugIndex = artifact.attempts.findIndex(
+      (attempt) =>
+        isObject(attempt) &&
+        ['verification-run', 'confirmation-run'].includes(attempt.kind) &&
+        attempt.outcome === 'pass',
+    );
+    if (
+      passingNonDebugIndex >= 0 &&
+      passingNonDebugIndex !== artifact.attempts.length - 1
+    )
+      errors.push('trace-attempt-after-terminal-pass');
   }
   if (!Array.isArray(artifact.repairs) || artifact.repairs.length > 10) {
     errors.push('trace-invalid-repairs');
@@ -208,7 +227,9 @@ function validateTrace(artifact, repository, handoffCriteria, errors) {
     errors.push('trace-invalid-final-classification');
   if (!DISPOSITIONS.has(artifact.disposition))
     errors.push('trace-invalid-disposition');
-  if (!['human', 'author', 'product-owner'].includes(artifact.next_owner))
+  if (
+    !['main', 'human', 'author', 'product-owner'].includes(artifact.next_owner)
+  )
     errors.push('trace-invalid-next-owner');
   if (artifact.escalation !== null && !isText(artifact.escalation, 200))
     errors.push('trace-invalid-escalation');
@@ -246,6 +267,15 @@ function validateTrace(artifact, repository, handoffCriteria, errors) {
     )
       errors.push('trace-invalid-scratch-cleanup');
   }
+  if (
+    Array.isArray(artifact.attempts) &&
+    !artifact.attempts.some((attempt) => attempt?.kind === 'debug-run')
+  ) {
+    if (artifact.cleanup?.runner !== 'not-started')
+      errors.push('trace-foreground-runner-cleanup-invalid');
+    if (artifact.cleanup?.browser_session !== 'not-opened')
+      errors.push('trace-foreground-browser-cleanup-invalid');
+  }
   const finalAttempt = Array.isArray(artifact.attempts)
     ? artifact.attempts.at(-1)
     : null;
@@ -265,13 +295,20 @@ function validateTrace(artifact, repository, handoffCriteria, errors) {
   if (
     artifact.disposition === 'fixed' &&
     (!isObject(finalAttempt) ||
-      finalAttempt.kind !== 'confirmation-run' ||
+      !['verification-run', 'confirmation-run'].includes(finalAttempt.kind) ||
       finalAttempt.outcome !== 'pass')
+  )
+    errors.push('fixed-requires-non-debug-pass');
+  if (
+    artifact.disposition === 'fixed' &&
+    Array.isArray(artifact.repairs) &&
+    artifact.repairs.length > 0 &&
+    finalAttempt?.kind !== 'confirmation-run'
   )
     errors.push('fixed-requires-confirmation');
   if (
     artifact.disposition === 'fixed' &&
-    (artifact.next_owner !== 'human' || artifact.escalation !== null)
+    (artifact.next_owner !== 'main' || artifact.escalation !== null)
   )
     errors.push('trace-invalid-fixed-disposition');
   if (

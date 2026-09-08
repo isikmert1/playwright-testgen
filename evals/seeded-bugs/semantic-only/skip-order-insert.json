@@ -1,0 +1,12 @@
+{
+  "schema_version": "seeded-bug.v1",
+  "bug_id": "semantic-only:skip-order-insert",
+  "target_id": "semantic-only",
+  "mutation_id": "skip-order-insert",
+  "criterion_id": "order-appears-in-table",
+  "patch_path": "evals/targets/semantic-only/repository/.testgen/mutations/skip-order-insert.patch",
+  "definition_digest": "34f3897665f0e53771badb5d865edd3352d843610f5c187f49caba26eafa6616",
+  "behavior": "Submitting an order adds its item and quantity to the orders table.",
+  "triggering_check": "The generated spec submits an order and asserts its row values.",
+  "expected_classification": "product-behavior-wrong"
+}

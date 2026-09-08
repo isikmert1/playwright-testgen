@@ -20,8 +20,14 @@ resource when it is created so each exit can release only run-owned resources.
 - Main owns `vacuity-report.json`. Write and validate it only when a fixed
   result reaches the post-Healer vacuity gate, retain it until its disposition
   is accepted, then remove it with the run directory.
+- Before disposable-worktree execution, the mutation checker reserves
+  Main-owned `mutation-recovery.json` with only the exact temporary root and
+  worktree paths needed for supervised recovery. An existing record blocks
+  another verification. Successful cleanup removes it; failed cleanup keeps it
+  without replacing the primary verification error. It is transient run state,
+  not a public result artifact.
 - Direct every workflow-controlled snapshot, download, trace, and debug file to
-  `.playwright-cli/testgen/<run-id>/` in the target repository.
+  `.playwright-cli/testgen/<run-id>/` in the repository.
 - Run attached Playwright CLI inspection commands with that validated run
   directory as their working directory so auto-generated CLI output remains a
   child of run-owned scratch.
@@ -30,7 +36,7 @@ resource when it is created so each exit can release only run-owned resources.
   its shape and run-directory use, while Healer owns the provenance check
   against the captured runner output.
 - Track test-owned product data separately; its teardown follows
-  `test-policy.md` and the target repository's fixtures.
+  `test-policy.md` and the repository's fixtures.
 - The mutation checker owns its OS-temporary detached worktree. It removes the
   exact worktree in `finally`, verifies that its registration and directory are
   gone, and rechecks the active checkout fingerprints. Never clean that
@@ -41,10 +47,15 @@ servers, profiles, ports, or files.
 
 ## Browser and process cleanup
 
+The Healer trace's `cleanup.runner` field describes only the owned background
+debug runner. Use `not-started` when foreground verification or confirmation
+ran and exited without creating a background runner, with
+`browser_session: not-opened` for that foreground-only path.
+
 - A session opened by the workflow ends with
-  `cd <validated-run-directory> && PWTEST_CLI_GLOBAL_CONFIG=. npm exec --no -- playwright-cli -s=<session> close`.
+  `cd <validated-run-directory> && PWTEST_CLI_GLOBAL_CONFIG=. playwright-cli -s=<session> close`.
 - A session attached to an external or debug-owned browser ends with
-  `cd <validated-run-directory> && PWTEST_CLI_GLOBAL_CONFIG=. npm exec --no -- playwright-cli -s=<session> detach`;
+  `cd <validated-run-directory> && PWTEST_CLI_GLOBAL_CONFIG=. playwright-cli -s=<session> detach`;
   then stop only the background test process that created the debug session.
 - If a scoped close fails, report the remaining session and process identifiers.
   Do not use `close-all` or `kill-all`, because they can terminate unrelated
@@ -59,8 +70,8 @@ servers, profiles, ports, or files.
 
 Resolve the exact run directory and verify it is a child of
 `.playwright-cli/testgen/` before removal. Delete only that run directory;
-never delete `.playwright-cli/`, the target repository, generated specs, or
-other durable files. From the target repository, the bounded command is
+never delete `.playwright-cli/`, the repository, generated specs, or other
+durable files. From the repository, the bounded command is
 `rm -rf -- .playwright-cli/testgen/<run-id>`; do not omit the run ID or replace
 the path with a glob. Full run-directory removal belongs to Main after the
 result is accepted. Governed agents may remove only the generated children
@@ -73,8 +84,8 @@ or use a wildcard.
 
 Raw snapshots, screenshots, videos, trace archives, DOM dumps, downloads, and
 runner logs controlled by this workflow are transient and belong in the run
-directory. When the target runner creates configured output elsewhere, report
-its repository-relative path and leave it target-owned rather than deleting
+directory. When the project runner creates configured output elsewhere, report
+its repository-relative path and leave it repository-owned rather than deleting
 outside the validated boundary. The validated handoff, trace, and vacuity
 report may remain only while the run is active or paused for a human decision.
 Remove them after the final disposition has been reported and accepted.
@@ -102,4 +113,6 @@ Remove them after the final disposition has been reported and accepted.
 
 A cleanup failure is reported separately with the exact owned resource still
 present. It never changes the test failure's classification or authorizes broad
-deletion.
+deletion. Main may use `mutation-recovery.json` for a supervised exact-path
+cleanup. After confirming both recorded paths and the Git worktree registration
+are gone, remove that record before any new verification attempt.

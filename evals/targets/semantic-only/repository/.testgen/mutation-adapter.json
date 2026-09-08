@@ -1,0 +1,15 @@
+{
+  "schema_version": "mutation-adapter.v1",
+  "adapter_id": "testgen-semantic-only",
+  "runner_path": ".testgen/mutation-runner.cjs",
+  "mutations": [
+    {
+      "mutation_id": "skip-order-insert",
+      "criterion_id": "order-appears-in-table",
+      "affected_paths": ["public/app.js"],
+      "patch_path": ".testgen/mutations/skip-order-insert.patch",
+      "definition_digest": "34f3897665f0e53771badb5d865edd3352d843610f5c187f49caba26eafa6616",
+      "timeout_ms": 120000
+    }
+  ]
+}

@@ -15,7 +15,7 @@ dispositions. The workflow handles exactly one written scenario at a time.
 | Work                                                              | Owner                      |
 | ----------------------------------------------------------------- | -------------------------- |
 | Coordinate the run and present decisions                          | Main session               |
-| Validate target runtime prerequisites before generation           | Main session               |
+| Validate project runtime prerequisites before generation          | Main session               |
 | Ground the scenario and explore the live app                      | Author                     |
 | Write and lint the candidate spec                                 | Author                     |
 | Approve, skip, or redirect the candidate                          | Human                      |
@@ -30,19 +30,55 @@ a broad rewrite. The main session coordinates, writes only transient run
 policy/artifacts, and reports; it does not explore, write product or test files,
 or debug.
 
+Main's repository discovery is limited to package metadata, the selected
+Playwright config, existing Playwright spec paths and naming (not their bodies),
+an actual `/setup` profile when present, and runtime readiness. Feature source,
+nearby test bodies, and rendered behavior belong to Author. A target descriptor
+may guide evaluation setup, but its expected outcomes and locator convention are
+evaluation metadata, not an operational profile, and must not be sent to Author.
+
 ## Ordered flow
 
-1. Main runs the read-only runtime preflight from `SKILL.md`. A `/setup`
-   profile never replaces this check. Missing or outdated prerequisites stop
-   the flow before Author and route to `/setup` when available; generation
-   never installs them.
+1. Main runs each read-only runtime preflight command from `SKILL.md` in its own
+   Bash call from the repository root. Missing or outdated prerequisites
+   stop the flow before Author; generation never installs them. Main also
+   confirms the application is already running at the approved origin and
+   records separate readiness facts for the Playwright CLI exploration browser
+   and the browser selected by the repository's existing runner configuration.
 2. Main receives one written scenario, preserves its acceptance criteria,
    assigns stable local criterion identifiers and a non-sensitive scenario
-   reference, identifies the target repository and proposed spec path, and
+   reference, identifies the repository root and proposed spec path, and
    creates the run ID with
-   `node "$CLAUDE_PLUGIN_ROOT/scripts/create-testgen-run-id.cjs"` under
-   `artifact-contract.md` before Author starts. Main
-   also writes `.playwright-cli/testgen/<run_id>/command-policy.json` with only
+   `node "$PLAYWRIGHT_TESTGEN_ROOT/scripts/create-testgen-run-id.cjs"` under
+   `artifact-contract.md` before Author starts.
+
+   Complete pre-Author setup in this order:
+
+   1. derive the concrete scenario reference, criteria, spec path, origin, and
+      readiness facts, including `/setup` profile presence, existing Playwright
+      spec presence, browser readiness, and the selected validation path;
+   2. create the run ID, write the run policy, and obtain its exact approved
+      spec filter;
+   3. ask whether to run the matching mutation check;
+   4. capture the `pre-author` boundary when that check is approved; and
+   5. delegate Author with the concrete values and readiness facts, including
+      `runtime preflight: passed`.
+
+   Main derives the scenario reference; never require the human to supply one.
+   An explicit spec path wins. Otherwise, inspect existing Playwright specs and
+   the selected Playwright config, then match their test directory, naming, and
+   language. Use JavaScript only when existing Playwright specs establish that
+   convention. When no Playwright specs exist, default to a descriptive
+   TypeScript `.spec.ts` file in the configured test directory. Ask before
+   creating the policy when conventions or the selected config are ambiguous.
+   Playwright transforms `.spec.ts` files without a project `tsconfig` or direct
+   `typescript` dependency; this does not replace a repository's own typecheck.
+   Only an actual `/setup` profile can make a locator convention
+   `profile-backed`. Without one, tell Author no profile exists and let it run
+   the single bounded convention scan. Never substitute evaluation metadata or
+   Main's source guess for that profile.
+
+   Main writes `.playwright-cli/testgen/<run_id>/command-policy.json` with only
    this shape:
 
    ```json
@@ -50,6 +86,7 @@ or debug.
      "approved_spec": "tests/account.spec.ts",
      "allowed_runner_options": [],
      "allowed_state_paths": [],
+     "allowed_write_paths": [],
      "format_version": 1,
      "run_id": "tg-<24hex>",
      "allowed_origins": ["https://app.example.test"]
@@ -59,21 +96,42 @@ or debug.
    The origin above is illustrative; it is never a default. `approved_spec` is
    the proposed repository-relative spec path. Each allowed origin is an exact
    HTTP(S) scheme, host, and port without a path or credentials. Include only
-   origins explicitly supplied for the target application. If none is known,
-   stop and ask rather than starting Author.
+   origins explicitly supplied or confirmed for the target application. Main
+   may inspect an existing selected Playwright config for a candidate origin,
+   but discovery is not approval. If no single candidate is known and
+   confirmed, stop and ask rather than starting Author.
    `allowed_runner_options` is initially empty and may contain only exact
    `--project=<name>` or `--config=<path>` arguments explicitly selected by
-   Main. `allowed_state_paths` contains only existing target-repository storage
+   Main. `allowed_state_paths` contains only existing repository storage
    state files explicitly supplied or approved for this scenario, expressed as
    exact paths relative to the run directory; keep it empty otherwise. Agents
    may pass an approved path to `state-load` but never read or copy its content.
+   `allowed_write_paths` contains at most ten exact repository-relative paths
+   to existing regular files that Main has explicitly approved for a focused
+   shared-helper or test-id edit; keep it empty otherwise. The approved spec is
+   writable separately and may be new. If Author discovers that another edit
+   is necessary, it returns the exact path and evidence to Main for approval
+   and redispatch instead of attempting the edit.
    This transient Main-owned policy binds the shared PreToolUse hook to the run.
    Author and Healer must never edit it; preserve it through Healer and never
    treat it as a handoff artifact.
 
+   From the repository root, Main obtains the shell-safe approved spec
+   filter after writing the policy:
+
+   ```sh
+   node "$PLAYWRIGHT_TESTGEN_ROOT/scripts/print-approved-spec-filter.cjs" <run_id>
+   ```
+
+   Main passes that output unchanged to Author for the collection-only fallback
+   and later regenerates it before Healer execution. Neither role reconstructs
+   the regex. The fallback is available only while this is the repository's one
+   active Testgen run policy. Concurrent runs may use a compatible repository
+   linter or serialize collection; never remove another run's policy.
+
    Before enabling mutation verification, Main identifies one exact
-   criterion-linked adapter entry and digest under `mutation-check.md` and gets
-   explicit human approval. If several entries could apply, ask now; never
+   criterion-linked adapter entry and digest under `mutation-check.md` and uses
+   its exact user-first approval question. If several entries could apply, ask now; never
    choose one implicitly. When that approval exists, Main captures the
    `pre-author` boundary with the exact command in `artifact-contract.md`. Do
    this after the policy exists and before delegating Author. If an approved
@@ -84,11 +142,18 @@ or debug.
    repository-state baseline.
 
 3. Main delegates the Author stage to
-   `playwright-testgen:playwright-test-author` with the run ID, original
-   criteria, target repository, proposed spec path, and known route, auth, and
-   data facts. Author grounds in relevant source and nearby tests, explores the
-   running app with Playwright CLI, verifies its locator choices, self-checks,
-   writes one spec, lints every touched test file, emits the Author handoff, and
+   `playwright-testgen:playwright-test-author` with the run ID, actual derived
+   `scenario_ref`, original criteria, repository root, proposed spec path,
+   exact approved spec filter, every approved project or config option, and
+   known route, auth, and data facts. State `runtime preflight: passed` so
+   Author does not repeat it. Before delegation, Main confirms the
+   target application is already running at the approved origin and supplies
+   separate exploration-browser and runner-browser readiness facts plus the
+   selected validation path. Author never derives a required value,
+   starts the application, or installs a browser or package. Author grounds in
+   relevant source and nearby tests, explores the running app with Playwright
+   CLI, verifies its locator choices, self-checks, writes one spec, validates
+   touched test files under `test-policy.md`, emits the Author handoff, and
    stops. Author never runs the spec.
 4. Main validates `.playwright-cli/testgen/<run_id>/handoff.json` before
    reporting it, using the exact validator command in `artifact-contract.md`,
@@ -98,11 +163,24 @@ or debug.
 5. The human chooses exactly one checkpoint action:
    - `run`: available only after lint succeeds; freeze the reviewed candidate
      and delegate `playwright-testgen:playwright-test-healer` in fresh context
-     with explicit approval, the run ID, target repository, exact approved spec
-     path, original criteria, validated handoff, and known project, config,
-     route, auth, environment, and test-data facts. Before delegation, Main
-     confirms `approved_spec` still names the reviewed file and records any
-     exact approved project/config arguments in `allowed_runner_options`.
+     with explicit approval, the run ID, repository root, exact approved spec
+     path, original criteria, validated handoff, `runtime preflight: passed`,
+     and known project, config, route, auth, environment, and test-data facts.
+     Before delegation, Main confirms `approved_spec` still names the reviewed
+     file and obtains its shell-safe approved spec filter argument from the
+     repository root:
+
+     ```sh
+     node "$PLAYWRIGHT_TESTGEN_ROOT/scripts/print-approved-spec-filter.cjs" <run_id>
+     ```
+
+     Pass the output to Healer unchanged; neither role reconstructs the regex.
+     Main records any exact approved project/config arguments in
+     `allowed_runner_options`. Every recorded option is mandatory on every
+     runner invocation; omission is not a fallback.
+     Supply only facts active in this run. Do not mention inactive fixture
+     variants, mutation patches, or adapter internals in the Healer dispatch;
+     the post-Healer mutation check remains Main-owned.
      When the run has a pre-Author change manifest, capture its `checkpoint`
      boundary after this human approval and before Healer delegation. A failed
      capture returns the repository-state conflict to the human and blocks the
@@ -113,6 +191,7 @@ or debug.
      This Main-owned placeholder gives Healer's `Edit`-only mutation boundary a
      declared trace file; it is not an artifact and no consumer may read or
      report it until Healer replaces it and validation succeeds.
+
    - `skip`: end as `generated-unverified` and say exactly, "Explored live;
      spec never executed."
    - `adjust`: return the original scenario, current spec, and exact human
@@ -127,6 +206,8 @@ or debug.
 7. Only a validated `fixed` trace enters Main's vacuity gate. Main does not put
    this work in `Stop` or `SubagentStop`, redispatch Healer for bookkeeping, or
    report `fixed` as the final Testgen result.
+   A valid fixed trace names `main` as `next_owner`; it never routes directly to
+   the human before this gate.
    - When the run has a change manifest, Main captures `post-healer` before
      verification. If capture fails, do not invoke the adapter; record the
      bounded capture error as behavior `error` in the vacuity report.

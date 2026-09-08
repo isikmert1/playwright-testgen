@@ -55,6 +55,7 @@ function validateHandoff(artifact, repository, errors) {
     errors.push('handoff-invalid-criteria');
   } else {
     const ids = new Set();
+    const stepTitles = new Set();
     for (const criterion of artifact.criteria) {
       if (!isObject(criterion)) {
         errors.push('handoff-invalid-criterion');
@@ -62,19 +63,30 @@ function validateHandoff(artifact, repository, errors) {
       }
       requireFields(
         criterion,
-        ['id', 'assertion_location', 'outcome'],
+        ['id', 'step_title', 'assertion_location', 'outcome'],
         errors,
         'criterion',
       );
       rejectUnknown(
         criterion,
-        new Set(['id', 'assertion_location', 'outcome']),
+        new Set(['id', 'step_title', 'assertion_location', 'outcome']),
         errors,
         'criterion',
       );
       if (!isIdentifier(criterion.id) || ids.has(criterion.id))
         errors.push('handoff-invalid-criterion-id');
       ids.add(criterion.id);
+      if (
+        !isText(criterion.step_title, 160) ||
+        criterion.step_title.trim() !== criterion.step_title ||
+        /\p{Cc}/u.test(criterion.step_title) ||
+        /testgen:criterion:/iu.test(criterion.step_title)
+      ) {
+        errors.push('handoff-invalid-step-title');
+      } else if (stepTitles.has(criterion.step_title)) {
+        errors.push('handoff-duplicate-step-title');
+      }
+      stepTitles.add(criterion.step_title);
       if (
         !isText(criterion.assertion_location, 240) ||
         !/^.+:[1-9]\d*$/u.test(criterion.assertion_location)

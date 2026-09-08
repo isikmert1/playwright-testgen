@@ -31,11 +31,17 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "assertion_location", "outcome"],
+        "required": ["id", "step_title", "assertion_location", "outcome"],
         "properties": {
           "id": {
             "type": "string",
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$"
+          },
+          "step_title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160,
+            "pattern": "^(?!\\s)(?!.*\\s$)(?!.*[Tt][Ee][Ss][Tt][Gg][Ee][Nn]:criterion:)[^\\u0000-\\u001F\\u007F-\\u009F]+$"
           },
           "assertion_location": {
             "type": "string",

@@ -1,7 +1,7 @@
 # Test policy
 
 This file owns the shape and quality of generated specs and helpers. Compatible
-target-repository conventions control layout, imports, fixtures, and naming.
+Repository conventions control layout, imports, fixtures, and naming.
 Written criteria, safety rules, and explicit prohibitions in this skill always
 win.
 
@@ -20,23 +20,38 @@ win.
 ## Layout and reuse
 
 - Follow nearby specs for imports, fixtures, naming, output location, and setup.
+- Choose the file extension from existing Playwright specs, not application or
+  config-file language. Use JavaScript only when existing Playwright specs
+  establish it; otherwise use TypeScript, including when no specs exist.
 - Keep one independently runnable scenario per spec.
 - Keep logic inline unless a plain helper is already reusable by two specs. Do
   not create speculative page objects, fixtures, directories, or abstractions.
-- Use page objects only when the target repository already does or the human
+- Use page objects only when the repository already does or the human
   explicitly requests them.
 
 ## Spec shape
 
-- Match the target repository's established `test` and `expect` imports and
+- Match the repository's established `test` and `expect` imports and
   fixture signatures.
 - Use `test.step()` only for meaningful user-flow phases, not every click.
+- Wrap each criterion's meaningful assertion in one stable `test.step()` with
+  a concise, unique, human-readable title that describes the assertion. Record
+  the exact title as `step_title` beside the criterion ID in the handoff and
+  keep it unchanged through healing so mutation evidence remains attributable
+  when line numbers move. Never add Testgen IDs, tags, markers, or ownership
+  comments to the generated spec.
 - Keep the behavior under test and its meaningful assertions visible in the
   spec; helpers may prepare or navigate but must not hide the scenario.
 - Apply `vacuity-policy.md` to every planned assertion. A criterion is not
   covered unless its assertion can fail when the required behavior is absent.
-- Author lints every touched spec and helper with the repository's existing
-  command, records the result, and never executes the spec.
+- Author uses the repository's existing package manager and lint convention,
+  scoped to touched files when supported. If only its normal repository-wide
+  lint exists, invoke that existing script and let the hook request approval;
+  if it is unsuitable or not approved, use the local collection fallback. A
+  denied direct executable such as `npx prettier` does not mean the package
+  script was blocked. The fallback collects only the exact policy-approved spec
+  through local Playwright with `--list`. Author never invents a package script
+  or executes the spec.
 
 ## Waiting and navigation
 
@@ -61,7 +76,7 @@ win.
   blocker instead of creating a polluting test.
 - Reuse documented authentication state. Never type credentials or copy login
   steps into an unrelated feature spec.
-- Product-data teardown belongs in the target test's established fixture or
+- Product-data teardown belongs in the test's established fixture or
   `finally` path. Browser and scratch cleanup follows `cleanup-contract.md`.
 
 Comments explain only a non-obvious why, a concrete `fixme`/`skip`, or an

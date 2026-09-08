@@ -19,7 +19,7 @@ function evaluate(payload) {
     payload.cwd.length === 0
   ) {
     return deny(
-      'Hook input is incomplete. Retry the operation through a normal Bash tool call from the target repository.',
+      'Hook input is incomplete. Retry the operation through a normal Bash tool call from the repository.',
     );
   }
 

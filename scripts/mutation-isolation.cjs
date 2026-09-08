@@ -1,4 +1,4 @@
-const { spawnSync } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const {
   chmodSync,
   copyFileSync,
@@ -9,6 +9,8 @@ const {
   realpathSync,
   rmSync,
   statSync,
+  unlinkSync,
+  writeFileSync,
 } = require('node:fs');
 const { tmpdir } = require('node:os');
 const path = require('node:path');
@@ -116,16 +118,17 @@ function safeDestination(worktree, relativePath) {
   let current = worktree;
   for (const segment of relativeParent.split(path.sep).filter(Boolean)) {
     current = path.join(current, segment);
-    if (!existsSync(current)) {
+    const entry = lstatSync(current, { throwIfNoEntry: false });
+    if (entry == null) {
       mkdirSync(current);
       continue;
     }
-    if (!lstatSync(current).isDirectory()) fail('overlay-parent-unsafe');
+    if (!entry.isDirectory()) fail('overlay-parent-unsafe');
   }
+  const entry = lstatSync(destination, { throwIfNoEntry: false });
   if (
-    existsSync(destination) &&
-    (!lstatSync(destination).isFile() ||
-      !isInside(worktree, realpathSync(destination)))
+    entry != null &&
+    (!entry.isFile() || !isInside(worktree, realpathSync(destination)))
   )
     fail('overlay-destination-unsafe');
   return destination;
@@ -142,6 +145,7 @@ function copyOverlay(repository, worktree, entries) {
 
 function parseRunnerOutput(result) {
   if (result.error?.code === 'ETIMEDOUT') fail('runner-timeout');
+  if (result.error?.code === 'ECANCELED') fail('runner-cancelled');
   if (result.error != null || result.status !== 0) fail('runner-failed');
   if (Buffer.byteLength(result.stdout, 'utf8') > MAX_RUNNER_OUTPUT)
     fail('runner-output-too-large');
@@ -180,29 +184,115 @@ function parseRunnerOutput(result) {
   return output;
 }
 
-function runAdapter(worktree, parsed, mutation, spec, phase) {
+function stopRunnerTree(child) {
+  if (child.pid == null) return;
+  if (process.platform === 'win32') {
+    const stopped = spawnSync(
+      'taskkill',
+      ['/pid', String(child.pid), '/T', '/F'],
+      { stdio: 'ignore', timeout: 5000, windowsHide: true },
+    );
+    if (stopped.error == null && stopped.status === 0) return;
+  } else {
+    try {
+      process.kill(-child.pid, 'SIGKILL');
+      return;
+    } catch {
+      // Fall back to the direct process when its group has already exited.
+    }
+  }
+  try {
+    child.kill('SIGKILL');
+  } catch {
+    // The process may have exited between the timeout and termination.
+  }
+}
+
+function runAdapterProcess(runner, args, options) {
+  return new Promise((resolve) => {
+    const { signal, timeout, ...spawnOptions } = options;
+    const child = spawn(process.execPath, [runner, ...args], {
+      ...spawnOptions,
+      detached: process.platform !== 'win32',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    const chunks = [];
+    let bytes = 0;
+    let failure = null;
+    let settled = false;
+    let stopTimer = null;
+    const finish = (status, error = failure) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      clearTimeout(stopTimer);
+      signal?.removeEventListener('abort', abort);
+      resolve({
+        error,
+        status,
+        stdout: Buffer.concat(chunks).toString('utf8'),
+      });
+    };
+    const stop = (code) => {
+      if (settled || failure != null) return;
+      failure = { code };
+      stopRunnerTree(child);
+      stopTimer = setTimeout(() => finish(null), 5000);
+    };
+    const abort = () => stop('ECANCELED');
+    const timer = setTimeout(() => stop('ETIMEDOUT'), timeout);
+    signal?.addEventListener('abort', abort, { once: true });
+    if (signal?.aborted) abort();
+    child.stdout.on('data', (chunk) => {
+      bytes += chunk.length;
+      if (bytes <= MAX_RUNNER_OUTPUT) chunks.push(chunk);
+      if (bytes > MAX_RUNNER_OUTPUT && failure == null) {
+        stop('ENOBUFS');
+      }
+    });
+    child.once('error', (error) => finish(null, error));
+    child.once('close', (status) => finish(status));
+  });
+}
+
+async function runAdapter(
+  worktree,
+  parsed,
+  mutation,
+  stepTitle,
+  spec,
+  phase,
+  signal,
+) {
   const runner = path.join(worktree, parsed.runner.relative);
-  return parseRunnerOutput(
-    spawnSync(
-      process.execPath,
-      [
-        runner,
-        '--phase',
-        phase,
-        '--spec',
-        spec,
-        '--criterion-id',
-        mutation.criterion_id,
-      ],
-      {
-        cwd: worktree,
-        encoding: 'utf8',
-        maxBuffer: MAX_RUNNER_OUTPUT,
-        timeout: mutation.timeout_ms,
-        windowsHide: true,
+  const result = await runAdapterProcess(
+    runner,
+    [
+      '--phase',
+      phase,
+      '--spec',
+      spec,
+      '--criterion-id',
+      mutation.criterion_id,
+      '--step-title',
+      stepTitle,
+    ],
+    {
+      cwd: worktree,
+      env: {
+        ...process.env,
+        TESTGEN_TARGET_NODE_MODULES: path.join(
+          parsed.repository,
+          'node_modules',
+        ),
       },
-    ),
+      signal,
+      timeout: mutation.timeout_ms,
+      windowsHide: true,
+    },
   );
+  if (result.error?.code === 'ENOBUFS') fail('runner-output-too-large');
+  return parseRunnerOutput(result);
 }
 
 function changedPaths(before, after) {
@@ -240,6 +330,44 @@ function cleanupWorktree(repository, temporaryRoot, worktree) {
   }
 }
 
+function recoveryRecordPath(policy) {
+  return path.join(policy.runDirectory, 'mutation-recovery.json');
+}
+
+function reserveRecoveryRecord(
+  repository,
+  policy,
+  runId,
+  temporaryRoot,
+  worktree,
+) {
+  const filename = recoveryRecordPath(policy);
+  try {
+    writeFileSync(
+      filename,
+      `${JSON.stringify({
+        schema_version: 'mutation-recovery.v1',
+        run_id: runId,
+        temporary_root: temporaryRoot,
+        worktree,
+      })}\n`,
+      { encoding: 'utf8', flag: 'wx', mode: 0o600 },
+    );
+  } catch (error) {
+    if (error?.code === 'EEXIST') fail('isolation-recovery-pending');
+    fail('recovery-record-failed');
+  }
+  return portable(path.relative(repository, filename));
+}
+
+function removeRecoveryRecord(policy) {
+  try {
+    unlinkSync(recoveryRecordPath(policy));
+  } catch {
+    fail('recovery-record-remove-failed');
+  }
+}
+
 function resultBase(parsed, mutation, digest) {
   return {
     adapter_id: parsed.adapter.adapter_id,
@@ -250,21 +378,24 @@ function resultBase(parsed, mutation, digest) {
   };
 }
 
-function verifyMutation(
+async function verifyMutation(
   repositoryInput,
   runId,
   adapterInput,
   mutationId,
   criterionId,
   approvalDigest,
+  signal,
 ) {
   const { policy, repository } = resolveRun(repositoryInput, runId);
+  if (existsSync(recoveryRecordPath(policy)))
+    fail('isolation-recovery-pending');
   if (!isIdentifier(criterionId)) fail('criterion-id-invalid');
   const handoff = validateArtifact(repository, runId, 'handoff');
   const trace = validateArtifact(repository, runId, 'trace');
   if (trace.disposition !== 'fixed') fail('trace-not-fixed');
-  if (!handoff.criteria.some(({ id }) => id === criterionId))
-    fail('criterion-not-approved');
+  const criterion = handoff.criteria.find(({ id }) => id === criterionId);
+  if (criterion == null) fail('criterion-not-approved');
   if (adapterInput == null) {
     if (mutationId != null || approvalDigest != null)
       fail('adapter-selection-invalid');
@@ -327,9 +458,19 @@ function verifyMutation(
   let baselineOutcome = null;
   let mutantOutcome = null;
   let result = null;
+  let recoveryOwned = false;
+  let recoveryRecord = null;
   try {
     temporaryRoot = mkdtempSync(path.join(tmpdir(), 'testgen-mutant-'));
     worktree = path.join(temporaryRoot, 'checkout');
+    recoveryRecord = reserveRecoveryRecord(
+      repository,
+      policy,
+      runId,
+      temporaryRoot,
+      worktree,
+    );
+    recoveryOwned = true;
     runGit(repository, [
       'worktree',
       'add',
@@ -340,15 +481,20 @@ function verifyMutation(
     ]);
     copyOverlay(repository, worktree, overlay.entries);
     const beforeBaseline = captureSnapshot(worktree, runId);
-    const baseline = runAdapter(
+    const baseline = await runAdapter(
       worktree,
       parsed,
       mutation,
+      criterion.step_title,
       overlay.approvedSpec,
       'baseline',
+      signal,
     );
     baselineOutcome = baseline.outcome;
-    if (!snapshotsMatch(beforeBaseline, captureSnapshot(worktree, runId)))
+    if (
+      currentHead(worktree) !== manifest.head ||
+      !snapshotsMatch(beforeBaseline, captureSnapshot(worktree, runId))
+    )
       fail('baseline-mutated-isolation');
     if (baseline.outcome !== 'pass') fail('baseline-not-passing');
 
@@ -369,14 +515,22 @@ function verifyMutation(
     )
       fail('mutation-path-mismatch');
 
-    const mutant = runAdapter(
+    const beforeMutant = captureSnapshot(worktree, runId);
+    const mutant = await runAdapter(
       worktree,
       parsed,
       mutation,
+      criterion.step_title,
       overlay.approvedSpec,
       'mutant',
+      signal,
     );
     mutantOutcome = mutant.outcome;
+    if (
+      currentHead(worktree) !== manifest.head ||
+      !snapshotsMatch(beforeMutant, captureSnapshot(worktree, runId))
+    )
+      fail('mutant-mutated-isolation');
     if (mutant.outcome === 'error') fail('mutant-runner-error');
     if (
       mutant.outcome === 'fail' &&
@@ -404,18 +558,25 @@ function verifyMutation(
     let cleanupError = null;
     try {
       cleanupWorktree(repository, temporaryRoot, worktree);
+      if (recoveryOwned) removeRecoveryRecord(policy);
       cleanup = 'removed';
     } catch (error) {
       cleanupError = errorCode(error);
     }
     let activeError = null;
     try {
-      if (!snapshotsMatch(captureSnapshot(repository, runId), activeBefore))
+      if (currentHead(repository) !== adapterHead) {
+        activeError = 'active-head-changed';
+      } else if (
+        !snapshotsMatch(captureSnapshot(repository, runId), activeBefore)
+      )
         activeError = 'active-checkout-changed';
     } catch (error) {
       activeError = errorCode(error);
     }
-    const finalError = activeError ?? cleanupError;
+    const primaryError =
+      result?.status === 'verification-error' ? result.error : null;
+    const finalError = primaryError ?? activeError ?? cleanupError;
     if (finalError != null) {
       result = {
         status: 'verification-error',
@@ -425,6 +586,12 @@ function verifyMutation(
         isolation: 'disposable-worktree',
         error: finalError,
       };
+      if (activeError != null && activeError !== finalError)
+        result.active_error = activeError;
+      if (cleanupError != null) {
+        result.cleanup_error = cleanupError;
+        if (recoveryOwned) result.recovery_record = recoveryRecord;
+      }
     }
     result.cleanup = cleanup;
   }

@@ -12,29 +12,57 @@ application proves what actually renders.
 
 ## Runtime boundary
 
-Run the workflow inside the target repository. That repository must already
-provide its required Playwright runtime, including `playwright`,
-`@playwright/test`, and `@playwright/cli`. Never install or resolve those
-packages from this plugin repository.
+Run the workflow inside the repository being tested. It must already
+provide its local `playwright` and `@playwright/test` runtime. The current
+official `@playwright/cli` must be installed globally so its documented
+`playwright-cli` command is available without depending on the repository's
+`node_modules` layout. Never install or resolve these dependencies from this
+plugin repository. Testgen requires Node.js 22.13 or later.
 
-Main runs this read-only preflight from the target package directory before
-every generation, even when a `/setup` profile exists:
+The SessionStart hook exports `PLAYWRIGHT_TESTGEN_ROOT` as the installed plugin
+directory for Bash commands. Use `$PLAYWRIGHT_TESTGEN_ROOT/scripts/...` for
+every bundled script without printing, resolving, or probing the variable. If a
+documented script call reports it missing, stop and ask the human to restart
+Claude Code after installing or reloading the plugin. Never infer it from
+`SKILL.md`, search for another checkout, or hardcode a development path.
+
+Main runs this read-only preflight from the repository's package directory before
+every generation:
 
 ```sh
-node -e "for (const id of ['playwright/package.json','@playwright/test/package.json','@playwright/cli/package.json']) require.resolve(id)"
-npm exec --no -- playwright-cli --help
+node --version
+node -e "for (const id of ['playwright/package.json','@playwright/test/package.json']) require.resolve(id)"
+playwright-cli --version
+playwright-cli --help
 ```
 
-The help output must identify an installed, current official `playwright-cli`
-skill. If any package or the skill is missing or outdated, stop before Author.
-When `/setup` is available, it owns guided detection and approved remediation;
-its prior result never replaces this runtime preflight. Until `/setup` ships,
-Main offers one explicit manual choice for the skill:
+Run each line as a separate Bash call from the repository root. Do not
+prefix it with `cd`, combine it with another command, or append discovery
+probes. Use `Read`, `Glob`, or `Grep` separately for repository discovery.
 
-- project-local: `npm exec --no -- playwright-cli install --skills`
-- user-global: `npm exec --no -- playwright-cli install --skills=agents -g`
+Node must be 22.13 or newer. The CLI must be version 0.1.19 or newer. Its help must list `attach`, `find`,
+`generate-locator`, and `requests`, and print an `Agent skill:` path. Treat the
+warning `The playwright-cli skill at '<path>' does not match the tool version.`
+as outdated. If any package, CLI capability, or skill is missing or outdated,
+stop before Author. Run the official install from the same Node/npm environment
+that launches the agent; a different global npm prefix does not satisfy this
+check.
 
-Never run either installation without user approval. Author never installs or
+Package resolution alone does not prove that either browser runtime is ready.
+Before Author, Main records separate facts for the Playwright CLI exploration
+browser and the repository runner browser selected by its existing config and
+project, and confirms the application is already running at the approved
+origin. Do not hardcode Chromium or change repository configuration. A browser
+installation listing is supporting evidence, not proof that the selected local
+Playwright version can launch it; stop when readiness cannot be confirmed.
+
+`/setup` is planned but not shipped. Until it exists, Main offers only the
+relevant official remediation:
+
+- install or update the CLI: `npm install -g @playwright/cli@latest`
+- install the skill from the repository: `playwright-cli install --skills`
+
+Never run an installation without user approval. Author never installs or
 updates packages or skills. The official skill owns CLI command mechanics only.
 This skill owns criteria, orchestration, checkpoints, handoffs, and healing,
 and wins when the workflows differ.
@@ -43,13 +71,14 @@ and wins when the workflows differ.
 
 Keep writes single-threaded. After preflight, Main delegates the Author stage to
 `playwright-testgen:playwright-test-author`; Main never performs Author work.
-Author grounds the scenario, explores the running application, writes and lints
-the spec, emits its handoff, and stops without running the test. A human then
+Author grounds the scenario, explores the running application, writes and
+validates the spec, emits its handoff, and stops without running the test. A human then
 chooses `run`, `skip`, or `adjust`; never auto-advance. `skip` ends with the spec
 unverified, `adjust` returns the scenario to Author, and only `run` lets Main
 delegate a fresh-context `playwright-testgen:playwright-test-healer` with the
-run ID, target repository, exact approved spec, original criteria, validated
-handoff, and known runner, route, auth, environment, and data facts. Healer
+run ID, repository root, exact approved spec, original criteria, validated
+handoff, passed-preflight fact, approved spec-filter argument, and known runner,
+route, auth, environment, and data facts. Healer
 executes, diagnoses, makes bounded repairs, and reports its trace; Main never
 performs Healer work. A validated `fixed` trace enters Main's vacuity gate:
 Main runs one approved criterion-linked product mutation when available,

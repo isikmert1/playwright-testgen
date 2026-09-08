@@ -20,7 +20,6 @@ const DEBUG_SESSION = /^tw-[A-Za-z0-9-]+$/u;
 const NAVIGATION_COMMANDS = new Set(['goto', 'open', 'tab-new']);
 const SIMPLE_COMMANDS = new Set([
   'close',
-  'console',
   'detach',
   'go-back',
   'go-forward',
@@ -31,6 +30,9 @@ const SIMPLE_COMMANDS = new Set([
   'step-over',
   'tab-list',
 ]);
+const CONSOLE_LEVELS = new Set(['error', 'warning', 'info', 'debug']);
+const SNAPSHOT_REF = /^e\d+$/u;
+const SNAPSHOT_DEPTH = /^--depth=\d+$/u;
 const TARGET_COMMANDS = new Set([
   'check',
   'click',
@@ -50,7 +52,9 @@ const ALLOWED_CLI_COMMANDS = new Set([
   ...SIMPLE_COMMANDS,
   ...TARGET_COMMANDS,
   'attach',
+  'console',
   'find',
+  'pause-at',
   'snapshot',
   'state-load',
   'tab-close',
@@ -144,17 +148,20 @@ function validateNavigation(subcommand, args, policy) {
 }
 
 function validateCli(cwd, assignments, args, agentType) {
-  if (args.length === 1 && args[0] === '--help') {
+  if (args.length === 1 && (args[0] === '--help' || args[0] === '--version')) {
     if (assignments.length !== 0) {
       return deny(
-        'The read-only playwright-cli help check does not accept environment assignments. Run npm exec --no -- playwright-cli --help.',
+        `The read-only playwright-cli ${args[0].slice(2)} check does not accept environment assignments. Run playwright-cli ${args[0]}.`,
       );
     }
     return decision(
       'allow',
-      "Read-only check of the target repository's local playwright-cli.",
+      'Read-only check of the official global playwright-cli.',
     );
   }
+
+  const rawCount = args.filter((value) => value === '--raw').length;
+  args = args.filter((value) => value !== '--raw');
 
   let session = '';
   if (args[0]?.startsWith('-s=')) {
@@ -165,6 +172,11 @@ function validateCli(cwd, assignments, args, agentType) {
   if (!ALLOWED_CLI_COMMANDS.has(subcommand)) {
     return deny(
       `playwright-cli subcommand "${subcommand ?? ''}" is not allowed. Use snapshot, find, or generate-locator for inspection and a listed interaction command for the verified action.`,
+    );
+  }
+  if (rawCount > 1 || (rawCount === 1 && subcommand !== 'generate-locator')) {
+    return deny(
+      '--raw is allowed once only for generate-locator. Use structured output for every other Playwright CLI command.',
     );
   }
 
@@ -178,7 +190,7 @@ function validateCli(cwd, assignments, args, agentType) {
   if (loaded.result != null) return loaded.result;
   if (!samePath(cwd, loaded.policy.runDirectory)) {
     return deny(
-      'Playwright CLI must run from the exact policy-owned directory so generated evidence stays in run scratch. Use cd .playwright-cli/testgen/<run_id> && PWTEST_CLI_GLOBAL_CONFIG=. npm exec --no -- playwright-cli <command>.',
+      'Playwright CLI must run from the exact policy-owned directory so generated evidence stays in run scratch. Use cd .playwright-cli/testgen/<run_id> && PWTEST_CLI_GLOBAL_CONFIG=. playwright-cli <command>.',
     );
   }
   if (
@@ -229,7 +241,7 @@ function validateCli(cwd, assignments, args, agentType) {
 
   if (args.some((value) => BLOCKED_OPTIONS.test(value))) {
     return deny(
-      'Profiles, custom config/output paths, raw evaluation, uploads, and implicit submission are not allowed. Use run-owned default output and explicit allowlisted browser actions.',
+      'Profiles, custom config/output paths, uploads, and implicit submission are not allowed. Use run-owned default output and explicit allowlisted browser actions.',
     );
   }
 
@@ -239,6 +251,13 @@ function validateCli(cwd, assignments, args, agentType) {
   } else if (SIMPLE_COMMANDS.has(subcommand) && args.length !== 0) {
     return deny(
       `${subcommand} does not accept arguments in this workflow. Use the command without extra arguments.`,
+    );
+  } else if (
+    subcommand === 'console' &&
+    (args.length > 1 || (args.length === 1 && !CONSOLE_LEVELS.has(args[0])))
+  ) {
+    return deny(
+      'console accepts no argument or one minimum level: error, warning, info, or debug.',
     );
   } else if (TARGET_COMMANDS.has(subcommand) && args.length === 0) {
     return deny(
@@ -254,14 +273,34 @@ function validateCli(cwd, assignments, args, agentType) {
     return deny(
       'find requires a text or regular-expression query. Use a quoted query from the current scenario.',
     );
-  } else if (subcommand === 'snapshot') {
+  } else if (subcommand === 'pause-at') {
+    const approvedSpec = normalizePath(
+      path.relative(loaded.policy.repositoryRoot, loaded.policy.approvedSpec),
+    );
+    const location =
+      args.length === 1 ? args[0].match(/^(.+):([1-9]\d*)$/u) : null;
     if (
+      !healer ||
+      !DEBUG_SESSION.test(session) ||
+      location == null ||
+      location[1] !== approvedSpec
+    ) {
+      return deny(
+        `pause-at requires the approved spec and a positive line, for example ${approvedSpec}:42. Use the repository-relative approved spec, not a bare line or another file.`,
+      );
+    }
+  } else if (subcommand === 'snapshot') {
+    const refs = args.filter((value) => SNAPSHOT_REF.test(value));
+    const depths = args.filter((value) => SNAPSHOT_DEPTH.test(value));
+    if (
+      refs.length > 1 ||
+      depths.length > 1 ||
       args.some(
-        (value) => value.startsWith('-') && !/^--depth=\d+$/u.test(value),
+        (value) => !SNAPSHOT_REF.test(value) && !SNAPSHOT_DEPTH.test(value),
       )
     ) {
       return deny(
-        'snapshot accepts only a ref and optional --depth=<number>. Use run-owned automatic snapshot output.',
+        'snapshot accepts no target or one current e<number> ref, plus optional --depth=<number>. Use find for text and generate-locator for locator expressions.',
       );
     }
   } else if (subcommand === 'state-load') {
@@ -283,7 +322,7 @@ function validateCli(cwd, assignments, args, agentType) {
       )
     ) {
       return deny(
-        "state-load requires one exact Main-approved state path inside the target repository. Ask Main to add the existing run-relative path to allowed_state_paths, or use the target repository's normal unauthenticated setup.",
+        "state-load requires one exact Main-approved state path inside the repository. Ask Main to add the existing run-relative path to allowed_state_paths, or use the repository's normal unauthenticated setup.",
       );
     }
   }
@@ -297,7 +336,7 @@ function validateCli(cwd, assignments, args, agentType) {
 function validatePlaywright(cwd, assignments, args, toolInput) {
   if (args[0] !== 'test') {
     return deny(
-      'Only the scoped Playwright test runner is allowed here. Use npm exec --no -- playwright test <approved-spec> with the required attempt flags.',
+      'Only the scoped Playwright test runner is allowed here. Use npx --no playwright test <approved-spec> with the required attempt flags.',
     );
   }
   if (!assignments.includes('PLAYWRIGHT_HTML_OPEN=never')) {
@@ -315,7 +354,7 @@ function validatePlaywright(cwd, assignments, args, toolInput) {
   }
   if (!debugging && background) {
     return deny(
-      'The final confirmation runner must stay in the foreground so its pass or failure is observed before reporting. Retry without run_in_background.',
+      'The verification or confirmation runner must stay in the foreground so its pass or failure is observed before reporting. Retry without run_in_background.',
     );
   }
 
@@ -334,6 +373,11 @@ function validatePlaywright(cwd, assignments, args, toolInput) {
 
   const loaded = requirePolicy(cwd, outputRunId);
   if (loaded.result != null) return loaded.result;
+  if (!samePath(path.resolve(cwd), loaded.policy.repositoryRoot)) {
+    return deny(
+      'Playwright test runners must start from the exact repository root so its approved configuration and package context apply.',
+    );
+  }
   const expectedOutput = path.join(
     loaded.policy.runDirectory,
     outputMatch[1],
@@ -381,25 +425,16 @@ function validatePlaywright(cwd, assignments, args, toolInput) {
   const spec = args[1];
   if (spec == null || spec.startsWith('-')) {
     return deny(
-      'The runner requires the exact human-approved spec argument. Use that spec path before the attempt flags.',
+      "The runner requires the exact approved spec filter. Use Main's anchored filter before the attempt flags.",
     );
   }
-  const resolvedSpec = resolveContainedPath(
-    cwd,
-    spec,
-    loaded.policy.repositoryRoot,
-    loaded.policy.canonicalRepositoryRoot,
-  );
-  if (
-    resolvedSpec == null ||
-    !samePath(resolvedSpec.absolute, loaded.policy.approvedSpec)
-  ) {
+  if (spec !== loaded.policy.approvedSpecFilter) {
     return deny(
-      'The runner spec does not match the human-approved path. Use only approved_spec from the current command-policy.json.',
+      'The runner spec does not match the exact approved spec filter. Use the anchored, escaped absolute filter derived from approved_spec in the current command-policy.json.',
     );
   }
   try {
-    if (!statSync(resolvedSpec.absolute).isFile()) {
+    if (!statSync(loaded.policy.approvedSpec).isFile()) {
       return deny(
         'The approved runner target must be one existing spec file. Return to Main if the reviewed spec path is missing or names a directory.',
       );
@@ -415,24 +450,25 @@ function validatePlaywright(cwd, assignments, args, toolInput) {
     );
   }
 
-  const optionalRunnerOptions = [
-    '--debug=cli',
-    ...loaded.policy.allowedRunnerOptions,
-  ];
+  const optionalRunnerOptions = ['--debug=cli'];
   const allowedRunnerArguments = new Set([
     '--retries=0',
     '--repeat-each=1',
     output,
     ...optionalRunnerOptions,
+    ...loaded.policy.allowedRunnerOptions,
   ]);
   if (
     args.slice(2).some((value) => !allowedRunnerArguments.has(value)) ||
     optionalRunnerOptions.some(
       (option) => args.filter((value) => value === option).length > 1,
+    ) ||
+    loaded.policy.allowedRunnerOptions.some(
+      (option) => args.filter((value) => value === option).length !== 1,
     )
   ) {
     return deny(
-      'The runner contains an unapproved option. Use only the required attempt flags, optional --debug=cli, and exact project/config options recorded by Main.',
+      'The runner must include every required project/config option recorded by Main exactly once, plus only the attempt flags and optional --debug=cli.',
     );
   }
 
@@ -555,10 +591,10 @@ function validateCleanup(cwd, args) {
     args.length === 3 && ['-rf', '-fr'].includes(args[0]) && args[1] === '--'
       ? args.slice(2)
       : [];
-  const runId = runIdFromOwnedPath(values[0] ?? '');
+  const runId = runIdFromOwnedPath(values[0] ?? '') ?? runIdFromOwnedPath(cwd);
   if (runId == null) {
     return deny(
-      'Cleanup requires the exact run directory. Use rm -rf -- .playwright-cli/testgen/<run_id> after closing or detaching its session.',
+      'Cleanup must name a generated child of the exact run directory for the current Testgen run. From the repository root use rm -rf -- .playwright-cli/testgen/<run_id>/.playwright-cli; from the exact run root use rm -rf -- .playwright-cli.',
     );
   }
   const loaded = requirePolicy(cwd, runId);
@@ -589,7 +625,7 @@ function validateCleanup(cwd, args) {
     ].includes(relative)
   ) {
     return deny(
-      'Cleanup may remove only the exact run directory or its generated .playwright-cli/attempt directories. Use the run-owned path named by command-policy.json, never its parent or another child.',
+      'Cleanup may remove only the generated .playwright-cli or attempt-1 through attempt-5 directories inside the current run. Never remove the run root, its parent, or another child.',
     );
   }
 
@@ -629,7 +665,7 @@ function validateArtifactValidator(cwd, args, agentType) {
   if (loaded.result != null) return loaded.result;
   if (!samePath(cwd, loaded.policy.repositoryRoot)) {
     return deny(
-      'Artifact validation must run from the target repository root. Use the documented validator command with --repo . after writing the run-owned artifact.',
+      'Artifact validation must run from the repository root. Use the documented validator command with --repo . after writing the run-owned artifact.',
     );
   }
   const expectedArtifact = path.join(

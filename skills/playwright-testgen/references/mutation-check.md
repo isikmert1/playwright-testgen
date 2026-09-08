@@ -32,8 +32,13 @@ its manifest, runner, or any adapter patch. Testgen applies the patch itself;
 the runner receives no product-mutation API.
 
 The runner is invoked in the disposable checkout with literal `--phase`,
-`--spec`, and `--criterion-id` arguments. It translates the exact approved
-spec's result into one JSON object on stdout:
+`--spec`, `--criterion-id`, and `--step-title` arguments. The step title comes
+from the validated Author handoff. The runner independently checks the exact
+approved spec's report and may attribute a failure only when the failed result
+contains that exact descriptive step with its own error. This out-of-band
+mapping survives line movement during healing without adding Testgen markers to
+the generated spec. The runner translates the result into one JSON object on
+stdout:
 
 ```json
 { "protocol_version": 1, "outcome": "pass", "criterion_id": null }
@@ -49,11 +54,34 @@ environment values, and secrets never enter this protocol.
 
 ## Approval
 
+Use this exact user-first question and choices, then append the technical
+identifiers:
+
+> **Run mutation check after the generated test passes?**
+>
+> Testgen will temporarily break the selected behavior in a disposable Git
+> worktree and rerun the test to confirm it catches the break. The active
+> checkout is not changed.
+
+- `Run mutation check (recommended)` — prove the test fails when the selected
+  behavior is broken.
+- `Skip mutation check` — continue without this proof and report
+  `mutation-not-verified`.
+
+Then show the exact adapter, mutation, criterion, and digest as technical
+details. Approval applies only to the current workflow run; never reuse it
+automatically.
+
 Compute the digest for a proposed entry with:
 
 ```sh
-node "$CLAUDE_PLUGIN_ROOT/scripts/mutation-check.cjs" digest --repo . --adapter <manifest> --mutation-id <mutation_id>
+node "$PLAYWRIGHT_TESTGEN_ROOT/scripts/mutation-check.cjs" digest --repo . --adapter <manifest> --mutation-id <mutation_id>
 ```
+
+Run every mutation-check command directly from the repository root. Pass the
+literal `--repo .` and a repository-relative adapter path such as
+`.testgen/mutation-adapter.json`; do not substitute absolute paths. The adapter
+contract rejects an absolute adapter path.
 
 Use 64 lowercase zeroes as the draft `definition_digest`, replace that
 placeholder with the command's returned digest, then commit the definition.
@@ -72,7 +100,7 @@ trace and a criterion retained in the validated handoff. With an approved
 adapter, run this after all three change-manifest boundaries are valid:
 
 ```sh
-node "$CLAUDE_PLUGIN_ROOT/scripts/mutation-check.cjs" verify --repo . --run-id <run_id> --adapter <manifest> --mutation-id <mutation_id> --criterion-id <criterion_id> --approval-digest <sha256>
+node "$PLAYWRIGHT_TESTGEN_ROOT/scripts/mutation-check.cjs" verify --repo . --run-id <run_id> --adapter <manifest> --mutation-id <mutation_id> --criterion-id <criterion_id> --approval-digest <sha256>
 ```
 
 The mutation ID, criterion ID, and digest must bind the same approved entry. If
@@ -98,8 +126,22 @@ unrelated pre-existing dirty content. It then:
 1. requires the approved spec to pass at baseline;
 2. applies the one approved patch;
 3. verifies that exactly `affected_paths` changed;
-4. runs the same spec against the mutant; and
-5. removes the worktree in `finally` and rechecks the active checkout.
+4. runs the same spec against the mutant and requires criterion-linked failure
+   evidence from the approved target runner;
+5. verifies that neither runner changed the disposable checkout beyond the
+   approved patch; and
+6. cancels the runner process tree on timeout or interruption, removes the
+   worktree in `finally`, then rechecks the active checkout and its `HEAD`.
+
+Before execution, the checker reserves Main-owned `mutation-recovery.json` with
+the exact temporary root and worktree paths. An existing record blocks another
+verification. Successful cleanup removes the reservation; failed cleanup keeps
+it for supervised recovery under `cleanup-contract.md` while preserving the
+primary result separately.
+
+The approved target runner must not detach children. It owns normal server and
+test-process shutdown; the outer checker owns the adapter timeout and
+cancellation boundary.
 
 The worktree isolates ordinary relative writes; it is not an operating-system
 security sandbox. The approved digest therefore binds the executable runner as

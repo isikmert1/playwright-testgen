@@ -5,12 +5,16 @@ const {
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
+  unlinkSync,
   writeFileSync,
 } = require('node:fs');
 const { tmpdir } = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const test = require('node:test');
+const { setTimeout: delay } = require('node:timers/promises');
+const { verifyMutation } = require('../scripts/mutation-isolation.cjs');
 
 const pluginRoot = path.resolve(__dirname, '..');
 const mutationCheckPath = path.join(
@@ -20,10 +24,11 @@ const mutationCheckPath = path.join(
 );
 const runId = 'tg-0123456789abcdef01234567';
 
-function run(repository, args) {
+function run(repository, args, options = {}) {
   return spawnSync(process.execPath, [mutationCheckPath, ...args], {
     cwd: repository,
     encoding: 'utf8',
+    env: options.env,
   });
 }
 
@@ -75,6 +80,7 @@ function createRepository() {
       allowed_origins: ['http://127.0.0.1:3000'],
       allowed_runner_options: [],
       allowed_state_paths: [],
+      allowed_write_paths: [],
       format_version: 1,
       run_id: runId,
     }),
@@ -100,6 +106,7 @@ function handoff() {
     criteria: [
       {
         id: 'criterion-1',
+        step_title: 'verify the saved profile is visible',
         assertion_location: 'tests/account.spec.ts:8',
         outcome: 'saved profile is visible',
       },
@@ -124,7 +131,7 @@ function trace() {
     attempts: [
       {
         number: 1,
-        kind: 'debug-run',
+        kind: 'verification-run',
         hypothesis: 'the expected status text changed',
         failure_signature: 'status-text-mismatch',
         evidence_summary: 'the verified locator resolved to one status element',
@@ -152,11 +159,11 @@ function trace() {
     ],
     final_classification: 'expectation-drift',
     disposition: 'fixed',
-    next_owner: 'human',
+    next_owner: 'main',
     escalation: null,
     cleanup: {
-      runner: 'stopped',
-      browser_session: 'closed',
+      runner: 'not-started',
+      browser_session: 'not-opened',
       scratch: 'retained-pending-acceptance',
     },
   };
@@ -210,7 +217,7 @@ function passingTrace() {
   value.attempts = [
     {
       number: 1,
-      kind: 'confirmation-run',
+      kind: 'verification-run',
       hypothesis: 'the approved spec passes unchanged',
       failure_signature: null,
       evidence_summary: 'the approved spec completed successfully',
@@ -229,7 +236,7 @@ function blockedTrace() {
   value.attempts = [
     {
       number: 1,
-      kind: 'debug-run',
+      kind: 'verification-run',
       hypothesis: 'authentication is required before the scenario can run',
       failure_signature: 'authentication-required',
       evidence_summary: 'the application redirected to its login route',
@@ -240,6 +247,7 @@ function blockedTrace() {
   ];
   value.final_classification = 'environment-or-auth';
   value.disposition = 'needs-user-input';
+  value.next_owner = 'human';
   value.escalation = 'approved authentication input is required';
   return value;
 }
@@ -289,22 +297,26 @@ function capturePassingRun(repository, runDirectory) {
   assert.equal(postHealer.status, 0, postHealer.stderr);
 }
 
-function verify(repository, adapterPath, definitionDigest) {
-  return run(repository, [
-    'verify',
-    '--repo',
-    '.',
-    '--run-id',
-    runId,
-    '--adapter',
-    path.relative(repository, adapterPath),
-    '--mutation-id',
-    'disable-save',
-    '--criterion-id',
-    'criterion-1',
-    '--approval-digest',
-    definitionDigest,
-  ]);
+function verify(repository, adapterPath, definitionDigest, options) {
+  return run(
+    repository,
+    [
+      'verify',
+      '--repo',
+      '.',
+      '--run-id',
+      runId,
+      '--adapter',
+      path.relative(repository, adapterPath),
+      '--mutation-id',
+      'disable-save',
+      '--criterion-id',
+      'criterion-1',
+      '--approval-digest',
+      definitionDigest,
+    ],
+    options,
+  );
 }
 
 test('records dirty paths without storing repository content', () => {
@@ -455,7 +467,8 @@ test('kills a criterion-linked mutation in disposable isolation', () => {
         'const value=(name)=>process.argv[process.argv.indexOf(name)+1];',
         "const spec=value('--spec');",
         "let result={protocol_version:1,outcome:'pass',criterion_id:null};",
-        "if(existsSync(path.join(process.cwd(),'notes.txt'))) result={protocol_version:1,outcome:'error',criterion_id:null,reason:'user-content-copied'};",
+        "if(process.argv.slice(2).length!==8||value('--step-title')!=='verify the saved profile is visible') result={protocol_version:1,outcome:'error',criterion_id:null,reason:'unexpected-arguments'};",
+        "else if(existsSync(path.join(process.cwd(),'notes.txt'))) result={protocol_version:1,outcome:'error',criterion_id:null,reason:'user-content-copied'};",
         "else if(!existsSync(path.join(process.cwd(),spec))) result={protocol_version:1,outcome:'error',criterion_id:null,reason:'spec-not-copied'};",
         "else if(readFileSync(path.join(process.cwd(),'src/app.js'),'utf8').includes('= 0')) result={protocol_version:1,outcome:'fail',criterion_id:value('--criterion-id')};",
         'process.stdout.write(JSON.stringify(result));',
@@ -498,6 +511,72 @@ test('kills a criterion-linked mutation in disposable isolation', () => {
   });
 });
 
+test('makes active target dependencies available to the isolated runner', () => {
+  withRepository(({ repository, runDirectory }) => {
+    writeFileSync(
+      path.join(repository, '.git', 'info', 'exclude'),
+      'node_modules/\n',
+    );
+    mkdirSync(path.join(repository, 'node_modules'));
+    writeFileSync(
+      path.join(repository, 'node_modules', 'testgen-sentinel'),
+      'available\n',
+    );
+    const adapterPath = writeAdapter(repository, {
+      runner: [
+        "const {existsSync,readFileSync}=require('node:fs');",
+        "const path=require('node:path');",
+        'const value=(name)=>process.argv[process.argv.indexOf(name)+1];',
+        "let result={protocol_version:1,outcome:'error',criterion_id:null,reason:'dependencies-unavailable'};",
+        'const dependencies=process.env.TESTGEN_TARGET_NODE_MODULES;',
+        "if(dependencies&&existsSync(path.join(dependencies,'testgen-sentinel'))) result=readFileSync(path.join(process.cwd(),'src/app.js'),'utf8').includes('= 0')?{protocol_version:1,outcome:'fail',criterion_id:value('--criterion-id')}:{protocol_version:1,outcome:'pass',criterion_id:null};",
+        'process.stdout.write(JSON.stringify(result));',
+        '',
+      ].join('\n'),
+    });
+    const definitionDigest = commitAdapter(repository, adapterPath);
+    capturePassingRun(repository, runDirectory);
+
+    const result = verify(repository, adapterPath, definitionDigest);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).status, 'killed');
+  });
+});
+
+test('rejects a dangling overlay destination in the disposable checkout', () => {
+  withRepository(({ repository, runDirectory }) => {
+    git(repository, ['config', 'core.symlinks', 'true']);
+    mkdirSync(path.join(repository, 'tests'));
+    symlinkSync(
+      `../../${path.basename(repository)}-escaped.txt`,
+      path.join(repository, 'tests', 'account.spec.ts'),
+      'file',
+    );
+    git(repository, ['add', 'tests/account.spec.ts']);
+    git(repository, ['commit', '--quiet', '-m', 'add dangling spec link']);
+    const adapterPath = writeAdapter(repository);
+    const definitionDigest = commitAdapter(repository, adapterPath);
+    assert.equal(capture(repository, 'pre-author').status, 0);
+    unlinkSync(path.join(repository, 'tests', 'account.spec.ts'));
+    writeApprovedCandidate(repository, runDirectory);
+    assert.equal(capture(repository, 'checkpoint').status, 0);
+    writeFileSync(
+      path.join(runDirectory, 'healer-trace.json'),
+      JSON.stringify(passingTrace()),
+    );
+    assert.equal(capture(repository, 'post-healer').status, 0);
+
+    const result = verify(repository, adapterPath, definitionDigest);
+
+    assert.equal(result.status, 1);
+    const output = JSON.parse(result.stdout);
+    assert.equal(output.status, 'verification-error');
+    assert.equal(output.error, 'overlay-destination-unsafe');
+    assert.equal(output.cleanup, 'removed');
+  });
+});
+
 test('rejects a mutant failure attributed to another criterion', () => {
   withRepository(({ repository, runDirectory }) => {
     const adapterPath = writeAdapter(repository, {
@@ -536,6 +615,60 @@ test('rejects a mutant failure attributed to another criterion', () => {
       readFileSync(path.join(repository, 'src', 'app.js'), 'utf8'),
       'module.exports = 1;\n',
     );
+  });
+});
+
+test('rejects a mutant run that changes approved inputs', () => {
+  withRepository(({ repository, runDirectory }) => {
+    const adapterPath = writeAdapter(repository, {
+      runner: [
+        "const {readFileSync,writeFileSync}=require('node:fs');",
+        "const path=require('node:path');",
+        'const value=(name)=>process.argv[process.argv.indexOf(name)+1];',
+        "const phase=value('--phase');",
+        "const spec=value('--spec');",
+        "let result={protocol_version:1,outcome:'pass',criterion_id:null};",
+        "if(phase==='mutant') {",
+        "  writeFileSync(path.join(process.cwd(),spec),'changed by runner\\n');",
+        "  if(readFileSync(path.join(process.cwd(),'src/app.js'),'utf8').includes('= 0')) result={protocol_version:1,outcome:'fail',criterion_id:value('--criterion-id')};",
+        '}',
+        'process.stdout.write(JSON.stringify(result));',
+        '',
+      ].join('\n'),
+    });
+    const definitionDigest = commitAdapter(repository, adapterPath);
+    capturePassingRun(repository, runDirectory);
+
+    const result = verify(repository, adapterPath, definitionDigest);
+
+    assert.equal(result.status, 1);
+    const output = JSON.parse(result.stdout);
+    assert.equal(output.status, 'verification-error');
+    assert.equal(output.error, 'mutant-mutated-isolation');
+    assert.equal(output.cleanup, 'removed');
+  });
+});
+
+test('rejects a runner that changes the disposable checkout HEAD', () => {
+  withRepository(({ repository, runDirectory }) => {
+    const adapterPath = writeAdapter(repository, {
+      runner: [
+        "const {spawnSync}=require('node:child_process');",
+        "const phase=process.argv[process.argv.indexOf('--phase')+1];",
+        "const criterion=process.argv[process.argv.indexOf('--criterion-id')+1];",
+        "if(phase==='baseline')spawnSync('git',['commit','--allow-empty','--quiet','-m','runner commit'],{cwd:process.cwd()});",
+        "const outcome=phase==='baseline'?{protocol_version:1,outcome:'pass',criterion_id:null}:{protocol_version:1,outcome:'fail',criterion_id:criterion};",
+        'process.stdout.write(JSON.stringify(outcome));',
+        '',
+      ].join('\n'),
+    });
+    const definitionDigest = commitAdapter(repository, adapterPath);
+    capturePassingRun(repository, runDirectory);
+
+    const result = verify(repository, adapterPath, definitionDigest);
+
+    assert.equal(result.status, 1);
+    assert.equal(JSON.parse(result.stdout).error, 'baseline-mutated-isolation');
   });
 });
 
@@ -815,6 +948,33 @@ test('rejects changes to content that was dirty before Author', () => {
   });
 });
 
+test('allows an Author change to an explicit pre-existing write path', () => {
+  withRepository(({ repository, runDirectory }) => {
+    const policyPath = path.join(runDirectory, 'command-policy.json');
+    const policy = JSON.parse(readFileSync(policyPath, 'utf8'));
+    policy.allowed_write_paths = ['src/app.js'];
+    writeFileSync(policyPath, JSON.stringify(policy));
+    assert.equal(capture(repository, 'pre-author').status, 0);
+
+    mkdirSync(path.join(repository, 'tests'));
+    writeFileSync(path.join(repository, 'tests', 'account.spec.ts'), 'spec\n');
+    writeFileSync(
+      path.join(repository, 'src', 'app.js'),
+      'module.exports = 2;\n',
+    );
+    const value = handoff();
+    value.touched_paths.push('src/app.js');
+    writeFileSync(
+      path.join(runDirectory, 'handoff.json'),
+      JSON.stringify(value),
+    );
+
+    const result = capture(repository, 'checkpoint');
+
+    assert.equal(result.status, 0, result.stderr);
+  });
+});
+
 test('fingerprints pre-existing dirty paths with Git metacharacters literally', () => {
   withRepository(({ repository, runDirectory }) => {
     const productPath = path.join(repository, 'src', 'item[1].js');
@@ -1077,6 +1237,184 @@ test('times out a runner and removes its disposable checkout', () => {
   });
 });
 
+test('stops runner descendants before removing a timed-out checkout', () => {
+  withRepository(({ repository, runDirectory }) => {
+    const pidFile = path.join(runDirectory, 'descendant.pid');
+    const adapterPath = writeAdapter(repository, {
+      runner: [
+        "const {spawn}=require('node:child_process');",
+        "const {writeFileSync}=require('node:fs');",
+        "const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});",
+        'child.unref();',
+        'writeFileSync(process.env.TESTGEN_DESCENDANT_PID,String(child.pid));',
+        'setTimeout(() => {}, 5000);',
+        '',
+      ].join('\n'),
+      mutation: { timeout_ms: 1000 },
+    });
+    const definitionDigest = commitAdapter(repository, adapterPath);
+    capturePassingRun(repository, runDirectory);
+    let pid = null;
+
+    try {
+      const result = verify(repository, adapterPath, definitionDigest, {
+        env: { ...process.env, TESTGEN_DESCENDANT_PID: pidFile },
+      });
+
+      assert.equal(result.status, 1);
+      const output = JSON.parse(result.stdout);
+      assert.equal(output.error, 'runner-timeout');
+      pid = Number(readFileSync(pidFile, 'utf8'));
+      assert.throws(() => process.kill(pid, 0));
+      assert.equal(output.cleanup, 'removed');
+    } finally {
+      if (pid != null) {
+        try {
+          process.kill(pid);
+        } catch {
+          // The verifier should already have stopped this owned descendant.
+        }
+      }
+    }
+  });
+});
+
+test('cancels an active runner and removes its isolation', async () => {
+  const { repository, runDirectory } = createRepository();
+  const pidFile = path.join(repository, 'runner.pid');
+  let pid = null;
+  try {
+    const adapterPath = writeAdapter(repository, {
+      runner: [
+        "const {writeFileSync}=require('node:fs');",
+        `writeFileSync(${JSON.stringify(pidFile)},String(process.pid));`,
+        'setInterval(()=>{},1000);',
+        '',
+      ].join('\n'),
+      mutation: { timeout_ms: 2000 },
+    });
+    const definitionDigest = commitAdapter(repository, adapterPath);
+    capturePassingRun(repository, runDirectory);
+    const controller = new AbortController();
+    const verification = verifyMutation(
+      repository,
+      runId,
+      path.relative(repository, adapterPath),
+      'disable-save',
+      'criterion-1',
+      definitionDigest,
+      controller.signal,
+    );
+    for (let attempt = 0; attempt < 40 && !existsSync(pidFile); attempt += 1)
+      await delay(50);
+    assert.equal(existsSync(pidFile), true);
+    pid = Number(readFileSync(pidFile, 'utf8'));
+
+    controller.abort();
+    const output = await verification;
+
+    assert.equal(output.status, 'verification-error');
+    assert.equal(output.error, 'runner-cancelled');
+    assert.equal(output.cleanup, 'removed');
+    assert.throws(() => process.kill(pid, 0));
+    assert.equal(
+      existsSync(path.join(runDirectory, 'mutation-recovery.json')),
+      false,
+    );
+  } finally {
+    if (pid != null) {
+      try {
+        process.kill(pid);
+      } catch {
+        // Cancellation should already have stopped the runner.
+      }
+    }
+    rmSync(repository, { force: true, recursive: true });
+  }
+});
+
+test('preserves a primary failure when cleanup also fails', () => {
+  withRepository(({ repository, runDirectory }) => {
+    const adapterPath = writeAdapter(repository, {
+      runner: [
+        "require('node:child_process').spawnSync('git',['worktree','lock','.']);",
+        'setTimeout(() => {}, 5000);',
+        '',
+      ].join('\n'),
+      mutation: { timeout_ms: 1000 },
+    });
+    const definitionDigest = commitAdapter(repository, adapterPath);
+    capturePassingRun(repository, runDirectory);
+
+    try {
+      const result = verify(repository, adapterPath, definitionDigest);
+
+      assert.equal(result.status, 1);
+      const output = JSON.parse(result.stdout);
+      assert.equal(output.status, 'verification-error');
+      assert.equal(output.error, 'runner-timeout');
+      assert.equal(output.cleanup_error, 'isolation-cleanup-failed');
+      assert.equal(output.cleanup, 'failed');
+      assert.equal(
+        output.recovery_record,
+        `.playwright-cli/testgen/${runId}/mutation-recovery.json`,
+      );
+      const recovery = JSON.parse(
+        readFileSync(path.join(repository, output.recovery_record), 'utf8'),
+      );
+      assert.equal(recovery.schema_version, 'mutation-recovery.v1');
+      assert.equal(recovery.run_id, runId);
+      assert.equal(path.dirname(recovery.worktree), recovery.temporary_root);
+      assert.equal(existsSync(recovery.worktree), true);
+    } finally {
+      const worktrees = git(repository, ['worktree', 'list', '--porcelain'])
+        .split(/\r?\n/u)
+        .filter((line) => line.startsWith('worktree '))
+        .map((line) => path.resolve(line.slice('worktree '.length)));
+      const disposable = worktrees.find(
+        (candidate) => candidate !== path.resolve(repository),
+      );
+      if (disposable != null) {
+        git(repository, ['worktree', 'unlock', disposable]);
+        git(repository, ['worktree', 'remove', '--force', '--', disposable]);
+        rmSync(path.dirname(disposable), { force: true, recursive: true });
+      }
+    }
+  });
+});
+
+test('refuses verification while an isolation recovery is pending', () => {
+  withRepository(({ repository, runDirectory }) => {
+    const adapterPath = writeAdapter(repository);
+    const definitionDigest = commitAdapter(repository, adapterPath);
+    capturePassingRun(repository, runDirectory);
+    const recoveryPath = path.join(runDirectory, 'mutation-recovery.json');
+    const recovery = {
+      schema_version: 'mutation-recovery.v1',
+      run_id: runId,
+      temporary_root: 'C:/previous/testgen-mutant',
+      worktree: 'C:/previous/testgen-mutant/checkout',
+    };
+    writeFileSync(recoveryPath, `${JSON.stringify(recovery)}\n`);
+
+    const result = verify(repository, adapterPath, definitionDigest);
+
+    assert.equal(result.status, 1);
+    assert.deepEqual(JSON.parse(result.stdout), {
+      ok: false,
+      operation: 'verify',
+      status: 'verification-error',
+      error: 'isolation-recovery-pending',
+    });
+    assert.deepEqual(JSON.parse(readFileSync(recoveryPath, 'utf8')), recovery);
+    assert.equal(
+      git(repository, ['worktree', 'list', '--porcelain']).match(/worktree /gu)
+        ?.length,
+      1,
+    );
+  });
+});
+
 test('reports a locked disposable checkout as a cleanup failure', () => {
   withRepository(({ repository, runDirectory }) => {
     const adapterPath = writeAdapter(repository, {
@@ -1165,6 +1503,37 @@ test('rechecks the active checkout even when isolation cleanup fails', () => {
         rmSync(path.dirname(disposable), { force: true, recursive: true });
       }
     }
+  });
+});
+
+test('rejects a commit made in the active checkout during verification', () => {
+  withRepository(({ repository, runDirectory }) => {
+    const adapterPath = writeAdapter(repository, {
+      runner: [
+        "const {spawnSync}=require('node:child_process');",
+        "const {dirname}=require('node:path');",
+        "const phase=process.argv[process.argv.indexOf('--phase')+1];",
+        "if(phase==='mutant') {",
+        "  const common=spawnSync('git',['rev-parse','--path-format=absolute','--git-common-dir'],{encoding:'utf8'}).stdout.trim();",
+        '  const active=dirname(common);',
+        "  spawnSync('git',['-C',active,'commit','--allow-empty','--quiet','-m','concurrent commit']);",
+        '}',
+        "const source=require('node:fs').readFileSync('src/app.js','utf8');",
+        "const result=source.includes('= 0')?{protocol_version:1,outcome:'fail',criterion_id:'criterion-1'}:{protocol_version:1,outcome:'pass',criterion_id:null};",
+        'process.stdout.write(JSON.stringify(result));',
+        '',
+      ].join('\n'),
+    });
+    const definitionDigest = commitAdapter(repository, adapterPath);
+    capturePassingRun(repository, runDirectory);
+
+    const result = verify(repository, adapterPath, definitionDigest);
+
+    assert.equal(result.status, 1);
+    const output = JSON.parse(result.stdout);
+    assert.equal(output.status, 'verification-error');
+    assert.equal(output.error, 'active-head-changed');
+    assert.equal(output.cleanup, 'removed');
   });
 });
 

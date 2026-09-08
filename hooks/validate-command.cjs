@@ -1,8 +1,9 @@
-const { existsSync } = require('node:fs');
+const { existsSync, readFileSync, readdirSync, statSync } = require('node:fs');
 const path = require('node:path');
 const parse = require('shell-quote/parse');
 const { decision, deny } = require('./hook-result.cjs');
 const {
+  RUN_ID,
   loadPolicy,
   runIdFromOwnedPath,
   samePath,
@@ -18,8 +19,105 @@ const {
 } = require('./validate-workflow-command.cjs');
 
 const ENVIRONMENT_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/u;
+const PACKAGE_SCRIPT_RUNNERS = new Set(['bun', 'npm', 'pnpm', 'yarn']);
 const RUNTIME_PREFLIGHT =
-  "for (const id of ['playwright/package.json','@playwright/test/package.json','@playwright/cli/package.json']) require.resolve(id)";
+  "for (const id of ['playwright/package.json','@playwright/test/package.json']) require.resolve(id)";
+
+function repositoryPolicies(cwd) {
+  let entries;
+  try {
+    entries = readdirSync(path.join(cwd, '.playwright-cli', 'testgen'), {
+      withFileTypes: true,
+    });
+  } catch {
+    return [];
+  }
+
+  return entries
+    .filter((entry) => entry.isDirectory() && RUN_ID.test(entry.name))
+    .map((entry) => loadPolicy(cwd, entry.name));
+}
+
+function hasPolicyAtRepositoryRoot(cwd) {
+  return repositoryPolicies(cwd).some(
+    (policy) =>
+      policy != null && samePath(path.resolve(cwd), policy.repositoryRoot),
+  );
+}
+
+function validateAuthorCollection(cwd, assignments, args, toolInput) {
+  if (assignments.length !== 0 || toolInput.run_in_background === true) {
+    return deny(
+      'Author collection must run in the foreground from the repository root without environment assignments. Only Healer may execute the spec after the human checkpoint.',
+    );
+  }
+
+  const policies = repositoryPolicies(cwd);
+  if (policies.length !== 1) {
+    return deny(
+      'Author collection requires exactly one active Testgen run policy in this repository. Finish or clean up other runs before using the collection fallback.',
+    );
+  }
+
+  const candidate = policies[0];
+  const expected =
+    candidate == null
+      ? []
+      : [
+          'test',
+          candidate.approvedSpecFilter,
+          '--list',
+          ...candidate.allowedRunnerOptions,
+        ];
+  let specIsFile = false;
+  if (candidate != null) {
+    try {
+      specIsFile = statSync(candidate.approvedSpec).isFile();
+    } catch {
+      specIsFile = false;
+    }
+  }
+  const policy =
+    candidate != null &&
+    samePath(path.resolve(cwd), candidate.repositoryRoot) &&
+    args.length === expected.length &&
+    args.every((value, index) => value === expected[index]) &&
+    specIsFile
+      ? candidate
+      : null;
+
+  if (policy == null) {
+    return deny(
+      "Author may only collect the exact policy-approved spec with --list and every Main-approved project or config option. Use Main's approved spec filter unchanged.",
+    );
+  }
+
+  return decision(
+    'allow',
+    'Collects the exact policy-approved spec without executing its test callback.',
+  );
+}
+
+function hasDeclaredPackageScript(cwd, scriptName) {
+  if (typeof scriptName !== 'string' || scriptName.length === 0) return false;
+
+  try {
+    const manifest = JSON.parse(
+      readFileSync(path.join(cwd, 'package.json'), 'utf8'),
+    );
+    const scripts = manifest?.scripts;
+    return (
+      scripts != null &&
+      typeof scripts === 'object' &&
+      !Array.isArray(scripts) &&
+      Object.hasOwn(scripts, scriptName) &&
+      typeof scripts[scriptName] === 'string' &&
+      scripts[scriptName].trim().length > 0
+    );
+  } catch {
+    return false;
+  }
+}
 
 function hasUnsupportedShellSyntax(command) {
   if (/\r|\n/u.test(command)) return true;
@@ -69,11 +167,13 @@ function hasUnsupportedShellSyntax(command) {
 
 function parseCommand(command, cwd) {
   const validator = pluginValidatorPath();
+  const pluginRoot =
+    validator == null ? null : path.dirname(path.dirname(validator));
   let tokens;
   try {
     tokens = parse(command, (name) =>
-      name === 'CLAUDE_PLUGIN_ROOT' && validator != null
-        ? path.dirname(path.dirname(validator))
+      name === 'PLAYWRIGHT_TESTGEN_ROOT' && pluginRoot != null
+        ? pluginRoot
         : name === ''
           ? '$'
           : { expansion: name },
@@ -118,7 +218,7 @@ function parseCommand(command, cwd) {
     }
     return {
       result: deny(
-        'The working-directory wrapper must enter the exact policy-owned run directory. Use cd .playwright-cli/testgen/<run_id> && <one allowlisted command>.',
+        'Run repository commands directly from the current repository root. A cd wrapper is allowed only when it enters .playwright-cli/testgen/<run_id> for one run-owned CLI or trace command.',
       ),
     };
   }
@@ -164,12 +264,29 @@ function validateCommand(payload) {
     payload.tool_input.command.length === 0
   ) {
     return deny(
-      'Hook input is incomplete. Retry the operation through a normal governed tool call from the target repository.',
+      'Hook input is incomplete. Retry the operation through a normal governed tool call from the repository.',
     );
   }
   if (payload.tool_input.dangerouslyDisableSandbox === true) {
     return deny(
       'Governed Testgen commands must remain sandboxed. Retry without dangerouslyDisableSandbox or return the sandbox prerequisite to Main.',
+    );
+  }
+  if (
+    /\$(?:\{)?CLAUDE_PLUGIN_ROOT(?:\}|\/)/u.test(payload.tool_input.command)
+  ) {
+    return deny(
+      'CLAUDE_PLUGIN_ROOT is unavailable to governed Bash commands. Use $PLAYWRIGHT_TESTGEN_ROOT from the SessionStart hook; if it is missing, restart Claude Code after installing or reloading the plugin.',
+    );
+  }
+  if (
+    /PLAYWRIGHT_TESTGEN_ROOT/u.test(payload.tool_input.command) &&
+    !/^node\s+"\$(?:PLAYWRIGHT_TESTGEN_ROOT|\{PLAYWRIGHT_TESTGEN_ROOT\})\/scripts\/validate-testgen-artifact\.cjs"\s+/u.test(
+      payload.tool_input.command,
+    )
+  ) {
+    return deny(
+      'PLAYWRIGHT_TESTGEN_ROOT is already exported for the documented artifact validator. Use it directly there; do not print, resolve, or probe it.',
     );
   }
 
@@ -182,13 +299,21 @@ function validateCommand(payload) {
   if (
     executable === 'node' &&
     split.assignments.length === 0 &&
+    args.length === 1 &&
+    args[0] === '--version'
+  ) {
+    return decision('allow', 'Read-only Node.js runtime version check.');
+  }
+  if (
+    executable === 'node' &&
+    split.assignments.length === 0 &&
     args.length === 2 &&
     args[0] === '-e' &&
     args[1] === RUNTIME_PREFLIGHT
   ) {
     return decision(
       'allow',
-      "Read-only resolution check for the target repository's Playwright packages.",
+      "Read-only resolution check for the repository's Playwright packages.",
     );
   }
 
@@ -203,58 +328,69 @@ function validateCommand(payload) {
     return validateCleanup(parsed.cwd, args);
   }
 
-  if (executable !== 'npm') {
-    return deny(
-      'Only the approved local npm and Node command forms are allowed. Use npm exec --no -- playwright-cli for browser work.',
-    );
+  if (executable === 'playwright-cli') {
+    return validateCli(parsed.cwd, split.assignments, args, payload.agent_type);
   }
 
-  if (args[0] === 'run') {
-    return decision(
-      'ask',
-      "This hook cannot inspect repository-defined npm scripts. Approve only the target repository's existing scoped lint or formatter with touched-file arguments; otherwise deny and report the lint prerequisite.",
+  if (executable === 'npx' && args[0] === '--no' && args[1] === 'playwright') {
+    const packageArgs = args.slice(2);
+    if (!payload.agent_type.endsWith('playwright-test-healer')) {
+      return validateAuthorCollection(
+        parsed.cwd,
+        split.assignments,
+        packageArgs,
+        payload.tool_input,
+      );
+    }
+    if (packageArgs[0] === 'trace') {
+      if (split.assignments.length !== 0) {
+        return deny(
+          'Trace inspection does not accept environment assignments. Run npx --no playwright trace from the validated run directory.',
+        );
+      }
+      return validateTrace(parsed.cwd, packageArgs.slice(1));
+    }
+    return validatePlaywright(
+      parsed.cwd,
+      split.assignments,
+      packageArgs,
+      payload.tool_input,
     );
   }
 
   if (
-    args[0] !== 'exec' ||
-    args[1] !== '--no' ||
-    args[2] !== '--' ||
-    !['playwright', 'playwright-cli'].includes(args[3])
+    PACKAGE_SCRIPT_RUNNERS.has(executable) &&
+    split.assignments.length === 0 &&
+    args[0] === 'run'
   ) {
-    return deny(
-      "This npm command is outside the workflow allowlist. Use npm exec --no -- playwright-cli for browser work or the target repository's existing scoped lint script with approval.",
+    if (!hasPolicyAtRepositoryRoot(parsed.cwd)) {
+      return deny(
+        'Validation scripts must run from the exact repository root that owns the current Testgen policy.',
+      );
+    }
+    const scriptName = args[1];
+    if (
+      typeof scriptName !== 'string' ||
+      scriptName.startsWith('-') ||
+      (executable === 'npm' && args.length > 2 && args[2] !== '--')
+    ) {
+      return deny(
+        'Package-manager options and script shortcuts are not allowed. Use the explicit <manager> run <script> form; for npm script arguments, add -- after the script name.',
+      );
+    }
+    if (!hasDeclaredPackageScript(parsed.cwd, scriptName)) {
+      return deny(
+        'Validation must use an existing declared package.json script from the repository. Use its package manager with the explicit <manager> run <script> form.',
+      );
+    }
+    return decision(
+      'ask',
+      "Approve this repository's validation script? A package script may execute arbitrary commands, including lifecycle hooks. Choose Yes only if the script and arguments match the repository's trusted lint, typecheck, or formatter convention; prefer touched-file scope when that command supports it.",
     );
   }
 
-  const packageName = args[3];
-  const packageArgs = args.slice(4);
-  if (packageName === 'playwright-cli') {
-    return validateCli(
-      parsed.cwd,
-      split.assignments,
-      packageArgs,
-      payload.agent_type,
-    );
-  }
-  if (!payload.agent_type.endsWith('playwright-test-healer')) {
-    return deny(
-      'Author never executes or debugs the spec. Return the candidate to Main for the human checkpoint; only Healer may run the approved spec after run approval.',
-    );
-  }
-  if (packageArgs[0] === 'trace') {
-    if (split.assignments.length !== 0) {
-      return deny(
-        'Trace inspection does not accept environment assignments. Run npm exec --no -- playwright trace from the validated run directory.',
-      );
-    }
-    return validateTrace(parsed.cwd, packageArgs.slice(1));
-  }
-  return validatePlaywright(
-    parsed.cwd,
-    split.assignments,
-    packageArgs,
-    payload.tool_input,
+  return deny(
+    'This command is outside the workflow allowlist. Use playwright-cli directly for browser work, npx --no playwright for the repository runner or trace inspection, or an existing scoped package script through npm, Yarn, pnpm, or Bun with approval.',
   );
 }
 

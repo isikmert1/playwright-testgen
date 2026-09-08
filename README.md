@@ -4,20 +4,61 @@
 
 Playwright Testgen is a Claude Code plugin that uses the
 [official Playwright CLI](https://github.com/microsoft/playwright-cli) to
-ground, generate, and repair focused Playwright end-to-end tests. The
-one-scenario Author → human checkpoint → Healer pipeline is implemented;
-the mutation-based vacuity gate is wired, while real target-application
-validation is still pending.
+turn one written scenario into a grounded, reviewable Playwright end-to-end
+test. It explores the running application before choosing locators, executes
+only after human approval, and repairs test problems without hiding product
+failures.
+
+## Why Testgen
+
+Generated tests can look convincing while using guessed selectors, checking
+the wrong outcome, or passing without exercising the behavior they claim to
+cover. Testgen separates authorship from execution and keeps browser evidence,
+written intent, and meaningful assertions connected throughout the run.
+
+## How it works
+
+1. Main checks the project's existing Playwright runtime and running app.
+2. Author grounds one scenario in source and the live UI, writes one candidate
+   spec, runs the project's lint or collection validation, and stops without
+   executing it.
+3. At a human checkpoint, the reviewer chooses whether to run, revise, or keep
+   the spec unverified.
+4. Healer runs only the approved spec, makes bounded evidence-backed test
+   repairs, preserves the approved criteria and assertions, and refuses to
+   rewrite them around product defects.
+5. When an approved adapter exists, the vacuity gate applies its approved
+   criterion-linked mutation in a disposable Git worktree and checks that the
+   test catches it. Missing coverage is reported as unverified, never silently
+   counted as success.
+
+Testgen follows the project's package manager, Playwright configuration,
+fixtures, test layout, and locator conventions. It does not replace or rewrite
+the project's Playwright configuration or CI. Its hooks constrain the delegated
+Author and Healer workflows; they are guardrails, not an operating-system
+sandbox.
+
+## Current status
+
+The implemented workflow has been exercised through clean marketplace
+installations against an owned target and a pinned real-world application.
+Those revision-specific observations are retained in the sanitized
+[installed-workflow record](docs/validation/installed-workflow.md). Additional
+negative-path validation remains in progress.
 
 ## Prerequisites
 
-- Node.js 24 or later and npm available to Claude Code.
-- A target repository with local `playwright`, `@playwright/test`, and
-  `@playwright/cli` packages.
-- The official `playwright-cli` skill available in the target repository.
+- Node.js 22.13 or later and npm available to Claude Code.
+- A project with local `playwright` and `@playwright/test` packages.
+- The current official `@playwright/cli` installed globally, plus its skill
+  installed from that project:
 
-This tooling repository does not install the target application's Playwright
-dependencies.
+  ```sh
+  npm install -g @playwright/cli@latest
+  playwright-cli install --skills
+  ```
+
+This tooling repository does not install the application's Playwright dependencies.
 
 ## Local validation
 

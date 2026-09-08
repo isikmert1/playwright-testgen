@@ -1,0 +1,57 @@
+:root {
+  color: #172033;
+  font-family: system-ui, sans-serif;
+  background: #f4f6fb;
+}
+
+body {
+  margin: 0;
+}
+
+main {
+  width: min(52rem, calc(100% - 2rem));
+  margin: 3rem auto;
+}
+
+section,
+dialog {
+  padding: 1.25rem;
+  margin-block: 1.5rem;
+  border: 1px solid #cbd2df;
+  border-radius: 0.5rem;
+  background: white;
+}
+
+form:not([method='dialog']) {
+  display: grid;
+  grid-template-columns: max-content minmax(10rem, 1fr);
+  gap: 0.75rem;
+  align-items: center;
+}
+
+button,
+input {
+  min-height: 2.25rem;
+  font: inherit;
+}
+
+button[type='submit'] {
+  grid-column: 2;
+  justify-self: start;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  padding: 0.75rem;
+  border-bottom: 1px solid #dce1ea;
+  text-align: left;
+}
+
+dialog::backdrop {
+  background: rgb(23 32 51 / 45%);
+}

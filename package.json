@@ -4,6 +4,9 @@
   "private": true,
   "description": "Claude Code plugin for grounded Playwright test generation and repair using the official Playwright CLI.",
   "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22.13.0"
+  },
   "scripts": {
     "format": "prettier --write .",
     "format:check": "prettier --check .",
