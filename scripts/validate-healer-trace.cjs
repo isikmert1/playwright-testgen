@@ -227,7 +227,9 @@ function validateTrace(artifact, repository, handoffCriteria, errors) {
     errors.push('trace-invalid-final-classification');
   if (!DISPOSITIONS.has(artifact.disposition))
     errors.push('trace-invalid-disposition');
-  if (!['human', 'author', 'product-owner'].includes(artifact.next_owner))
+  if (
+    !['main', 'human', 'author', 'product-owner'].includes(artifact.next_owner)
+  )
     errors.push('trace-invalid-next-owner');
   if (artifact.escalation !== null && !isText(artifact.escalation, 200))
     errors.push('trace-invalid-escalation');
@@ -265,6 +267,15 @@ function validateTrace(artifact, repository, handoffCriteria, errors) {
     )
       errors.push('trace-invalid-scratch-cleanup');
   }
+  if (
+    Array.isArray(artifact.attempts) &&
+    !artifact.attempts.some((attempt) => attempt?.kind === 'debug-run')
+  ) {
+    if (artifact.cleanup?.runner !== 'not-started')
+      errors.push('trace-foreground-runner-cleanup-invalid');
+    if (artifact.cleanup?.browser_session !== 'not-opened')
+      errors.push('trace-foreground-browser-cleanup-invalid');
+  }
   const finalAttempt = Array.isArray(artifact.attempts)
     ? artifact.attempts.at(-1)
     : null;
@@ -297,7 +308,7 @@ function validateTrace(artifact, repository, handoffCriteria, errors) {
     errors.push('fixed-requires-confirmation');
   if (
     artifact.disposition === 'fixed' &&
-    (artifact.next_owner !== 'human' || artifact.escalation !== null)
+    (artifact.next_owner !== 'main' || artifact.escalation !== null)
   )
     errors.push('trace-invalid-fixed-disposition');
   if (

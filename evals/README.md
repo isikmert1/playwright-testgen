@@ -18,6 +18,10 @@ listing it does not imply affiliation or endorsement. Additional external
 targets stay deferred until the first installed workflow and independently
 graded case provide evidence that broader coverage is useful.
 
+Descriptor expectations such as `locator_convention` are scoring metadata,
+not operational setup or `/setup` profile facts. They must not be disclosed to
+the agent being evaluated.
+
 `seeded-bugs/` records deliberate product failures and their expected
 classifications. Each record points to one canonical, reviewable patch instead
 of duplicating the broken source.

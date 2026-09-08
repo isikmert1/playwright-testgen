@@ -159,11 +159,11 @@ function trace() {
     ],
     final_classification: 'expectation-drift',
     disposition: 'fixed',
-    next_owner: 'human',
+    next_owner: 'main',
     escalation: null,
     cleanup: {
-      runner: 'stopped',
-      browser_session: 'closed',
+      runner: 'not-started',
+      browser_session: 'not-opened',
       scratch: 'retained-pending-acceptance',
     },
   };
@@ -247,6 +247,7 @@ function blockedTrace() {
   ];
   value.final_classification = 'environment-or-auth';
   value.disposition = 'needs-user-input';
+  value.next_owner = 'human';
   value.escalation = 'approved authentication input is required';
   return value;
 }

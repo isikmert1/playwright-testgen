@@ -47,6 +47,11 @@ servers, profiles, ports, or files.
 
 ## Browser and process cleanup
 
+The Healer trace's `cleanup.runner` field describes only the owned background
+debug runner. Use `not-started` when foreground verification or confirmation
+ran and exited without creating a background runner, with
+`browser_session: not-opened` for that foreground-only path.
+
 - A session opened by the workflow ends with
   `cd <validated-run-directory> && PWTEST_CLI_GLOBAL_CONFIG=. playwright-cli -s=<session> close`.
 - A session attached to an external or debug-owned browser ends with

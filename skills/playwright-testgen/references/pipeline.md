@@ -30,11 +30,21 @@ a broad rewrite. The main session coordinates, writes only transient run
 policy/artifacts, and reports; it does not explore, write product or test files,
 or debug.
 
+Main's repository discovery is limited to package metadata, the selected
+Playwright config, existing Playwright spec paths and naming (not their bodies),
+an actual `/setup` profile when present, and runtime readiness. Feature source,
+nearby test bodies, and rendered behavior belong to Author. A target descriptor
+may guide evaluation setup, but its expected outcomes and locator convention are
+evaluation metadata, not an operational profile, and must not be sent to Author.
+
 ## Ordered flow
 
 1. Main runs each read-only runtime preflight command from `SKILL.md` in its own
    Bash call from the repository root. Missing or outdated prerequisites
-   stop the flow before Author; generation never installs them.
+   stop the flow before Author; generation never installs them. Main also
+   confirms the application is already running at the approved origin and
+   records separate readiness facts for the Playwright CLI exploration browser
+   and the browser selected by the repository's existing runner configuration.
 2. Main receives one written scenario, preserves its acceptance criteria,
    assigns stable local criterion identifiers and a non-sensitive scenario
    reference, identifies the repository root and proposed spec path, and
@@ -45,7 +55,8 @@ or debug.
    Complete pre-Author setup in this order:
 
    1. derive the concrete scenario reference, criteria, spec path, origin, and
-      readiness facts;
+      readiness facts, including `/setup` profile presence, existing Playwright
+      spec presence, browser readiness, and the selected validation path;
    2. create the run ID, write the run policy, and obtain its exact approved
       spec filter;
    3. ask whether to run the matching mutation check;
@@ -62,6 +73,10 @@ or debug.
    creating the policy when conventions or the selected config are ambiguous.
    Playwright transforms `.spec.ts` files without a project `tsconfig` or direct
    `typescript` dependency; this does not replace a repository's own typecheck.
+   Only an actual `/setup` profile can make a locator convention
+   `profile-backed`. Without one, tell Author no profile exists and let it run
+   the single bounded convention scan. Never substitute evaluation metadata or
+   Main's source guess for that profile.
 
    Main writes `.playwright-cli/testgen/<run_id>/command-policy.json` with only
    this shape:
@@ -133,7 +148,8 @@ or debug.
    known route, auth, and data facts. State `runtime preflight: passed` so
    Author does not repeat it. Before delegation, Main confirms the
    target application is already running at the approved origin and supplies
-   the known browser-runtime state. Author never derives a required value,
+   separate exploration-browser and runner-browser readiness facts plus the
+   selected validation path. Author never derives a required value,
    starts the application, or installs a browser or package. Author grounds in
    relevant source and nearby tests, explores the running app with Playwright
    CLI, verifies its locator choices, self-checks, writes one spec, validates
@@ -190,6 +206,8 @@ or debug.
 7. Only a validated `fixed` trace enters Main's vacuity gate. Main does not put
    this work in `Stop` or `SubagentStop`, redispatch Healer for bookkeeping, or
    report `fixed` as the final Testgen result.
+   A valid fixed trace names `main` as `next_owner`; it never routes directly to
+   the human before this gate.
    - When the run has a change manifest, Main captures `post-healer` before
      verification. If capture fails, do not invoke the adapter; record the
      bounded capture error as behavior `error` in the vacuity report.

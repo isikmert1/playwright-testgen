@@ -13,7 +13,7 @@ const SCHEMAS = {
   trace: {
     filename: 'healer-trace.v1.schema.json',
     version: 'healer-trace.v1',
-    hash: 'ce574eb3f46abc7942c8971861b1deca8bb757b61a0419308d3898b4ed9418c3',
+    hash: '548ac97695d06f09ccd56d51728bb5665a2d4128afad4ac533a388927c15da0b',
   },
   vacuity: {
     filename: 'vacuity-report.v1.schema.json',

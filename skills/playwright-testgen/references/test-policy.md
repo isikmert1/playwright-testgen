@@ -45,10 +45,13 @@ win.
 - Apply `vacuity-policy.md` to every planned assertion. A criterion is not
   covered unless its assertion can fail when the required behavior is absent.
 - Author uses the repository's existing package manager and lint convention,
-  scoped to touched files when supported. A normal repository-wide lint may be
-  used with approval. When no compatible linter exists, the exact
-  policy-approved spec may be collected through local Playwright with `--list`.
-  Author never invents a package script or executes the spec.
+  scoped to touched files when supported. If only its normal repository-wide
+  lint exists, invoke that existing script and let the hook request approval;
+  if it is unsuitable or not approved, use the local collection fallback. A
+  denied direct executable such as `npx prettier` does not mean the package
+  script was blocked. The fallback collects only the exact policy-approved spec
+  through local Playwright with `--list`. Author never invents a package script
+  or executes the spec.
 
 ## Waiting and navigation
 

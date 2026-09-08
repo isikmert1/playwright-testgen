@@ -50,7 +50,10 @@ test('active external target descriptors pin reproducible sources without vendor
     assert.notEqual(descriptor.setup.command, '');
     assert.equal(typeof descriptor.start.command, 'string');
     assert.notEqual(descriptor.start.command, '');
-    assert.match(descriptor.start.origin, /^http:\/\/127\.0\.0\.1:\d+$/u);
+    assert.match(
+      descriptor.start.origin,
+      /^http:\/\/(?:127\.0\.0\.1|localhost):\d+$/u,
+    );
     assert.equal(typeof descriptor.reset.strategy, 'string');
     assert.notEqual(descriptor.reset.strategy, '');
     assert.deepEqual(readdirSync(targetDirectory), ['target.json']);
@@ -58,6 +61,11 @@ test('active external target descriptors pin reproducible sources without vendor
   }
 
   assert.equal(sourceUrls.size, targetIds.length);
+  assert.equal(
+    readJson(path.join(targetsRoot, 'cypress-realworld-app', 'target.json'))
+      .start.origin,
+    'http://localhost:3000',
+  );
 });
 
 test('owned semantic-only target serves controls without test IDs', async (t) => {

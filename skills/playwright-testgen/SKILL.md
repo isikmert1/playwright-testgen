@@ -17,7 +17,7 @@ provide its local `playwright` and `@playwright/test` runtime. The current
 official `@playwright/cli` must be installed globally so its documented
 `playwright-cli` command is available without depending on the repository's
 `node_modules` layout. Never install or resolve these dependencies from this
-plugin repository.
+plugin repository. Testgen requires Node.js 22.13 or later.
 
 The SessionStart hook exports `PLAYWRIGHT_TESTGEN_ROOT` as the installed plugin
 directory for Bash commands. Use `$PLAYWRIGHT_TESTGEN_ROOT/scripts/...` for
@@ -40,13 +40,21 @@ Run each line as a separate Bash call from the repository root. Do not
 prefix it with `cd`, combine it with another command, or append discovery
 probes. Use `Read`, `Glob`, or `Grep` separately for repository discovery.
 
-The CLI must be version 0.1.19 or newer. Its help must list `attach`, `find`,
+Node must be 22.13 or newer. The CLI must be version 0.1.19 or newer. Its help must list `attach`, `find`,
 `generate-locator`, and `requests`, and print an `Agent skill:` path. Treat the
 warning `The playwright-cli skill at '<path>' does not match the tool version.`
 as outdated. If any package, CLI capability, or skill is missing or outdated,
 stop before Author. Run the official install from the same Node/npm environment
 that launches the agent; a different global npm prefix does not satisfy this
 check.
+
+Package resolution alone does not prove that either browser runtime is ready.
+Before Author, Main records separate facts for the Playwright CLI exploration
+browser and the repository runner browser selected by its existing config and
+project, and confirms the application is already running at the approved
+origin. Do not hardcode Chromium or change repository configuration. A browser
+installation listing is supporting evidence, not proof that the selected local
+Playwright version can launch it; stop when readiness cannot be confirmed.
 
 `/setup` is planned but not shipped. Until it exists, Main offers only the
 relevant official remediation:

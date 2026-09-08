@@ -9,12 +9,15 @@ permissions:
 
 jobs:
   check:
+    strategy:
+      matrix:
+        node: [22.13.0, 24]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
-          node-version: 24
+          node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
       - run: npm run check

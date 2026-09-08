@@ -87,11 +87,11 @@ function trace(run = runId) {
     repairs: [],
     final_classification: null,
     disposition: 'fixed',
-    next_owner: 'human',
+    next_owner: 'main',
     escalation: null,
     cleanup: {
-      runner: 'stopped',
-      browser_session: 'closed',
+      runner: 'not-started',
+      browser_session: 'not-opened',
       scratch: 'retained-pending-acceptance',
     },
   };
@@ -284,6 +284,48 @@ test('accepts a valid fixed Healer trace in its run-owned location', () => {
 
     assert.equal(result.status, 0, result.stderr);
     assert.equal(JSON.parse(result.stdout).valid, true);
+  });
+});
+
+test('rejects foreground-only traces that claim background resources', () => {
+  withRepository((repository) => {
+    const artifact = trace();
+    artifact.cleanup.runner = 'stopped';
+    artifact.cleanup.browser_session = 'not-opened';
+    assertRejected(
+      repository,
+      'trace',
+      'healer-trace.json',
+      artifact,
+      /trace-foreground-runner-cleanup-invalid/iu,
+    );
+  });
+
+  withRepository((repository) => {
+    const artifact = trace();
+    artifact.cleanup.runner = 'not-started';
+    artifact.cleanup.browser_session = 'closed';
+    assertRejected(
+      repository,
+      'trace',
+      'healer-trace.json',
+      artifact,
+      /trace-foreground-browser-cleanup-invalid/iu,
+    );
+  });
+});
+
+test('routes a fixed Healer trace to Main for the vacuity gate', () => {
+  withRepository((repository) => {
+    const artifact = trace();
+    artifact.next_owner = 'human';
+    assertRejected(
+      repository,
+      'trace',
+      'healer-trace.json',
+      artifact,
+      /trace-invalid-fixed-disposition/iu,
+    );
   });
 });
 

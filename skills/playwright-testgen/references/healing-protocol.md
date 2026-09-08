@@ -39,7 +39,8 @@ PLAYWRIGHT_HTML_OPEN=never npx --no playwright test <approved-spec-filter-argume
 Main supplies `<approved-spec-filter-argument>` as the shell-safe output of
 `print-approved-spec-filter.cjs`. Use it unchanged and do not add quotes, derive
 another filter, or add a title `--grep`. Do not prefix a runner command with
-`cd`; the current working directory is already the repository root.
+`cd`; every Bash call already starts at the repository root. A hook rejection
+before the runner process starts does not consume or reserve an attempt.
 Include every project/config option recorded by Main. Record this first attempt
 as `verification-run`. If it passes before any repair or debug run, report
 `fixed` without running it again.
@@ -169,7 +170,7 @@ otherwise source changes route to Author or the product owner.
 Report the attempt count, last signature, evidence summary, classification,
 repairs, final disposition, and required next owner using
 `artifact-contract.md`. `fixed` requires a passing non-debug run in the approved
-scope after the last edit.
+scope after the last edit and sets `next_owner` to `main` for the vacuity gate.
 
 Assemble the complete scrubbed trace before replacing Main's `{}` draft. Make
 one whole-file `Edit`, validate once, and use validation error codes to rebuild
