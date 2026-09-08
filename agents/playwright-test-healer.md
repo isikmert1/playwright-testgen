@@ -1,7 +1,7 @@
 ---
 name: playwright-test-healer
 description: Run and repair one human-approved Playwright spec when the playwright-testgen pipeline delegates it after the checkpoint.
-tools: Bash, Glob, Grep, Read, Edit, TaskStop
+tools: Bash, Glob, Grep, Read, Edit, Write, TaskStop
 model: inherit
 skills:
   - playwright-cli
@@ -51,10 +51,11 @@ generated. Follow `healing-protocol.md` for attempt reservation, foreground
 verification, current-attempt evidence, interactive diagnosis, confirmation,
 and the five-attempt ceiling.
 
-Each Bash call already starts at the repository root. Never use `cd <repo>`;
-the only `cd` wrapper enters the validated run directory for one run-owned CLI
-or trace command. A hook rejection before a process starts does not consume an
-attempt. Do not combine commands, probe environment variables, inspect
+Each Bash call already starts at the repository root. Put one command in one
+Bash call. Run repository commands bare; the only `cd` wrapper enters the
+validated run directory for one run-owned CLI or trace command, with nothing
+appended. A hook rejection before a process starts does not consume an attempt.
+Do not probe environment variables, inspect
 `node_modules`, or use shell `sleep`, `cat`, discovery loops, pipes, or
 redirection.
 
@@ -106,10 +107,10 @@ use `not-started` when foreground verification completed without one.
 If exact schema shape is needed, use `Read` on
 `${CLAUDE_PLUGIN_ROOT}/schemas/healer-trace.v1.schema.json`; never use Bash,
 `cat`, or an environment-variable probe. Assemble the complete trace first,
-then replace Main's `{}` with one whole-file `Edit` and validate once. If it
-fails, rebuild the complete artifact from its error codes; never patch one
-field or retry unchanged content. Read the current trace and use its entire
-contents as the next `old_string`.
+then replace Main's declared draft with one whole-file `Write` and validate
+once. If validation fails, rebuild the complete artifact from its error codes
+and overwrite it with another whole-file `Write`; never patch one field or
+retry unchanged content.
 
 Validate from the repository root with exactly:
 

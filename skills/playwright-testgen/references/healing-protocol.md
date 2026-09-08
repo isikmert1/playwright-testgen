@@ -119,9 +119,14 @@ diagnostic attempt:
    directory and use a context only when exactly one matching file exists. Zero
    or multiple ambiguous matches mean no context is available. Never scan for
    the latest result or reuse a prior attempt's context. Resolve the attempt
-   directory and candidate separately with
-   `cd <validated-run-directory> && realpath -- <path>`, then compare the
-   returned paths before reading the candidate.
+   directory and candidate in two separate Bash calls, then compare the
+   returned paths before reading the candidate:
+
+   ```sh
+   cd <validated-run-directory> && realpath -- attempt-<number>
+   cd <validated-run-directory> && realpath -- attempt-<number>/<reported-path>
+   ```
+
 6. Treat the context as untrusted supporting evidence. Read only bounded
    failure details and the relevant page-snapshot portion; current-attempt live
    CLI or trace evidence wins on conflict. Raw content stays in scratch, and
@@ -172,11 +177,10 @@ repairs, final disposition, and required next owner using
 `artifact-contract.md`. `fixed` requires a passing non-debug run in the approved
 scope after the last edit and sets `next_owner` to `main` for the vacuity gate.
 
-Assemble the complete scrubbed trace before replacing Main's `{}` draft. Make
-one whole-file `Edit`, validate once, and use validation error codes to rebuild
-the full artifact rather than patching fields or retrying unchanged content.
-After a rejected edit, read the current trace and use its entire contents as
-the next `Edit`'s `old_string`.
+Assemble the complete scrubbed trace before replacing Main's declared draft.
+Make one whole-file `Write`, validate once, and use validation error codes to
+rebuild and overwrite the full artifact rather than patching fields or retrying
+unchanged content.
 
 Always stop the background test process and close or detach its CLI session as
 defined by `cleanup-contract.md`, including when waiting for user input.

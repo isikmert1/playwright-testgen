@@ -1789,59 +1789,17 @@ test('binds artifact mutations to the role that owns each artifact', () => {
     assert.deepEqual(
       runToolHook(
         targetRepository,
-        'Edit',
+        'Write',
         {
           file_path: tracePath,
-          old_string: '{}',
-          new_string: '{"schema_version":"healer-trace.v1"}',
+          content: '{"schema_version":"healer-trace.v1"}',
         },
         'playwright-test-healer',
       ),
       {},
     );
     writeFileSync(tracePath, '{}');
-    const partialTraceEdit = runToolHook(
-      targetRepository,
-      'Edit',
-      {
-        file_path: tracePath,
-        old_string: '{',
-        new_string: '{"schema_version":"healer-trace.v1"}',
-      },
-      'playwright-test-healer',
-    );
-    assert.equal(partialTraceEdit.permissionDecision, 'deny');
-    assert.match(
-      partialTraceEdit.permissionDecisionReason,
-      /entire current contents/iu,
-    );
-    const traceWrite = runToolHook(
-      targetRepository,
-      'Write',
-      { file_path: tracePath },
-      'playwright-test-healer',
-    );
-    assert.equal(traceWrite.permissionDecision, 'deny');
-    assert.match(traceWrite.permissionDecisionReason, /already exists.*Edit/iu);
-
-    const rejectedTrace = '{"schema_version":"bad"}';
-    writeFileSync(tracePath, rejectedTrace);
-    assert.deepEqual(
-      runToolHook(
-        targetRepository,
-        'Edit',
-        {
-          file_path: tracePath,
-          old_string: rejectedTrace,
-          new_string: '{"schema_version":"healer-trace.v1"}',
-        },
-        'playwright-test-healer',
-      ),
-      {},
-    );
-
-    rmSync(tracePath);
-    const missingTraceEdit = runToolHook(
+    const traceEdit = runToolHook(
       targetRepository,
       'Edit',
       {
@@ -1851,25 +1809,64 @@ test('binds artifact mutations to the role that owns each artifact', () => {
       },
       'playwright-test-healer',
     );
-    assert.equal(missingTraceEdit.permissionDecision, 'deny');
-    assert.match(missingTraceEdit.permissionDecisionReason, /unavailable/iu);
+    assert.equal(traceEdit.permissionDecision, 'deny');
+    assert.match(traceEdit.permissionDecisionReason, /whole-file Write/iu);
+
+    const emptyTraceWrite = runToolHook(
+      targetRepository,
+      'Write',
+      { file_path: tracePath, content: '' },
+      'playwright-test-healer',
+    );
+    assert.equal(emptyTraceWrite.permissionDecision, 'deny');
+    assert.match(
+      emptyTraceWrite.permissionDecisionReason,
+      /complete artifact/iu,
+    );
+
+    const rejectedTrace = '{"schema_version":"bad"}';
+    writeFileSync(tracePath, rejectedTrace);
+    assert.deepEqual(
+      runToolHook(
+        targetRepository,
+        'Write',
+        {
+          file_path: tracePath,
+          content: '{"schema_version":"healer-trace.v1"}',
+        },
+        'playwright-test-healer',
+      ),
+      {},
+    );
+
+    rmSync(tracePath);
+    const missingTraceWrite = runToolHook(
+      targetRepository,
+      'Write',
+      {
+        file_path: tracePath,
+        content: '{"schema_version":"healer-trace.v1"}',
+      },
+      'playwright-test-healer',
+    );
+    assert.equal(missingTraceWrite.permissionDecision, 'deny');
+    assert.match(missingTraceWrite.permissionDecisionReason, /unavailable/iu);
   });
 });
 
 test('rejects non-regular and oversized trace drafts before reading', () => {
   withTargetRepository(({ runDirectory, targetRepository }) => {
     const tracePath = path.join(runDirectory, 'healer-trace.json');
-    const edit = {
+    const write = {
       file_path: tracePath,
-      old_string: '{}',
-      new_string: '{"schema_version":"healer-trace.v1"}',
+      content: '{"schema_version":"healer-trace.v1"}',
     };
 
     writeFileSync(tracePath, 'x'.repeat(64 * 1024 + 1));
     let result = runToolHook(
       targetRepository,
-      'Edit',
-      edit,
+      'Write',
+      write,
       'playwright-test-healer',
     );
     assert.equal(result.permissionDecision, 'deny');
@@ -1879,8 +1876,8 @@ test('rejects non-regular and oversized trace drafts before reading', () => {
     mkdirSync(tracePath);
     result = runToolHook(
       targetRepository,
-      'Edit',
-      edit,
+      'Write',
+      write,
       'playwright-test-healer',
     );
     assert.equal(result.permissionDecision, 'deny');

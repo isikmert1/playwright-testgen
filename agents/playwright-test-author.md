@@ -119,15 +119,16 @@ The fallback loads only the approved spec without executing its callback and
 requires one active Testgen run policy. Never invent a script or run another
 spec. Repository commands already start at the repository root: do not prefix
 them with `cd`, combine commands, or append shell operators. Use `Read`, `Glob`,
-or `Grep` for discovery.
+or `Grep` for discovery. Run the collection command bare in its own Bash call.
 
 Build the complete scrubbed `author-handoff.v1` described by
 `artifact-contract.md`. Raw selectors belong only in `locators[].locator`; prose
 fields paraphrase them. If exact schema shape is needed, use `Read` on
 `${CLAUDE_PLUGIN_ROOT}/schemas/author-handoff.v1.schema.json`; never use Bash,
-`cat`, or an environment-variable probe. Read final spec line numbers, write
-the handoff once at `.playwright-cli/testgen/<run_id>/handoff.json`, then run
-exactly:
+`cat`, or an environment-variable probe. Read the final spec once and record
+each assertion line inside its named `test.step()`, not the step's opening line.
+Write the handoff once at `.playwright-cli/testgen/<run_id>/handoff.json`, then
+run exactly:
 
 ```sh
 node "$PLAYWRIGHT_TESTGEN_ROOT/scripts/validate-testgen-artifact.cjs" --repo . --type handoff --run-id <run_id> .playwright-cli/testgen/<run_id>/handoff.json

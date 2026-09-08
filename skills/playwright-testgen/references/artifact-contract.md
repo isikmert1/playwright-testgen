@@ -168,6 +168,10 @@ The exact artifact path is
 `.playwright-cli/testgen/<run_id>/healer-trace.json`. Include a separate top-level
 `repairs` collection of repairable attempt numbers, affected repository-relative
 regular-file paths, and concise reasons; paths are unique within each repair.
+Each attempt summary is one behavior-focused sentence of at most 200 characters:
+state what was observed and why it supports the classification. Put paths and
+signatures in their dedicated fields rather than embedding code, commands, raw
+selectors, or tool output in the summary.
 `verification-run` appears exactly once as attempt 1. An attempt's `action`
 remains a concise local action summary. A `fixed` trace
 with no repair or debug run may end with one passing `verification-run`. After
@@ -245,4 +249,4 @@ Use references, field names, classifications, bounded summaries, and
 repository-relative paths instead. If prohibited content enters an artifact,
 replace it with a sanitized complete version and validate again before any
 consumer reads it. Healer corrects its existing trace through another
-whole-file `Edit`; it never deletes or recreates the Main-declared path.
+whole-file `Write`; it never deletes or recreates the Main-declared path.

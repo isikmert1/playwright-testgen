@@ -242,9 +242,31 @@ test('workflow guidance removes avoidable pre-Author ambiguity', () => {
   assert.match(healer, /pause-at.*approved.*spec.*positive line/isu);
   assert.match(
     healer,
-    /complete trace.*one whole-file `Edit`.*validate once/isu,
+    /complete trace.*one whole-file `Write`.*validate\s+once/isu,
   );
-  assert.match(healer, /read the current trace.*entire.*`old_string`/isu);
+  assert.match(healer, /overwrite.*whole-file `Write`/isu);
+  assert.match(healer, /Put one command in one\s+Bash call/iu);
+  assert.match(
+    author,
+    /collection command.*bare.*own Bash call.*final spec.*assertion line/isu,
+  );
+  assert.match(
+    artifactContract,
+    /attempt summary.*behavior-focused sentence.*200 characters/isu,
+  );
+  assert.match(
+    readFileSync(
+      path.join(
+        repositoryRoot,
+        'skills',
+        'playwright-testgen',
+        'references',
+        'healing-protocol.md',
+      ),
+      'utf8',
+    ),
+    /attempt\s+directory and candidate in two separate Bash calls/isu,
+  );
   assert.match(
     artifactContract,
     /raw selectors.*only.*`locators\[\]\.locator`/isu,
