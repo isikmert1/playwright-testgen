@@ -188,7 +188,7 @@ evaluation metadata, not an operational profile, and must not be sent to Author.
      Never pass Author's reasoning transcript.
      Before delegation, Main writes the exact two-byte draft `{}` at
      `.playwright-cli/testgen/<run_id>/healer-trace.json` and passes that path.
-     This Main-owned placeholder gives Healer's `Edit`-only mutation boundary a
+     This Main-owned placeholder gives Healer's whole-file `Write` mutation boundary a
      declared trace file; it is not an artifact and no consumer may read or
      report it until Healer replaces it and validation succeeds.
 

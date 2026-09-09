@@ -62,6 +62,10 @@ const ALLOWED_CLI_COMMANDS = new Set([
 ]);
 const BLOCKED_OPTIONS =
   /^(?:--cdp|--config|--extension|--filename|--path|--persistent|--profile|--raw|--storage-state|--submit|--user-data-dir)(?:=|$)/u;
+const APPROVED_RUNNER_REASON =
+  'Runner command is scoped to one approved spec and one run-owned attempt directory.';
+const APPROVED_DEBUG_RUNNER_REASON =
+  'Debug runner is scoped to one approved spec and one run-owned attempt directory.';
 
 function requirePolicy(cwd, runId) {
   const policy = loadPolicy(cwd, runId);
@@ -488,7 +492,7 @@ function validatePlaywright(cwd, assignments, args, toolInput) {
 
   return decision(
     'allow',
-    'Runner command is scoped to one approved spec and one run-owned attempt directory.',
+    debugging ? APPROVED_DEBUG_RUNNER_REASON : APPROVED_RUNNER_REASON,
   );
 }
 
@@ -690,6 +694,7 @@ function validateArtifactValidator(cwd, args, agentType) {
 }
 
 module.exports = {
+  APPROVED_RUNNER_REASON,
   pluginValidatorPath,
   validateArtifactValidator,
   validateCleanup,

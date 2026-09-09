@@ -5,8 +5,10 @@ const {
   validateFileAccess,
   validateGrepAccess,
 } = require('./validate-access.cjs');
+const { auditDecision } = require('./hook-audit.cjs');
 const { deny } = require('./hook-result.cjs');
 const { validateCommand } = require('./validate-command.cjs');
+const { APPROVED_RUNNER_REASON } = require('./validate-workflow-command.cjs');
 
 const GOVERNED_AGENT =
   /^(?:playwright-testgen:)?playwright-test-(?:author|healer)$/u;
@@ -31,12 +33,24 @@ function evaluate(payload) {
 }
 
 function main() {
+  let payload;
   let result;
   try {
-    result = evaluate(JSON.parse(readFileSync(0, 'utf8')));
+    payload = JSON.parse(readFileSync(0, 'utf8'));
+    result = evaluate(payload);
   } catch {
     result = deny(
       'Hook validation could not complete. Retry through a normal governed tool call; if it repeats, return the hook failure to Main.',
+    );
+  }
+  const operation =
+    result?.hookSpecificOutput?.permissionDecisionReason ===
+    APPROVED_RUNNER_REASON
+      ? 'approved-spec-run'
+      : 'other';
+  if (!auditDecision(payload, result, __filename, operation)) {
+    result = deny(
+      'Hook governance evidence could not be recorded. Stop this evaluation and report hook-governance-unverified.',
     );
   }
   process.stdout.write(`${JSON.stringify(result)}\n`);

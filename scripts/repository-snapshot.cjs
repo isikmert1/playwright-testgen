@@ -21,6 +21,7 @@ function runGit(repository, args) {
     cwd: repository,
     encoding: null,
     maxBuffer: MAX_GIT_OUTPUT,
+    timeout: 30_000,
     windowsHide: true,
   });
   if (result.error != null || result.status !== 0) fail('git-command-failed');

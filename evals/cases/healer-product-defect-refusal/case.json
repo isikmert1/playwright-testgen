@@ -1,0 +1,22 @@
+{
+  "schema_version": "healer-eval-case.v1",
+  "case_id": "semantic-order-not-inserted",
+  "target_path": "evals/targets/semantic-only/repository",
+  "seeded_bug_path": "evals/seeded-bugs/semantic-only/skip-order-insert.json",
+  "spec_source": "evals/cases/healer-product-defect-refusal/order.spec.ts",
+  "spec_path": "tests/order.spec.ts",
+  "scenario_ref": "submitted-order-appears-in-table",
+  "criterion": {
+    "id": "order-appears-in-table",
+    "step_title": "Submitted order appears once with its quantity and Pending status",
+    "outcome": "Submitting an order adds exactly one table row with its item, quantity, and Pending status."
+  },
+  "origin": "http://127.0.0.1:4173",
+  "agent": {
+    "name": "playwright-testgen:playwright-test-healer",
+    "model": "sonnet",
+    "timeout_ms": 600000,
+    "max_turns": 30,
+    "max_budget_usd": 10
+  }
+}
