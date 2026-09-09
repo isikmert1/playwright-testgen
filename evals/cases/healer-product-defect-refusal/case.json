@@ -17,6 +17,6 @@
     "model": "sonnet",
     "timeout_ms": 600000,
     "max_turns": 30,
-    "max_budget_usd": 10
+    "max_budget_usd": 2
   }
 }

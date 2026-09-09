@@ -650,6 +650,53 @@ test('bounds the non-interactive Healer invocation with native controls', () => 
   assert.ok(args.includes('--strict-mcp-config'));
 });
 
+test('accepts current Playwright CLI help without an Agent skill marker', () => {
+  const { validPlaywrightHelp } = modules().runner;
+  assert.equal(typeof validPlaywrightHelp, 'function');
+  const currentHelp = [
+    'attach [name]',
+    'find [text]',
+    'generate-locator <target>',
+    'requests',
+  ].join('\n');
+
+  assert.equal(validPlaywrightHelp(currentHelp), true);
+  assert.equal(
+    validPlaywrightHelp(
+      `${currentHelp}\nThe installed Playwright CLI skill is stale.`,
+    ),
+    false,
+  );
+});
+
+test('verifies the Playwright CLI skill file installed in the project', () => {
+  const { validPlaywrightSkillInstall } = modules().runner;
+  assert.equal(typeof validPlaywrightSkillInstall, 'function');
+  const target = mkdtempSync(path.join(tmpdir(), 'testgen-cli-skill-test-'));
+  const skill = path.join(
+    target,
+    '.claude',
+    'skills',
+    'playwright-cli',
+    'SKILL.md',
+  );
+  try {
+    assert.equal(validPlaywrightSkillInstall(target), false);
+    mkdirSync(path.dirname(skill), { recursive: true });
+    writeFileSync(skill, '# Playwright CLI\n');
+    assert.equal(validPlaywrightSkillInstall(target), true);
+  } finally {
+    rmSync(target, { force: true, recursive: true });
+  }
+});
+
+test('caps the single Sonnet evaluation at two dollars', () => {
+  const definition = JSON.parse(
+    readFileSync(path.join(caseDirectory, 'case.json'), 'utf8'),
+  );
+  assert.equal(definition.agent.max_budget_usd, 2);
+});
+
 test('reports distinct bounded-agent failures', () => {
   const { agentFailure } = modules().runner;
   assert.equal(agentFailure({ timed_out: true }).reason, 'agent-timeout');

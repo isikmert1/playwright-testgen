@@ -6,6 +6,7 @@ const {
   copyFileSync,
   cpSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -842,6 +843,8 @@ async function prepareTarget(definition, temporaryRoot, tooling, signal) {
       signal,
     },
   );
+  if (!validPlaywrightSkillInstall(target))
+    fail('playwright-cli-skill-unavailable');
   const cliHelp = await command(
     process.execPath,
     [tooling.playwright_cli, '--help'],
@@ -1219,10 +1222,23 @@ function validPlaywrightHelp(output) {
   return (
     ['attach', 'find', 'generate-locator', 'requests'].every((commandName) =>
       new RegExp(`\\b${commandName}\\b`, 'u').test(output),
-    ) &&
-    /Agent skill:/u.test(output) &&
-    !/The installed Playwright CLI skill is stale\./u.test(output)
+    ) && !/The installed Playwright CLI skill is stale\./u.test(output)
   );
+}
+
+function validPlaywrightSkillInstall(target) {
+  const skill = path.join(
+    target,
+    '.claude',
+    'skills',
+    'playwright-cli',
+    'SKILL.md',
+  );
+  try {
+    return lstatSync(skill).isFile() && readFileSync(skill).length > 0;
+  } catch {
+    return false;
+  }
 }
 
 function recordTargetRuntime(target, runtime) {
@@ -1618,5 +1634,7 @@ module.exports = {
   preparePluginSource,
   runBounded,
   stopProcessTree,
+  validPlaywrightHelp,
+  validPlaywrightSkillInstall,
   windowsProcessTree,
 };
