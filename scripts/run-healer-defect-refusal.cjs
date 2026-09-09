@@ -53,12 +53,16 @@ const FORBIDDEN_PLUGIN_PATHS = [
   'scripts/score-healer-defect-refusal.cjs',
   'scripts/windows-process-tree.cjs',
 ];
+const SAFE_ERROR_CODE = /^[a-z][a-z0-9-]{0,79}$/u;
 const executableCache = new Map();
 
 class EvaluationError extends Error {
-  constructor(code) {
+  constructor(code, details = []) {
     super(code);
     this.code = code;
+    this.details = details
+      .filter((value) => SAFE_ERROR_CODE.test(value))
+      .slice(0, 12);
   }
 }
 
@@ -287,9 +291,7 @@ function agentFailure(result) {
 }
 
 function evaluationFailure(error) {
-  const reason = /^[a-z][a-z0-9-]{0,79}$/u.test(
-    error?.code ?? error?.message ?? '',
-  )
+  const reason = SAFE_ERROR_CODE.test(error?.code ?? error?.message ?? '')
     ? (error.code ?? error.message)
     : 'internal-error';
   const grading = new Set([
@@ -314,7 +316,7 @@ function evaluationFailure(error) {
       'target-dependencies-unavailable',
       'testgen-repository-not-clean',
     ].includes(reason);
-  return {
+  const result = {
     status: 'failed',
     error: prerequisite
       ? 'prerequisite-unavailable'
@@ -323,6 +325,9 @@ function evaluationFailure(error) {
         : 'evaluation-failed',
     reason,
   };
+  if (Array.isArray(error?.details) && error.details.length > 0)
+    result.details = error.details;
+  return result;
 }
 
 function emptyRuntime() {
@@ -349,6 +354,7 @@ function combineResult(primary, cleanup) {
       ok: false,
       error: primary.error,
       reason: primary.reason,
+      ...(primary.details == null ? {} : { details: primary.details }),
       ...(primary.runtime == null ? {} : { runtime: primary.runtime }),
       ...(cleanup.status === 'failed' ? { cleanup } : {}),
     };
@@ -498,6 +504,7 @@ async function stopProcessTree(child) {
 function runBounded(commandName, args, options) {
   return new Promise((resolve) => {
     let output = '';
+    let errorOutput = '';
     let outputBytes = 0;
     let timedOut = false;
     let cancelled = false;
@@ -510,6 +517,7 @@ function runBounded(commandName, args, options) {
       resolve({
         cancelled: true,
         output: '',
+        ...(options.capture_stderr === true ? { error_output: '' } : {}),
         output_overflow: false,
         signal: null,
         spawn_error: null,
@@ -538,6 +546,9 @@ function runBounded(commandName, args, options) {
       resolve({
         cancelled,
         output,
+        ...(options.capture_stderr === true
+          ? { error_output: errorOutput }
+          : {}),
         output_overflow: overflow,
         signal,
         spawn_error: spawnError,
@@ -578,7 +589,17 @@ function runBounded(commandName, args, options) {
       }
       output += chunk.toString('utf8');
     });
-    child.stderr.resume();
+    if (options.capture_stderr === true)
+      child.stderr.on('data', (chunk) => {
+        outputBytes += chunk.length;
+        if (outputBytes > MAX_OUTPUT_BYTES) {
+          overflow = true;
+          terminate();
+          return;
+        }
+        errorOutput += chunk.toString('utf8');
+      });
+    else child.stderr.resume();
     child.once('error', (error) => finish(null, null, error.code ?? 'error'));
     child.once('close', (status, signal) => {
       if (options.verify_process_tree === true || stopping != null) {
@@ -1062,7 +1083,7 @@ async function validateArtifact(
   filename,
   signal,
 ) {
-  const output = await command(
+  const result = await runBounded(
     process.execPath,
     [
       path.join(installPath, 'scripts', 'validate-testgen-artifact.cjs'),
@@ -1074,10 +1095,37 @@ async function validateArtifact(
       runId,
       filename,
     ],
-    { cwd: repository, error: `${type}-invalid`, signal },
+    {
+      capture_stderr: true,
+      cwd: repository,
+      env: process.env,
+      signal,
+      timeout_ms: LIFECYCLE_COMMAND_TIMEOUT_MS,
+      verify_process_tree: true,
+    },
   );
-  const result = readJsonOutput(output, `${type}-invalid`);
-  if (result.valid !== true) fail(`${type}-invalid`);
+  if (result.tree_cleanup_failed) fail('process-tree-cleanup-failed');
+  if (result.cancelled) fail('evaluation-cancelled');
+  if (result.timed_out) fail('lifecycle-command-timeout');
+  if (result.status !== 0) {
+    let details = [];
+    try {
+      const report = JSON.parse(result.error_output.trim());
+      if (
+        report.valid === false &&
+        report.type === type &&
+        Array.isArray(report.errors)
+      )
+        details = report.errors;
+    } catch {
+      details = [];
+    }
+    throw new EvaluationError(`${type}-invalid`, details);
+  }
+  if (result.output_overflow || result.spawn_error != null)
+    fail(`${type}-invalid`);
+  const report = readJsonOutput(result.output.trim(), `${type}-invalid`);
+  if (report.valid !== true) fail(`${type}-invalid`);
 }
 
 function startServer(repository, origin, signal) {
@@ -1634,6 +1682,7 @@ module.exports = {
   preparePluginSource,
   runBounded,
   stopProcessTree,
+  validateArtifact,
   validPlaywrightHelp,
   validPlaywrightSkillInstall,
   windowsProcessTree,

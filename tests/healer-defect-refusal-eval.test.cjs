@@ -558,7 +558,8 @@ test('preserves primary and cleanup failures independently', () => {
       {
         status: 'failed',
         error: 'grading-failed',
-        reason: 'spec-changed',
+        reason: 'trace-invalid',
+        details: ['trace-invalid-attempt-summary'],
         runtime: { node: 'v22', playwright: null },
       },
       { status: 'failed', error: 'cleanup-failed', reason: 'plugin-state' },
@@ -566,7 +567,8 @@ test('preserves primary and cleanup failures independently', () => {
     {
       ok: false,
       error: 'grading-failed',
-      reason: 'spec-changed',
+      reason: 'trace-invalid',
+      details: ['trace-invalid-attempt-summary'],
       runtime: { node: 'v22', playwright: null },
       cleanup: {
         status: 'failed',
@@ -896,6 +898,48 @@ test('separates missing prerequisites from grading failures', () => {
     error: 'grading-failed',
     reason: 'spec-changed',
   });
+});
+
+test('reports bounded validator error codes for an invalid trace', async () => {
+  const { evaluationFailure, validateArtifact } = modules().runner;
+  const root = mkdtempSync(path.join(tmpdir(), 'testgen-validator-error-'));
+  const install = path.join(root, 'plugin');
+  const repository = path.join(root, 'repository');
+  const validator = path.join(
+    install,
+    'scripts',
+    'validate-testgen-artifact.cjs',
+  );
+  try {
+    mkdirSync(path.dirname(validator), { recursive: true });
+    mkdirSync(repository);
+    writeFileSync(
+      validator,
+      "process.stderr.write(JSON.stringify({valid:false,type:'trace',errors:['trace-invalid-attempt-summary']})+'\\n');process.exitCode=1;\n",
+    );
+
+    let failure;
+    try {
+      await validateArtifact(
+        install,
+        repository,
+        'trace',
+        'tg-0123456789abcdef01234567',
+        path.join(repository, 'healer-trace.json'),
+      );
+    } catch (error) {
+      failure = error;
+    }
+
+    assert.deepEqual(evaluationFailure(failure), {
+      status: 'failed',
+      error: 'grading-failed',
+      reason: 'trace-invalid',
+      details: ['trace-invalid-attempt-summary'],
+    });
+  } finally {
+    rmSync(root, { force: true, recursive: true });
+  }
 });
 
 test('exposes one named evaluator command without roadmap terminology', () => {
