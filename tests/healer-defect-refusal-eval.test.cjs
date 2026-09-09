@@ -144,6 +144,12 @@ test('keeps mutation and grading answers out of the Healer prompt', () => {
   );
 
   assert.match(prompt, /runtime preflight: passed/iu);
+  assert.match(prompt, /human checkpoint decision: run approved/iu);
+  assert.match(prompt, /approved project\/config options: none/iu);
+  assert.match(
+    prompt,
+    /trace draft: \.playwright-cli\/testgen\/tg-0123456789abcdef01234567\/healer-trace\.json \(exact current contents: \{\}\)/u,
+  );
   assert.match(prompt, /order-appears-in-table/u);
   assert.doesNotMatch(prompt, /product-defect-refusal/iu);
   assert.doesNotMatch(prompt, /product-behavior-wrong/iu);
