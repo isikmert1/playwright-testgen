@@ -67,28 +67,38 @@ function policiesNear(...paths) {
   };
 }
 
-function isPluginBootstrapRead(payload, absolute, canonical) {
-  if (payload.tool_name !== 'Read') return false;
+function validatePluginRead(payload, absolute, canonical) {
+  if (payload.tool_name !== 'Read') return null;
   const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
-  if (typeof pluginRoot !== 'string' || pluginRoot.length === 0) return false;
+  if (typeof pluginRoot !== 'string' || pluginRoot.length === 0) return null;
 
   let canonicalPluginRoot;
   try {
     canonicalPluginRoot = realpathSync(pluginRoot);
   } catch {
-    return false;
+    return null;
   }
 
-  return ['scripts', path.join('skills', 'playwright-testgen')].some(
-    (relative) => {
-      const lexicalRoot = path.join(path.resolve(pluginRoot), relative);
-      const canonicalRoot = path.join(canonicalPluginRoot, relative);
-      return (
-        isContained(lexicalRoot, absolute, true) &&
-        isContained(canonicalRoot, canonical, true)
+  for (const relative of [
+    'schemas',
+    'scripts',
+    path.join('skills', 'playwright-testgen'),
+  ]) {
+    const lexicalRoot = path.join(path.resolve(pluginRoot), relative);
+    if (!isContained(lexicalRoot, absolute, true)) continue;
+    const canonicalRoot = path.join(canonicalPluginRoot, relative);
+    if (!isContained(canonicalRoot, canonical, true)) {
+      return deny(
+        'The requested installed-plugin read escapes its approved canonical directory.',
       );
-    },
-  );
+    }
+    return decision(
+      'allow',
+      'Read is confined to an approved installed Testgen directory.',
+    );
+  }
+
+  return null;
 }
 
 function validateFileAccess(payload) {
@@ -118,7 +128,8 @@ function validateFileAccess(payload) {
     }
   }
 
-  if (isPluginBootstrapRead(payload, absolute, canonical)) return {};
+  const pluginRead = validatePluginRead(payload, absolute, canonical);
+  if (pluginRead != null) return pluginRead;
 
   const normalized = normalizePath(canonical);
   const discovered = policiesNear(payload.cwd, absolute, canonical);
@@ -146,6 +157,38 @@ function validateFileAccess(payload) {
     return deny(
       'Approved storage state is opaque to Author and Healer. Pass only its exact policy-approved path to playwright-cli state-load; never read or modify the file.',
     );
+  }
+
+  if (
+    payload.tool_name === 'Read' &&
+    payload.agent_type.endsWith('playwright-test-healer')
+  ) {
+    for (const policy of nearbyPolicies) {
+      if (
+        samePath(absolute, policy.approvedSpec) &&
+        samePath(canonical, policy.canonicalApprovedSpec)
+      ) {
+        return decision('allow', 'Read is bound to the approved spec.');
+      }
+
+      for (const filename of ['handoff.json', 'healer-trace.json']) {
+        const expected = path.join(policy.runDirectory, filename);
+        if (!samePath(absolute, expected)) continue;
+        const canonicalExpected = path.join(
+          policy.canonicalRunDirectory,
+          filename,
+        );
+        if (!samePath(canonical, canonicalExpected)) {
+          return deny(
+            'The requested run-artifact read escapes its approved canonical path.',
+          );
+        }
+        return decision(
+          'allow',
+          'Read is bound to an exact Healer run artifact.',
+        );
+      }
+    }
   }
 
   if (payload.tool_name === 'Read') return {};

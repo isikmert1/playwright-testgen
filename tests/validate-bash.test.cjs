@@ -1777,14 +1777,14 @@ test('binds artifact mutations to the role that owns each artifact', () => {
       assert.match(result.permissionDecisionReason, /role-owned artifact/iu);
     }
 
-    assert.deepEqual(
+    assert.equal(
       runToolHook(
         targetRepository,
         'Read',
         { file_path: tracePath },
         'playwright-test-healer',
-      ),
-      {},
+      ).permissionDecision,
+      'allow',
     );
     assert.equal(
       runToolHook(
@@ -1863,6 +1863,99 @@ test('binds artifact mutations to the role that owns each artifact', () => {
   });
 });
 
+test('allows only canonical installed-plugin reads required by governed agents', () => {
+  withTargetRepository(({ targetRepository }) => {
+    const pluginRoot = mkdtempSync(path.join(tmpdir(), 'testgen-plugin-'));
+    try {
+      const skillRoot = path.join(pluginRoot, 'skills', 'playwright-testgen');
+      const schemaRoot = path.join(pluginRoot, 'schemas');
+      const scriptRoot = path.join(pluginRoot, 'scripts');
+      mkdirSync(skillRoot, { recursive: true });
+      mkdirSync(schemaRoot);
+      mkdirSync(scriptRoot);
+
+      const approvedPaths = [
+        path.join(skillRoot, 'SKILL.md'),
+        path.join(schemaRoot, 'healer-trace.v1.schema.json'),
+        path.join(scriptRoot, 'validate-testgen-artifact.cjs'),
+      ];
+      for (const approvedPath of approvedPaths) {
+        writeFileSync(approvedPath, '{}');
+        assert.equal(
+          runToolHook(
+            targetRepository,
+            'Read',
+            { file_path: approvedPath },
+            'playwright-test-healer',
+            { CLAUDE_PLUGIN_ROOT: pluginRoot },
+          ).permissionDecision,
+          'allow',
+        );
+      }
+
+      const unrelatedPath = path.join(pluginRoot, 'README.md');
+      writeFileSync(unrelatedPath, 'unrelated');
+      assert.deepEqual(
+        runToolHook(
+          targetRepository,
+          'Read',
+          { file_path: unrelatedPath },
+          'playwright-test-healer',
+          { CLAUDE_PLUGIN_ROOT: pluginRoot },
+        ),
+        {},
+      );
+
+      const escapingPath = path.join(skillRoot, 'escape.md');
+      symlinkSync(unrelatedPath, escapingPath, 'file');
+      const escaped = runToolHook(
+        targetRepository,
+        'Read',
+        { file_path: escapingPath },
+        'playwright-test-healer',
+        { CLAUDE_PLUGIN_ROOT: pluginRoot },
+      );
+      assert.equal(escaped.permissionDecision, 'deny');
+      assert.match(escaped.permissionDecisionReason, /escapes/iu);
+    } finally {
+      rmSync(pluginRoot, { force: true, recursive: true });
+    }
+  });
+});
+
+test('allows Healer to read only its exact run-bound inputs', () => {
+  withTargetRepository(({ runDirectory, targetRepository }) => {
+    const specPath = path.join(targetRepository, 'tests', 'account.spec.ts');
+    const handoffPath = path.join(runDirectory, 'handoff.json');
+    const tracePath = path.join(runDirectory, 'healer-trace.json');
+    writeFileSync(handoffPath, '{}');
+    writeFileSync(tracePath, '{}');
+
+    for (const filePath of [specPath, handoffPath, tracePath]) {
+      assert.equal(
+        runToolHook(
+          targetRepository,
+          'Read',
+          { file_path: filePath },
+          'playwright-testgen:playwright-test-healer',
+        ).permissionDecision,
+        'allow',
+      );
+    }
+
+    const unrelatedPath = path.join(targetRepository, 'package.json');
+    assert.deepEqual(
+      runToolHook(
+        targetRepository,
+        'Read',
+        { file_path: unrelatedPath },
+        'playwright-test-healer',
+      ),
+      {},
+    );
+  });
+});
+
 test('rejects non-regular and oversized trace drafts before reading', () => {
   withTargetRepository(({ runDirectory, targetRepository }) => {
     const tracePath = path.join(runDirectory, 'healer-trace.json');
@@ -1936,7 +2029,7 @@ test('fails closed when a discovered run policy is invalid', () => {
     assert.equal(denied.permissionDecision, 'deny');
     assert.match(denied.permissionDecisionReason, /policy.*invalid/iu);
 
-    assert.deepEqual(
+    assert.equal(
       runToolHook(
         targetRepository,
         'Read',
@@ -1950,8 +2043,8 @@ test('fails closed when a discovered run policy is invalid', () => {
         },
         'playwright-test-author',
         { CLAUDE_PLUGIN_ROOT: repositoryRoot },
-      ),
-      {},
+      ).permissionDecision,
+      'allow',
     );
   });
 });
