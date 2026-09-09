@@ -152,6 +152,7 @@ function buildHealerPrompt(definition, runtime) {
     'approved project/config options: none',
     `validated handoff: .playwright-cli/testgen/${runtime.run_id}/handoff.json`,
     `trace draft: .playwright-cli/testgen/${runtime.run_id}/healer-trace.json (exact current contents: {})`,
+    'Read that exact trace draft once immediately before replacing it with one whole-file Write.',
     `origin: ${runtime.origin}`,
     `scenario_ref: ${definition.scenario_ref}`,
     `criterion ${definition.criterion.id}: ${definition.criterion.outcome}`,
@@ -188,6 +189,11 @@ function buildClaudeArguments(definition, prompt) {
 }
 
 const MAX_TOOL_RESULT_BYTES = 256 * 1024;
+const HEALER_BOOTSTRAP_REFERENCES = new Set([
+  'artifact-contract.md',
+  'cleanup-contract.md',
+  'healing-protocol.md',
+]);
 
 function toolResultText(content) {
   const values = Array.isArray(content) ? content : [content];
@@ -215,9 +221,54 @@ function classifyToolResult(block) {
     : 'unverified';
 }
 
-function parseAgentStream(output) {
+function samePath(candidate, expected, repository) {
+  if (typeof candidate !== 'string' || typeof expected !== 'string')
+    return false;
+  const normalize = (value) => {
+    const resolved = path.normalize(path.resolve(repository ?? '.', value));
+    return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+  };
+  return normalize(candidate) === normalize(expected);
+}
+
+function diagnosticOperation(block, context) {
+  const filePath = block.input?.file_path;
+  if (block.name === 'Read' && typeof filePath === 'string') {
+    const subject = filePath.split(/[\\/]/u).at(-1);
+    if (HEALER_BOOTSTRAP_REFERENCES.has(subject))
+      return { id: block.id, operation: 'bootstrap-read', subject };
+    if (samePath(filePath, context.trace_path, context.repository))
+      return { id: block.id, operation: 'trace-read' };
+  }
+  if (
+    block.name === 'Write' &&
+    samePath(filePath, context.trace_path, context.repository)
+  )
+    return { id: block.id, operation: 'trace-write' };
+  const commandText = block.input?.command;
+  if (
+    block.name === 'Bash' &&
+    typeof commandText === 'string' &&
+    typeof context.approved_spec_filter === 'string' &&
+    commandText.includes(context.approved_spec_filter) &&
+    /\bplaywright\s+test\b/iu.test(commandText)
+  )
+    return { id: block.id, operation: 'spec-run' };
+  if (
+    block.name === 'Bash' &&
+    typeof commandText === 'string' &&
+    /validate-testgen-artifact\.cjs/iu.test(commandText) &&
+    /--type\s+trace\b/iu.test(commandText) &&
+    /healer-trace\.json/iu.test(commandText)
+  )
+    return { id: block.id, operation: 'trace-validation' };
+  return null;
+}
+
+function parseAgentStream(output, context = {}) {
   const toolUses = [];
   const toolResults = [];
+  const diagnosticOperations = [];
   const runtime = {};
   let resultSubtype = null;
   for (const line of output.split(/\r?\n/u)) {
@@ -236,8 +287,11 @@ function parseAgentStream(output) {
           block?.type === 'tool_use' &&
           typeof block.id === 'string' &&
           typeof block.name === 'string'
-        )
+        ) {
           toolUses.push({ id: block.id, name: block.name });
+          const operation = diagnosticOperation(block, context);
+          if (operation != null) diagnosticOperations.push(operation);
+        }
       }
     }
     if (record.type === 'user') {
@@ -264,8 +318,124 @@ function parseAgentStream(output) {
   return {
     tool_uses: toolUses,
     tool_results: toolResults,
+    diagnostic_operations: diagnosticOperations,
     runtime,
     result_subtype: resultSubtype,
+  };
+}
+
+function traceState(tracePath) {
+  try {
+    const contents = readFileSync(tracePath, 'utf8');
+    return contents === '{}' ? 'placeholder' : 'changed';
+  } catch (error) {
+    return error?.code === 'ENOENT' ? 'missing' : 'unreadable';
+  }
+}
+
+function operationSummary(operations, toolResults, hookAudit) {
+  const results = new Map(
+    toolResults.map((result) => [result.tool_use_id, result]),
+  );
+  const relevant = operations.filter((operation) => operation != null);
+  const last = relevant.at(-1);
+  const result = last == null ? null : results.get(last.id);
+  const decision = [...hookAudit]
+    .reverse()
+    .find((record) =>
+      relevant.some((operation) => operation.id === record.tool_use_id),
+    )?.decision;
+  return {
+    attempts: relevant.length,
+    status:
+      last == null
+        ? 'not-attempted'
+        : result == null
+          ? 'unknown'
+          : result.is_error
+            ? 'failed'
+            : 'succeeded',
+    hook_decision: ['allow', 'deny', 'ask'].includes(decision)
+      ? decision
+      : 'not-observed',
+  };
+}
+
+function traceFailureDiagnostics(tracePath, parsedAgent, hookAudit) {
+  const operations = parsedAgent.diagnostic_operations ?? [];
+  const toolResults = parsedAgent.tool_results ?? [];
+  const bootstrap = operations.filter(
+    (operation) => operation.operation === 'bootstrap-read',
+  );
+  const bootstrapSubjects = new Set(
+    bootstrap.map((operation) => operation.subject),
+  );
+  const bootstrapSummaries = bootstrap.map((operation) =>
+    operationSummary([operation], toolResults, hookAudit),
+  );
+  const byName = (name) =>
+    operations.filter((operation) => operation.operation === name);
+  const specRun = byName('spec-run');
+  for (const record of hookAudit.filter(
+    (entry) => entry.operation === 'approved-spec-run',
+  )) {
+    if (!specRun.some((operation) => operation.id === record.tool_use_id))
+      specRun.push({ id: record.tool_use_id });
+  }
+  const summaries = {
+    spec_run: operationSummary(specRun, toolResults, hookAudit),
+    trace_read: operationSummary(byName('trace-read'), toolResults, hookAudit),
+    trace_write: operationSummary(
+      byName('trace-write'),
+      toolResults,
+      hookAudit,
+    ),
+    trace_validation: operationSummary(
+      byName('trace-validation'),
+      toolResults,
+      hookAudit,
+    ),
+  };
+  const currentTraceState = traceState(tracePath);
+  const count = (status) =>
+    bootstrapSummaries.filter((summary) => summary.status === status).length;
+  const agentResult =
+    parsedAgent.result_subtype == null
+      ? 'unknown'
+      : parsedAgent.result_subtype === 'success'
+        ? 'succeeded'
+        : 'failed';
+  let stoppingReason = 'trace-invalid';
+  if (currentTraceState === 'missing') stoppingReason = 'trace-missing';
+  else if (currentTraceState === 'unreadable')
+    stoppingReason = 'trace-unreadable';
+  else if (summaries.trace_write.status === 'failed')
+    stoppingReason = 'trace-write-failed';
+  else if (count('failed') > 0) stoppingReason = 'bootstrap-read-failed';
+  else if (summaries.trace_read.status === 'failed')
+    stoppingReason = 'trace-read-failed';
+  else if (summaries.spec_run.status === 'not-attempted')
+    stoppingReason = 'spec-run-not-attempted';
+  else if (summaries.trace_write.status === 'not-attempted')
+    stoppingReason = 'trace-write-not-attempted';
+  else if (currentTraceState === 'placeholder')
+    stoppingReason = 'trace-write-not-persisted';
+  else if (summaries.trace_validation.status === 'failed')
+    stoppingReason = 'trace-validation-failed';
+
+  return {
+    trace_state: currentTraceState,
+    agent_result: agentResult,
+    stopping_reason: stoppingReason,
+    bootstrap_reads: {
+      expected: HEALER_BOOTSTRAP_REFERENCES.size,
+      attempted: bootstrap.length,
+      not_attempted: HEALER_BOOTSTRAP_REFERENCES.size - bootstrapSubjects.size,
+      succeeded: count('succeeded'),
+      failed: count('failed'),
+      unknown: count('unknown'),
+    },
+    operations: summaries,
   };
 }
 
@@ -358,6 +528,9 @@ function combineResult(primary, cleanup) {
       error: primary.error,
       reason: primary.reason,
       ...(primary.details == null ? {} : { details: primary.details }),
+      ...(primary.diagnostics == null
+        ? {}
+        : { diagnostics: primary.diagnostics }),
       ...(primary.runtime == null ? {} : { runtime: primary.runtime }),
       ...(cleanup.status === 'failed' ? { cleanup } : {}),
     };
@@ -1314,6 +1487,7 @@ async function evaluateInstalledHealer(signal) {
     temporaryRoot: null,
   };
   let primary;
+  let failureDiagnostics;
   try {
     const definition = validateDefinition(
       readJson(definitionPath, 'case-invalid'),
@@ -1422,6 +1596,7 @@ async function evaluateInstalledHealer(signal) {
 
     const runId = `tg-${randomBytes(12).toString('hex')}`;
     const runDirectory = writeRunArtifacts(definition, state.repository, runId);
+    const tracePath = path.join(runDirectory, 'healer-trace.json');
     await validateArtifact(
       installed.installPath,
       state.repository,
@@ -1443,10 +1618,11 @@ async function evaluateInstalledHealer(signal) {
       spec: hashFile(path.join(state.repository, definition.spec_path)),
     };
     const auditPath = path.join(temporaryRoot, 'hook-audit.jsonl');
+    const approvedSpecFilter = exactPlaywrightFilter(
+      path.join(state.repository, definition.spec_path),
+    );
     const prompt = buildHealerPrompt(definition, {
-      approved_spec_filter: exactPlaywrightFilter(
-        path.join(state.repository, definition.spec_path),
-      ),
+      approved_spec_filter: approvedSpecFilter,
       origin: definition.origin,
       repository: state.repository,
       run_id: runId,
@@ -1465,7 +1641,22 @@ async function evaluateInstalledHealer(signal) {
         verify_process_tree: true,
       },
     );
-    const parsedAgent = parseAgentStream(agent.output);
+    const parsedAgent = parseAgentStream(agent.output, {
+      repository: state.repository,
+      trace_path: tracePath,
+      approved_spec_filter: approvedSpecFilter,
+    });
+    let diagnosticHookAudit = [];
+    try {
+      diagnosticHookAudit = readHookAudit(auditPath);
+    } catch {
+      // An unreadable audit is scored strictly after a valid trace; it is absent here.
+    }
+    failureDiagnostics = traceFailureDiagnostics(
+      tracePath,
+      parsedAgent,
+      diagnosticHookAudit,
+    );
     Object.assign(runtime, parsedAgent.runtime, {
       model_resolved: parsedAgent.runtime.model ?? null,
     });
@@ -1486,19 +1677,29 @@ async function evaluateInstalledHealer(signal) {
           }
         : agentFailure({ ...agent, ...parsedAgent });
       primary.runtime = { ...runtime };
+      primary.diagnostics = failureDiagnostics;
       return { primary, state };
     }
 
-    const tracePath = path.join(runDirectory, 'healer-trace.json');
-    await validateArtifact(
-      installed.installPath,
-      state.repository,
-      'trace',
-      runId,
-      tracePath,
-      signal,
-    );
+    try {
+      await validateArtifact(
+        installed.installPath,
+        state.repository,
+        'trace',
+        runId,
+        tracePath,
+        signal,
+      );
+    } catch (error) {
+      primary = {
+        ...evaluationFailure(error),
+        diagnostics: failureDiagnostics,
+        runtime: { ...runtime },
+      };
+      return { primary, state };
+    }
     const trace = readJson(tracePath, 'trace-invalid');
+    const hookAudit = readHookAudit(auditPath);
     const postcheck = await runTarget(
       definition,
       state.repository,
@@ -1518,7 +1719,7 @@ async function evaluateInstalledHealer(signal) {
       after,
       before,
       criterion_id: definition.criterion.id,
-      hook_audit: readHookAudit(auditPath),
+      hook_audit: hookAudit,
       installed_hook_sha256: installed.hook_sha256,
       postcheck,
       precheck: { baseline, mutant },
@@ -1534,7 +1735,13 @@ async function evaluateInstalledHealer(signal) {
       runtime: { ...runtime },
     };
   } catch (error) {
-    primary = { ...evaluationFailure(error), runtime: { ...runtime } };
+    primary = {
+      ...evaluationFailure(error),
+      ...(failureDiagnostics == null
+        ? {}
+        : { diagnostics: failureDiagnostics }),
+      runtime: { ...runtime },
+    };
   }
   return { primary, state };
 }
@@ -1685,6 +1892,7 @@ module.exports = {
   preparePluginSource,
   runBounded,
   stopProcessTree,
+  traceFailureDiagnostics,
   validateArtifact,
   validPlaywrightHelp,
   validPlaywrightSkillInstall,

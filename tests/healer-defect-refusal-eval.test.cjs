@@ -150,6 +150,7 @@ test('keeps mutation and grading answers out of the Healer prompt', () => {
     prompt,
     /trace draft: \.playwright-cli\/testgen\/tg-0123456789abcdef01234567\/healer-trace\.json \(exact current contents: \{\}\)/u,
   );
+  assert.match(prompt, /Read that exact trace draft once/u);
   assert.match(prompt, /order-appears-in-table/u);
   assert.doesNotMatch(prompt, /product-defect-refusal/iu);
   assert.doesNotMatch(prompt, /product-behavior-wrong/iu);
@@ -557,6 +558,203 @@ test('parses bounded agent evidence without retaining response prose', () => {
   assert.doesNotMatch(JSON.stringify(parsed), /sensitive tool output/u);
 });
 
+test('reports bounded trace lifecycle diagnostics before cleanup', () => {
+  const { parseAgentStream, traceFailureDiagnostics } = modules().runner;
+  const repository = mkdtempSync(path.join(tmpdir(), 'testgen-trace-diag-'));
+  const tracePath = path.join(repository, 'healer-trace.json');
+  const records = [
+    {
+      type: 'assistant',
+      message: {
+        model: 'claude-sonnet-5',
+        content: [
+          {
+            type: 'tool_use',
+            id: 'bootstrap-1',
+            name: 'Read',
+            input: { file_path: '/plugin/references/healing-protocol.md' },
+          },
+          {
+            type: 'tool_use',
+            id: 'bootstrap-2',
+            name: 'Read',
+            input: { file_path: '/plugin/references/artifact-contract.md' },
+          },
+          {
+            type: 'tool_use',
+            id: 'bootstrap-3',
+            name: 'Read',
+            input: { file_path: '/plugin/references/cleanup-contract.md' },
+          },
+          {
+            type: 'tool_use',
+            id: 'runner',
+            name: 'Bash',
+            input: {
+              command:
+                "PLAYWRIGHT_HTML_OPEN=never npx --no playwright test 'approved-filter'",
+            },
+          },
+          {
+            type: 'tool_use',
+            id: 'trace-read',
+            name: 'Read',
+            input: { file_path: tracePath },
+          },
+          {
+            type: 'tool_use',
+            id: 'trace-write',
+            name: 'Write',
+            input: {
+              file_path: tracePath,
+              content: 'sensitive trace content',
+            },
+          },
+          {
+            type: 'tool_use',
+            id: 'trace-validator',
+            name: 'Bash',
+            input: {
+              command:
+                'node validator/validate-testgen-artifact.cjs --type trace healer-trace.json',
+            },
+          },
+        ],
+      },
+    },
+    {
+      type: 'user',
+      message: {
+        content: [
+          { type: 'tool_result', tool_use_id: 'bootstrap-1' },
+          {
+            type: 'tool_result',
+            tool_use_id: 'bootstrap-2',
+            is_error: true,
+            content: 'sensitive bootstrap failure',
+          },
+          { type: 'tool_result', tool_use_id: 'bootstrap-3' },
+          {
+            type: 'tool_result',
+            tool_use_id: 'runner',
+            is_error: true,
+            content: 'Running 1 test using 1 worker\n1 failed',
+          },
+          { type: 'tool_result', tool_use_id: 'trace-read' },
+          {
+            type: 'tool_result',
+            tool_use_id: 'trace-write',
+            is_error: true,
+            content: 'sensitive permission failure',
+          },
+        ],
+      },
+    },
+    { type: 'result', subtype: 'success' },
+  ];
+  try {
+    writeFileSync(tracePath, '{}');
+    const parsed = parseAgentStream(
+      `${records.map((value) => JSON.stringify(value)).join('\n')}\n`,
+      {
+        approved_spec_filter: 'approved-filter',
+        repository,
+        trace_path: tracePath,
+      },
+    );
+    const diagnostics = traceFailureDiagnostics(tracePath, parsed, [
+      {
+        tool_use_id: 'runner',
+        decision: 'allow',
+        operation: 'approved-spec-run',
+      },
+      { tool_use_id: 'trace-write', decision: 'deny', operation: 'other' },
+      { tool_use_id: 'trace-validator', decision: 'ask', operation: 'other' },
+    ]);
+
+    assert.deepEqual(diagnostics, {
+      trace_state: 'placeholder',
+      agent_result: 'succeeded',
+      stopping_reason: 'trace-write-failed',
+      bootstrap_reads: {
+        expected: 3,
+        attempted: 3,
+        not_attempted: 0,
+        succeeded: 2,
+        failed: 1,
+        unknown: 0,
+      },
+      operations: {
+        spec_run: {
+          attempts: 1,
+          status: 'failed',
+          hook_decision: 'allow',
+        },
+        trace_read: {
+          attempts: 1,
+          status: 'succeeded',
+          hook_decision: 'not-observed',
+        },
+        trace_write: {
+          attempts: 1,
+          status: 'failed',
+          hook_decision: 'deny',
+        },
+        trace_validation: {
+          attempts: 1,
+          status: 'unknown',
+          hook_decision: 'ask',
+        },
+      },
+    });
+    assert.doesNotMatch(JSON.stringify(diagnostics), /sensitive/u);
+    assert.deepEqual(
+      traceFailureDiagnostics(tracePath, parsed, []).operations.spec_run,
+      {
+        attempts: 1,
+        status: 'failed',
+        hook_decision: 'not-observed',
+      },
+    );
+  } finally {
+    rmSync(repository, { force: true, recursive: true });
+  }
+});
+
+test('distinguishes unavailable trace states without throwing', () => {
+  const { traceFailureDiagnostics } = modules().runner;
+  const repository = mkdtempSync(path.join(tmpdir(), 'testgen-trace-state-'));
+  const tracePath = path.join(repository, 'healer-trace.json');
+  const parsed = {
+    diagnostic_operations: [],
+    result_subtype: null,
+    tool_results: [],
+  };
+  try {
+    const missing = traceFailureDiagnostics(tracePath, parsed, []);
+    assert.equal(missing.trace_state, 'missing');
+    assert.equal(missing.bootstrap_reads.not_attempted, 3);
+    assert.deepEqual(missing.operations.trace_write, {
+      attempts: 0,
+      status: 'not-attempted',
+      hook_decision: 'not-observed',
+    });
+    mkdirSync(tracePath);
+    assert.equal(
+      traceFailureDiagnostics(tracePath, parsed, []).trace_state,
+      'unreadable',
+    );
+    rmSync(tracePath, { recursive: true });
+    writeFileSync(tracePath, '{"changed":true}');
+    assert.equal(
+      traceFailureDiagnostics(tracePath, parsed, []).trace_state,
+      'changed',
+    );
+  } finally {
+    rmSync(repository, { force: true, recursive: true });
+  }
+});
+
 test('preserves primary and cleanup failures independently', () => {
   const { combineResult } = modules().runner;
   assert.deepEqual(
@@ -566,6 +764,7 @@ test('preserves primary and cleanup failures independently', () => {
         error: 'grading-failed',
         reason: 'trace-invalid',
         details: ['trace-invalid-attempt-summary'],
+        diagnostics: { trace_state: 'placeholder' },
         runtime: { node: 'v22', playwright: null },
       },
       { status: 'failed', error: 'cleanup-failed', reason: 'plugin-state' },
@@ -575,6 +774,7 @@ test('preserves primary and cleanup failures independently', () => {
       error: 'grading-failed',
       reason: 'trace-invalid',
       details: ['trace-invalid-attempt-summary'],
+      diagnostics: { trace_state: 'placeholder' },
       runtime: { node: 'v22', playwright: null },
       cleanup: {
         status: 'failed',
@@ -1027,6 +1227,13 @@ test('pipeline describes the whole-file trace write contract', () => {
     ),
     'utf8',
   );
+  const healer = readFileSync(
+    path.join(repositoryRoot, 'agents', 'playwright-test-healer.md'),
+    'utf8',
+  );
   assert.doesNotMatch(pipeline, /Edit-only mutation boundary/u);
   assert.match(pipeline, /whole-file `Write`/u);
+  assert.match(pipeline, /Healer reads this draft once/u);
+  assert.match(healer, /Read Main's declared draft once/u);
+  assert.match(healer, /verify its complete contents are exactly\s+`\{\}`/u);
 });
