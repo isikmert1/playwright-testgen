@@ -106,11 +106,12 @@ use `not-started` when foreground verification completed without one.
 
 If exact schema shape is needed, use `Read` on
 `${CLAUDE_PLUGIN_ROOT}/schemas/healer-trace.v1.schema.json`; never use Bash,
-`cat`, or an environment-variable probe. Assemble the complete trace first,
-then replace Main's declared draft with one whole-file `Write` and validate
-once. If validation fails, rebuild the complete artifact from its error codes
-and overwrite it with another whole-file `Write`; never patch one field or
-retry unchanged content.
+`cat`, or an environment-variable probe. Assemble the complete trace first.
+Read Main's declared draft once and verify its complete contents are exactly
+`{}`; stop if they are not. Then replace it with one whole-file `Write` and
+validate once. If validation fails, rebuild the complete artifact from its
+error codes and overwrite it with another whole-file `Write`; never patch one
+field or retry unchanged content.
 
 Validate from the repository root with exactly:
 

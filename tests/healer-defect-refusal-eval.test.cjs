@@ -150,6 +150,7 @@ test('keeps mutation and grading answers out of the Healer prompt', () => {
     prompt,
     /trace draft: \.playwright-cli\/testgen\/tg-0123456789abcdef01234567\/healer-trace\.json \(exact current contents: \{\}\)/u,
   );
+  assert.match(prompt, /Read that exact trace draft once/u);
   assert.match(prompt, /order-appears-in-table/u);
   assert.doesNotMatch(prompt, /product-defect-refusal/iu);
   assert.doesNotMatch(prompt, /product-behavior-wrong/iu);
@@ -1027,6 +1028,13 @@ test('pipeline describes the whole-file trace write contract', () => {
     ),
     'utf8',
   );
+  const healer = readFileSync(
+    path.join(repositoryRoot, 'agents', 'playwright-test-healer.md'),
+    'utf8',
+  );
   assert.doesNotMatch(pipeline, /Edit-only mutation boundary/u);
   assert.match(pipeline, /whole-file `Write`/u);
+  assert.match(pipeline, /Healer reads this draft once/u);
+  assert.match(healer, /Read Main's declared draft once/u);
+  assert.match(healer, /verify its complete contents are exactly\s+`\{\}`/u);
 });

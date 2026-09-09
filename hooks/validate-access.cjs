@@ -1,6 +1,6 @@
 const { existsSync, readdirSync, realpathSync, statSync } = require('node:fs');
 const path = require('node:path');
-const { deny } = require('./hook-result.cjs');
+const { decision, deny } = require('./hook-result.cjs');
 const {
   RUN_ID,
   comparablePath,
@@ -201,7 +201,10 @@ function validateFileAccess(payload) {
           );
         }
       }
-      return {};
+      return decision(
+        'allow',
+        'Mutation is bound to the exact role-owned Testgen artifact.',
+      );
     }
   }
 
@@ -276,7 +279,10 @@ function validateFileAccess(payload) {
     );
   }
 
-  return {};
+  return decision(
+    'allow',
+    'Mutation is bound to an exact run-policy write path.',
+  );
 }
 
 function validateGrepAccess(payload) {

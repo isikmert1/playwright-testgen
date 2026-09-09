@@ -1780,13 +1780,22 @@ test('binds artifact mutations to the role that owns each artifact', () => {
     assert.deepEqual(
       runToolHook(
         targetRepository,
-        'Write',
-        { file_path: handoffPath },
-        'playwright-test-author',
+        'Read',
+        { file_path: tracePath },
+        'playwright-test-healer',
       ),
       {},
     );
-    assert.deepEqual(
+    assert.equal(
+      runToolHook(
+        targetRepository,
+        'Write',
+        { file_path: handoffPath },
+        'playwright-test-author',
+      ).permissionDecision,
+      'allow',
+    );
+    assert.equal(
       runToolHook(
         targetRepository,
         'Write',
@@ -1795,8 +1804,8 @@ test('binds artifact mutations to the role that owns each artifact', () => {
           content: '{"schema_version":"healer-trace.v1"}',
         },
         'playwright-test-healer',
-      ),
-      {},
+      ).permissionDecision,
+      'allow',
     );
     writeFileSync(tracePath, '{}');
     const traceEdit = runToolHook(
@@ -1826,7 +1835,7 @@ test('binds artifact mutations to the role that owns each artifact', () => {
 
     const rejectedTrace = '{"schema_version":"bad"}';
     writeFileSync(tracePath, rejectedTrace);
-    assert.deepEqual(
+    assert.equal(
       runToolHook(
         targetRepository,
         'Write',
@@ -1835,8 +1844,8 @@ test('binds artifact mutations to the role that owns each artifact', () => {
           content: '{"schema_version":"healer-trace.v1"}',
         },
         'playwright-test-healer',
-      ),
-      {},
+      ).permissionDecision,
+      'allow',
     );
 
     rmSync(tracePath);
@@ -1895,15 +1904,16 @@ test('limits governed file mutations to explicitly approved paths', () => {
       allowed_write_paths: ['tests/selectors.ts'],
     });
 
-    assert.deepEqual(
-      runToolHook(targetRepository, 'Edit', { file_path: helperPath }),
-      {},
+    assert.equal(
+      runToolHook(targetRepository, 'Edit', { file_path: helperPath })
+        .permissionDecision,
+      'allow',
     );
-    assert.deepEqual(
+    assert.equal(
       runToolHook(targetRepository, 'Edit', {
         file_path: path.join(targetRepository, 'tests', 'account.spec.ts'),
-      }),
-      {},
+      }).permissionDecision,
+      'allow',
     );
 
     const denied = runToolHook(targetRepository, 'Write', {

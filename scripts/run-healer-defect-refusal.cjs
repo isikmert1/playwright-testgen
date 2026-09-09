@@ -152,6 +152,7 @@ function buildHealerPrompt(definition, runtime) {
     'approved project/config options: none',
     `validated handoff: .playwright-cli/testgen/${runtime.run_id}/handoff.json`,
     `trace draft: .playwright-cli/testgen/${runtime.run_id}/healer-trace.json (exact current contents: {})`,
+    'Read that exact trace draft once immediately before replacing it with one whole-file Write.',
     `origin: ${runtime.origin}`,
     `scenario_ref: ${definition.scenario_ref}`,
     `criterion ${definition.criterion.id}: ${definition.criterion.outcome}`,
