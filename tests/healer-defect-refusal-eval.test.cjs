@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const { spawnSync } = require('node:child_process');
 const {
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -219,6 +220,80 @@ test('prepares an exact-revision plugin source without evaluation answers', asyn
     assert.throws(
       () => assertPluginBlind(source),
       /installed-evaluation-material/u,
+    );
+  } finally {
+    rmSync(temporaryRoot, { force: true, recursive: true });
+  }
+});
+
+test('rejects an installed plugin with a stale access policy', async () => {
+  const { findInstalledPlugin, preparePluginSource } = modules().runner;
+  const temporaryRoot = mkdtempSync(
+    path.join(tmpdir(), 'testgen-plugin-integrity-'),
+  );
+  const revision = spawnSync(
+    'git',
+    [
+      '-c',
+      `safe.directory=${repositoryRoot.replaceAll('\\', '/')}`,
+      'rev-parse',
+      'HEAD',
+    ],
+    { cwd: repositoryRoot, encoding: 'utf8', windowsHide: true },
+  ).stdout.trim();
+  try {
+    const prepared = await preparePluginSource(
+      repositoryRoot,
+      temporaryRoot,
+      revision,
+    );
+    cpSync(
+      path.join(repositoryRoot, 'hooks', 'validate-access.cjs'),
+      path.join(prepared.source, 'hooks', 'validate-access.cjs'),
+    );
+    const dependencyTarget = path.join(
+      prepared.source,
+      'node_modules',
+      'shell-quote',
+    );
+    cpSync(
+      path.join(repositoryRoot, 'node_modules', 'shell-quote'),
+      dependencyTarget,
+      {
+        recursive: true,
+      },
+    );
+    const plugins = [
+      {
+        id: prepared.plugin_id,
+        scope: 'local',
+        enabled: true,
+        version: revision.slice(0, 12),
+        installPath: prepared.source,
+      },
+    ];
+
+    assert.doesNotThrow(() =>
+      findInstalledPlugin(
+        plugins,
+        prepared.plugin_id,
+        repositoryRoot,
+        revision,
+      ),
+    );
+    writeFileSync(
+      path.join(prepared.source, 'hooks', 'validate-access.cjs'),
+      'stale',
+    );
+    assert.throws(
+      () =>
+        findInstalledPlugin(
+          plugins,
+          prepared.plugin_id,
+          repositoryRoot,
+          revision,
+        ),
+      /installed-revision-unverified/u,
     );
   } finally {
     rmSync(temporaryRoot, { force: true, recursive: true });
@@ -663,6 +738,7 @@ test('reports bounded trace lifecycle diagnostics before cleanup', () => {
       },
     );
     const diagnostics = traceFailureDiagnostics(tracePath, parsed, [
+      { tool_use_id: 'bootstrap-1', decision: 'allow', operation: 'other' },
       {
         tool_use_id: 'runner',
         decision: 'allow',
@@ -683,6 +759,12 @@ test('reports bounded trace lifecycle diagnostics before cleanup', () => {
         succeeded: 2,
         failed: 1,
         unknown: 0,
+        hook_decisions: {
+          allow: 1,
+          deny: 0,
+          ask: 0,
+          not_observed: 2,
+        },
       },
       operations: {
         spec_run: {

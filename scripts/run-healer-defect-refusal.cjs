@@ -38,6 +38,7 @@ const CRITICAL_PLUGIN_FILES = [
   'agents/playwright-test-healer.md',
   'hooks/hook-audit.cjs',
   'hooks/hooks.json',
+  'hooks/validate-access.cjs',
   'hooks/validate-bash.cjs',
   'schemas/healer-trace.v1.schema.json',
   'scripts/validate-healer-trace.cjs',
@@ -399,6 +400,9 @@ function traceFailureDiagnostics(tracePath, parsedAgent, hookAudit) {
   const currentTraceState = traceState(tracePath);
   const count = (status) =>
     bootstrapSummaries.filter((summary) => summary.status === status).length;
+  const countHookDecision = (decision) =>
+    bootstrapSummaries.filter((summary) => summary.hook_decision === decision)
+      .length;
   const agentResult =
     parsedAgent.result_subtype == null
       ? 'unknown'
@@ -434,6 +438,12 @@ function traceFailureDiagnostics(tracePath, parsedAgent, hookAudit) {
       succeeded: count('succeeded'),
       failed: count('failed'),
       unknown: count('unknown'),
+      hook_decisions: {
+        allow: countHookDecision('allow'),
+        deny: countHookDecision('deny'),
+        ask: countHookDecision('ask'),
+        not_observed: countHookDecision('not-observed'),
+      },
     },
     operations: summaries,
   };
@@ -1887,6 +1897,7 @@ module.exports = {
   command,
   emptyRuntime,
   evaluationFailure,
+  findInstalledPlugin,
   matchesInstalledPlugin,
   parseAgentStream,
   preparePluginSource,

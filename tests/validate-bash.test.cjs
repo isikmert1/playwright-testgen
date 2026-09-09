@@ -1923,6 +1923,28 @@ test('allows only canonical installed-plugin reads required by governed agents',
   });
 });
 
+test('derives the installed plugin root when Claude does not export it', () => {
+  withTargetRepository(({ targetRepository }) => {
+    const result = runToolHook(
+      targetRepository,
+      'Read',
+      {
+        file_path: path.join(
+          repositoryRoot,
+          'skills',
+          'playwright-testgen',
+          'references',
+          'healing-protocol.md',
+        ),
+      },
+      'playwright-test-healer',
+      { CLAUDE_PLUGIN_ROOT: '' },
+    );
+
+    assert.equal(result.permissionDecision, 'allow');
+  });
+});
+
 test('allows Healer to read only its exact run-bound inputs', () => {
   withTargetRepository(({ runDirectory, targetRepository }) => {
     const specPath = path.join(targetRepository, 'tests', 'account.spec.ts');

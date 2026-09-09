@@ -69,8 +69,11 @@ function policiesNear(...paths) {
 
 function validatePluginRead(payload, absolute, canonical) {
   if (payload.tool_name !== 'Read') return null;
-  const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
-  if (typeof pluginRoot !== 'string' || pluginRoot.length === 0) return null;
+  const pluginRoot =
+    typeof process.env.CLAUDE_PLUGIN_ROOT === 'string' &&
+    process.env.CLAUDE_PLUGIN_ROOT.length > 0
+      ? process.env.CLAUDE_PLUGIN_ROOT
+      : path.resolve(__dirname, '..');
 
   let canonicalPluginRoot;
   try {
