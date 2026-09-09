@@ -68,6 +68,11 @@ npm run check
 claude plugin validate .
 ```
 
+The independently graded installed-Healer case is separate because it invokes
+Claude Code and consumes model budget. From a clean committed checkout, run
+`npm run eval:healer-defect-refusal`; its target, scoring contract, isolation,
+and cache behavior are documented in [evals/README.md](evals/README.md).
+
 ## Local marketplace installation
 
 ```sh

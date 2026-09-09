@@ -8,6 +8,7 @@
     "node": ">=22.13.0"
   },
   "scripts": {
+    "eval:healer-defect-refusal": "node scripts/run-healer-defect-refusal.cjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "eslint .",
