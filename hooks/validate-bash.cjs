@@ -1,20 +1,27 @@
 #!/usr/bin/env node
 
 const { readFileSync } = require('node:fs');
-const {
-  validateFileAccess,
-  validateGrepAccess,
-} = require('./validate-access.cjs');
-const { auditDecision } = require('./hook-audit.cjs');
-const { deny } = require('./hook-result.cjs');
-const { validateCommand } = require('./validate-command.cjs');
-const { APPROVED_RUNNER_REASON } = require('./validate-workflow-command.cjs');
 
 const GOVERNED_AGENT =
   /^(?:playwright-testgen:)?playwright-test-(?:author|healer)$/u;
 
+function deny(permissionDecisionReason) {
+  return {
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'deny',
+      permissionDecisionReason,
+    },
+  };
+}
+
 function evaluate(payload) {
   if (!GOVERNED_AGENT.test(payload?.agent_type ?? '')) return {};
+  const {
+    validateFileAccess,
+    validateGrepAccess,
+  } = require('./validate-access.cjs');
+  const { validateCommand } = require('./validate-command.cjs');
   if (
     payload?.hook_event_name !== 'PreToolUse' ||
     typeof payload.cwd !== 'string' ||
@@ -34,26 +41,38 @@ function evaluate(payload) {
 
 function main() {
   let payload;
-  let result;
   try {
     payload = JSON.parse(readFileSync(0, 'utf8'));
-    result = evaluate(payload);
   } catch {
-    result = deny(
-      'Hook validation could not complete. Retry through a normal governed tool call; if it repeats, return the hook failure to Main.',
+    process.stdout.write(
+      `${JSON.stringify(deny('Hook input is invalid. Retry through a normal governed tool call; if it repeats, return the hook failure to Main.'))}\n`,
     );
+    return;
   }
-  const operation =
-    result?.hookSpecificOutput?.permissionDecisionReason ===
-    APPROVED_RUNNER_REASON
-      ? 'approved-spec-run'
-      : 'other';
-  if (!auditDecision(payload, result, __filename, operation)) {
-    result = deny(
-      'Hook governance evidence could not be recorded. Stop this evaluation and report hook-governance-unverified.',
+
+  try {
+    const { auditDecision } = require('./hook-audit.cjs');
+    const {
+      APPROVED_RUNNER_REASON,
+    } = require('./validate-workflow-command.cjs');
+    let result = evaluate(payload);
+    const operation =
+      result?.hookSpecificOutput?.permissionDecisionReason ===
+      APPROVED_RUNNER_REASON
+        ? 'approved-spec-run'
+        : 'other';
+    if (!auditDecision(payload, result, __filename, operation)) {
+      result = deny(
+        'Hook governance evidence could not be recorded. Stop this evaluation and report hook-governance-unverified.',
+      );
+    }
+    process.stdout.write(`${JSON.stringify(result)}\n`);
+  } catch {
+    process.stderr.write(
+      'Playwright Testgen hook validation could not start; the governed operation is blocked. Reinstall the plugin and retry.\n',
     );
+    process.exitCode = 2;
   }
-  process.stdout.write(`${JSON.stringify(result)}\n`);
 }
 
 if (require.main === module) main();

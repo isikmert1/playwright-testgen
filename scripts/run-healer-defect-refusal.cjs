@@ -40,11 +40,17 @@ const CRITICAL_PLUGIN_FILES = [
   'hooks/hooks.json',
   'hooks/validate-access.cjs',
   'hooks/validate-bash.cjs',
+  'hooks/validate-command.cjs',
   'schemas/healer-trace.v1.schema.json',
+  'scripts/print-approved-spec-filter.cjs',
   'scripts/validate-healer-trace.cjs',
   'scripts/validate-testgen-artifact.cjs',
   'skills/playwright-testgen/SKILL.md',
   'skills/playwright-testgen/references/healing-protocol.md',
+  'vendor/shell-quote/LICENSE',
+  'vendor/shell-quote/SOURCE.md',
+  'vendor/shell-quote/parse.js',
+  'vendor/shell-quote/quote.js',
 ];
 const FORBIDDEN_PLUGIN_PATHS = [
   'evals',
@@ -92,8 +98,10 @@ function executable(name) {
 
 async function command(commandName, args, options = {}) {
   const result = await runBounded(commandName, args, {
+    capture_stderr: options.capture_stderr,
     cwd: options.cwd ?? repositoryRoot,
     env: options.env ?? process.env,
+    input: options.input,
     signal: options.signal,
     timeout_ms: options.timeout_ms ?? LIFECYCLE_COMMAND_TIMEOUT_MS,
     verify_process_tree: true,
@@ -801,7 +809,7 @@ function runBounded(commandName, args, options) {
       cwd: options.cwd,
       detached: process.platform !== 'win32',
       env: options.env,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: [options.input == null ? 'ignore' : 'pipe', 'pipe', 'pipe'],
       windowsHide: true,
       ...(process.platform === 'win32' && /\.(?:cmd|bat)$/iu.test(commandName)
         ? { shell: true }
@@ -850,6 +858,10 @@ function runBounded(commandName, args, options) {
     }, options.timeout_ms);
     options.signal?.addEventListener('abort', cancel, { once: true });
     if (options.signal?.aborted) cancel();
+    if (options.input != null) {
+      child.stdin.on('error', () => {});
+      child.stdin.end(options.input);
+    }
     child.stdout.on('data', (chunk) => {
       outputBytes += chunk.length;
       if (outputBytes > MAX_OUTPUT_BYTES) {
@@ -926,6 +938,28 @@ async function marketplaceList(repository, signal) {
 
 function sameJson(left, right) {
   return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function stateDifferenceCategories(before, after, ownedName, kind) {
+  const name = (entry) => (kind === 'plugin' ? entry.id : entry.name);
+  const key = (entry) =>
+    kind === 'plugin'
+      ? JSON.stringify([entry.id, entry.scope, entry.projectPath ?? null])
+      : entry.name;
+  const previous = new Map(before.map((entry) => [key(entry), entry]));
+  const current = new Map(after.map((entry) => [key(entry), entry]));
+  const categories = new Set();
+
+  for (const identity of new Set([...previous.keys(), ...current.keys()])) {
+    const left = previous.get(identity);
+    const right = current.get(identity);
+    if (left != null && right != null && sameJson(left, right)) continue;
+    const owner = name(right ?? left) === ownedName ? 'evaluation' : 'other';
+    const change =
+      left == null ? 'added' : right == null ? 'removed' : 'changed';
+    categories.add(`${owner}-${kind}-${change}`);
+  }
+  return [...categories].sort();
 }
 
 async function rootGit(args, error, signal) {
@@ -1025,8 +1059,6 @@ function versionAtLeast(value, minimum) {
 async function preflight(signal, runtime) {
   if (!versionAtLeast(process.versions.node, '22.13.0'))
     fail('node-version-unsupported');
-  if (!existsSync(path.join(repositoryRoot, 'node_modules', 'shell-quote')))
-    fail('plugin-dependencies-unavailable');
   const npmCli = process.env.npm_execpath;
   if (typeof npmCli !== 'string' || !existsSync(npmCli))
     fail('npm-unavailable');
@@ -1512,7 +1544,6 @@ function findInstalledPlugin(plugins, pluginId, repository, revision) {
   }
   assertPluginBlind(installPath);
   try {
-    require.resolve('shell-quote', { paths: [installPath] });
     sourceDigest = hashFiles(repositoryRoot, CRITICAL_PLUGIN_FILES);
     installedDigest = hashFiles(installPath, CRITICAL_PLUGIN_FILES);
   } catch {
@@ -1524,6 +1555,57 @@ function findInstalledPlugin(plugins, pluginId, repository, revision) {
     hook_sha256: hashFile(path.join(installPath, 'hooks', 'validate-bash.cjs')),
     runtime_sha256: installedDigest,
   };
+}
+
+async function verifyInstalledHook(installPath, repository, auditPath, signal) {
+  const toolUseId = `hook-preflight-${randomBytes(8).toString('hex')}`;
+  const payload = {
+    agent_type: 'playwright-test-healer',
+    cwd: repository,
+    hook_event_name: 'PreToolUse',
+    tool_name: 'Bash',
+    tool_input: { command: 'node --version' },
+    tool_use_id: toolUseId,
+  };
+  const hookPath = path.join(installPath, 'hooks', 'validate-bash.cjs');
+  const timeoutSeconds = readJson(
+    path.join(installPath, 'hooks', 'hooks.json'),
+    'installed-hook-unavailable',
+  )?.hooks?.PreToolUse?.[0]?.hooks?.[0]?.timeout;
+  if (
+    typeof timeoutSeconds !== 'number' ||
+    !Number.isFinite(timeoutSeconds) ||
+    timeoutSeconds <= 0
+  )
+    fail('installed-hook-unavailable');
+  const output = await command(process.execPath, [hookPath], {
+    capture_stderr: true,
+    cwd: repository,
+    env: {
+      ...process.env,
+      CLAUDE_PLUGIN_ROOT: installPath,
+      PLAYWRIGHT_TESTGEN_HOOK_AUDIT_PATH: auditPath,
+    },
+    input: JSON.stringify(payload),
+    signal,
+    timeout_ms: timeoutSeconds * 1000,
+    error: 'installed-hook-unavailable',
+  });
+  const response = readJsonOutput(output, 'installed-hook-unavailable');
+  if (response?.hookSpecificOutput?.permissionDecision !== 'allow')
+    fail('installed-hook-unavailable');
+  const record = readHookAudit(auditPath).find(
+    (entry) => entry.tool_use_id === toolUseId,
+  );
+  if (
+    record?.agent_type !== payload.agent_type ||
+    record.tool_name !== payload.tool_name ||
+    record.decision !== 'allow' ||
+    record.operation !== 'other' ||
+    record.hook_sha256 !== hashFile(hookPath)
+  )
+    fail('hook-governance-unverified');
+  return record;
 }
 
 function readHookAudit(filename) {
@@ -1699,6 +1781,12 @@ async function evaluateInstalledHealer(signal) {
       path.join(runDirectory, 'handoff.json'),
       signal,
     );
+    await verifyInstalledHook(
+      installed.installPath,
+      state.repository,
+      path.join(temporaryRoot, 'hook-preflight-audit.jsonl'),
+      signal,
+    );
     state.server = await startServer(
       state.repository,
       definition.origin,
@@ -1842,6 +1930,7 @@ async function evaluateInstalledHealer(signal) {
 
 async function cleanupEvaluation(state) {
   const failures = [];
+  const details = [];
   if (state.server != null && !(await stopProcessTree(state.server)))
     failures.push('server-cleanup-failed');
   if (
@@ -1883,20 +1972,26 @@ async function cleanupEvaluation(state) {
   }
   if (state.repository != null && state.plugin_state_before != null) {
     try {
-      if (
-        !sameJson(
-          normalizedPluginState(await pluginList(state.repository)),
-          state.plugin_state_before,
-        )
-      )
+      const pluginChanges = stateDifferenceCategories(
+        state.plugin_state_before,
+        normalizedPluginState(await pluginList(state.repository)),
+        state.plugin_id,
+        'plugin',
+      );
+      if (pluginChanges.length !== 0) {
         failures.push('plugin-state-changed');
-      if (
-        !sameJson(
-          normalizedMarketplaceState(await marketplaceList(state.repository)),
-          state.marketplace_state_before,
-        )
-      )
+        details.push(...pluginChanges);
+      }
+      const marketplaceChanges = stateDifferenceCategories(
+        state.marketplace_state_before,
+        normalizedMarketplaceState(await marketplaceList(state.repository)),
+        state.marketplace_name,
+        'marketplace',
+      );
+      if (marketplaceChanges.length !== 0) {
         failures.push('marketplace-state-changed');
+        details.push(...marketplaceChanges);
+      }
     } catch (error) {
       failures.push(error.code ?? 'plugin-state-unavailable');
     }
@@ -1927,6 +2022,9 @@ async function cleanupEvaluation(state) {
         status: 'failed',
         error: 'cleanup-failed',
         reason: failures.join(','),
+        ...(details.length === 0
+          ? {}
+          : { details: [...new Set(details)].sort().slice(0, 12) }),
       };
 }
 
@@ -1986,10 +2084,12 @@ module.exports = {
   parseAgentStream,
   preparePluginSource,
   runBounded,
+  stateDifferenceCategories,
   stopProcessTree,
   traceFailureDiagnostics,
   validateArtifact,
   validPlaywrightHelp,
   validPlaywrightSkillInstall,
+  verifyInstalledHook,
   windowsProcessTree,
 };

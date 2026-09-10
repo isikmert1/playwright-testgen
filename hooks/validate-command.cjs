@@ -1,6 +1,6 @@
 const { existsSync, readFileSync, readdirSync, statSync } = require('node:fs');
 const path = require('node:path');
-const parse = require('shell-quote/parse');
+const parse = require('../vendor/shell-quote/parse');
 const { decision, deny } = require('./hook-result.cjs');
 const {
   RUN_ID,
@@ -135,6 +135,7 @@ function hasUnsupportedShellSyntax(command) {
       if (character === '\\') index += 1;
       else if (character === '"') quote = null;
       else if (character === '`') return true;
+      else if (character === '$' && command[index + 1] === '(') return true;
       continue;
     }
     if (character === '\\') {
@@ -150,6 +151,7 @@ function hasUnsupportedShellSyntax(command) {
       continue;
     }
     if (character === '`') return true;
+    if (character === '$' && command[index + 1] === '(') return true;
     if (
       quote == null &&
       character === '$' &&
