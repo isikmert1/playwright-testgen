@@ -1,4 +1,4 @@
-const { quote } = require('shell-quote');
+const quote = require('../vendor/shell-quote/quote');
 const { loadPolicy, RUN_ID } = require('../hooks/run-policy.cjs');
 
 function main([runId]) {

@@ -44,10 +44,14 @@ The command uses the authenticated Claude Code installation and therefore
 consumes the configured model's budget. It provisions a disposable target,
 installs this exact Testgen revision at project-local scope, applies hard turn,
 cost, and time limits, emits bounded JSON, and removes the temporary target.
+Before the paid agent call, it executes the installed hook in a fresh child
+process and requires an explicit audited allow decision.
 Evaluation cases, tests, and grading scripts are omitted from the installed
 plugin source, so the Healer does not receive the expected verdict.
 Claude's shared plugin cache and Playwright browser cache may retain downloaded
-content; existing plugin registrations are snapshotted and must be restored.
+content. The evaluator removes only registrations it created; if the final
+snapshot differs, it reports bounded owned/other change categories without
+overwriting concurrent changes.
 
 Owned target runners must execute the exact approved spec filter and attribute
 a mutant failure to the exact descriptive `step_title` supplied from the

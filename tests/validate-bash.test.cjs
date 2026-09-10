@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
 const {
+  cpSync,
   mkdirSync,
   mkdtempSync,
   linkSync,
@@ -151,10 +152,7 @@ test('denies malformed hook input instead of failing open', () => {
   const output = JSON.parse(result.stdout).hookSpecificOutput;
   assert.equal(output.hookEventName, 'PreToolUse');
   assert.equal(output.permissionDecision, 'deny');
-  assert.match(
-    output.permissionDecisionReason,
-    /validation could not complete/iu,
-  );
+  assert.match(output.permissionDecisionReason, /hook input is invalid/iu);
 });
 
 test('allows main-thread calls without an agent type to remain ungoverned', () => {
@@ -171,6 +169,49 @@ test('allows main-thread calls without an agent type to remain ungoverned', () =
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stderr, '');
   assert.deepEqual(JSON.parse(result.stdout), {});
+});
+
+test('fails closed when the hook runtime cannot load', () => {
+  const temporaryRoot = mkdtempSync(path.join(tmpdir(), 'testgen-hook-load-'));
+  const temporaryHook = path.join(temporaryRoot, 'hooks', 'validate-bash.cjs');
+  try {
+    cpSync(path.join(repositoryRoot, 'hooks'), path.dirname(temporaryHook), {
+      recursive: true,
+    });
+    const started = Date.now();
+    const result = spawnSync(process.execPath, [temporaryHook], {
+      cwd: temporaryRoot,
+      encoding: 'utf8',
+      input: JSON.stringify({
+        agent_type: 'playwright-test-healer',
+        cwd: temporaryRoot,
+        hook_event_name: 'PreToolUse',
+        tool_input: { command: 'node --version' },
+        tool_name: 'Bash',
+      }),
+    });
+
+    assert.equal(result.status, 2);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, /hook validation could not start/iu);
+    assert.ok(Buffer.byteLength(result.stderr, 'utf8') < 512);
+    assert.ok(Date.now() - started < 4000);
+
+    const mainResult = spawnSync(process.execPath, [temporaryHook], {
+      cwd: temporaryRoot,
+      encoding: 'utf8',
+      input: JSON.stringify({
+        cwd: temporaryRoot,
+        hook_event_name: 'PreToolUse',
+        tool_input: { command: 'node --version' },
+        tool_name: 'Bash',
+      }),
+    });
+    assert.equal(mainResult.status, 0, mainResult.stderr);
+    assert.deepEqual(JSON.parse(mainResult.stdout), {});
+  } finally {
+    rmSync(temporaryRoot, { force: true, recursive: true });
+  }
 });
 
 function runCliHook(cwd, command, agentType = 'playwright-test-author') {
@@ -536,6 +577,31 @@ test('denies shell syntax that shell-quote leaves inside word tokens', () => {
         'deny',
       );
     }
+  });
+});
+
+test('denies command substitution in an otherwise valid CLI command', () => {
+  withTargetRepository(({ targetRepository }) => {
+    for (const value of ['"$(id)"', '"prefix$(echo nested)suffix"']) {
+      const result = runCliHook(
+        targetRepository,
+        `-s=${runId} fill e1 ${value}`,
+      );
+
+      assert.equal(result.permissionDecision, 'deny');
+      assert.match(result.permissionDecisionReason, /shell expansion syntax/iu);
+    }
+  });
+});
+
+test('preserves single-quoted substitution text as literal data', () => {
+  withTargetRepository(({ targetRepository }) => {
+    const result = runCliHook(
+      targetRepository,
+      `-s=${runId} fill e1 'literal $(not-executed)'`,
+    );
+
+    assert.equal(result.permissionDecision, 'allow');
   });
 });
 

@@ -227,75 +227,268 @@ test('prepares an exact-revision plugin source without evaluation answers', asyn
   }
 });
 
-test('rejects an installed plugin with a stale access policy', async () => {
-  const { findInstalledPlugin, preparePluginSource } = modules().runner;
+test('rejects an installed plugin with a stale access policy', () => {
+  const { findInstalledPlugin } = modules().runner;
   const temporaryRoot = mkdtempSync(
     path.join(tmpdir(), 'testgen-plugin-integrity-'),
   );
-  const revision = spawnSync(
-    'git',
-    [
-      '-c',
-      `safe.directory=${repositoryRoot.replaceAll('\\', '/')}`,
-      'rev-parse',
-      'HEAD',
-    ],
-    { cwd: repositoryRoot, encoding: 'utf8', windowsHide: true },
-  ).stdout.trim();
+  const revision = 'a'.repeat(40);
+  const source = path.join(temporaryRoot, 'plugin');
+  const excluded = new Set([
+    '.git',
+    'benchmarks',
+    'evals',
+    'node_modules',
+    'tests',
+    'scripts/run-healer-defect-refusal.cjs',
+    'scripts/score-healer-defect-refusal.cjs',
+    'scripts/windows-process-tree.cjs',
+  ]);
   try {
-    const prepared = await preparePluginSource(
-      repositoryRoot,
-      temporaryRoot,
-      revision,
-    );
-    cpSync(
-      path.join(repositoryRoot, 'hooks', 'validate-access.cjs'),
-      path.join(prepared.source, 'hooks', 'validate-access.cjs'),
-    );
-    const dependencyTarget = path.join(
-      prepared.source,
-      'node_modules',
-      'shell-quote',
-    );
-    cpSync(
-      path.join(repositoryRoot, 'node_modules', 'shell-quote'),
-      dependencyTarget,
-      {
-        recursive: true,
+    cpSync(repositoryRoot, source, {
+      filter: (candidate) => {
+        const relative = path
+          .relative(repositoryRoot, candidate)
+          .replaceAll('\\', '/');
+        return ![...excluded].some(
+          (entry) => relative === entry || relative.startsWith(`${entry}/`),
+        );
       },
-    );
+      recursive: true,
+    });
+    const pluginId = 'playwright-testgen@test-marketplace';
     const plugins = [
       {
-        id: prepared.plugin_id,
+        id: pluginId,
         scope: 'local',
         enabled: true,
         version: revision.slice(0, 12),
-        installPath: prepared.source,
+        installPath: source,
       },
     ];
 
     assert.doesNotThrow(() =>
-      findInstalledPlugin(
-        plugins,
-        prepared.plugin_id,
-        repositoryRoot,
-        revision,
-      ),
+      findInstalledPlugin(plugins, pluginId, repositoryRoot, revision),
     );
-    writeFileSync(
-      path.join(prepared.source, 'hooks', 'validate-access.cjs'),
-      'stale',
-    );
+    writeFileSync(path.join(source, 'hooks', 'validate-access.cjs'), 'stale');
     assert.throws(
-      () =>
-        findInstalledPlugin(
-          plugins,
-          prepared.plugin_id,
-          repositoryRoot,
-          revision,
-        ),
+      () => findInstalledPlugin(plugins, pluginId, repositoryRoot, revision),
       /installed-revision-unverified/u,
     );
+  } finally {
+    rmSync(temporaryRoot, { force: true, recursive: true });
+  }
+});
+
+test('vendors the unchanged shell-quote runtime and license', () => {
+  for (const filename of ['parse.js', 'quote.js']) {
+    assert.deepEqual(
+      readFileSync(
+        path.join(repositoryRoot, 'vendor', 'shell-quote', filename),
+      ),
+      readFileSync(
+        path.join(repositoryRoot, 'node_modules', 'shell-quote', filename),
+      ),
+      filename,
+    );
+  }
+  assert.equal(
+    readFileSync(
+      path.join(repositoryRoot, 'vendor', 'shell-quote', 'LICENSE'),
+      'utf8',
+    )
+      .replace(/[ \t]+$/gmu, '')
+      .trimEnd(),
+    readFileSync(
+      path.join(repositoryRoot, 'node_modules', 'shell-quote', 'LICENSE'),
+      'utf8',
+    )
+      .replace(/[ \t]+$/gmu, '')
+      .trimEnd(),
+  );
+  assert.match(
+    readFileSync(
+      path.join(repositoryRoot, 'vendor', 'shell-quote', 'SOURCE.md'),
+      'utf8',
+    ),
+    /shell-quote 1\.10\.0.*github\.com\/ljharb\/shell-quote/isu,
+  );
+});
+
+test('executes the installed hook and observes an explicit decision', async () => {
+  const { verifyInstalledHook } = modules().runner;
+  const temporaryRoot = mkdtempSync(
+    path.join(tmpdir(), 'testgen-installed-hook-'),
+  );
+  const installPath = path.join(temporaryRoot, 'plugin');
+  const repository = path.join(temporaryRoot, 'repository');
+  const auditPath = path.join(temporaryRoot, 'hook-preflight.jsonl');
+  const runId = 'tg-0123456789abcdef01234567';
+  try {
+    cpSync(
+      path.join(repositoryRoot, 'hooks'),
+      path.join(installPath, 'hooks'),
+      {
+        recursive: true,
+      },
+    );
+    cpSync(
+      path.join(repositoryRoot, 'vendor'),
+      path.join(installPath, 'vendor'),
+      { recursive: true },
+    );
+    mkdirSync(path.join(installPath, 'scripts'), { recursive: true });
+    cpSync(
+      path.join(repositoryRoot, 'scripts', 'print-approved-spec-filter.cjs'),
+      path.join(installPath, 'scripts', 'print-approved-spec-filter.cjs'),
+    );
+    mkdirSync(path.join(repository, 'tests'), { recursive: true });
+    const runDirectory = path.join(
+      repository,
+      '.playwright-cli',
+      'testgen',
+      runId,
+    );
+    mkdirSync(runDirectory, { recursive: true });
+    writeFileSync(path.join(repository, 'tests', 'order.spec.ts'), '');
+    writeFileSync(
+      path.join(runDirectory, 'command-policy.json'),
+      JSON.stringify({
+        approved_spec: 'tests/order.spec.ts',
+        allowed_origins: ['http://127.0.0.1:4173'],
+        allowed_runner_options: [],
+        allowed_state_paths: [],
+        allowed_write_paths: [],
+        format_version: 1,
+        run_id: runId,
+      }),
+    );
+    writeFileSync(path.join(runDirectory, 'handoff.json'), '{}');
+
+    const result = await verifyInstalledHook(
+      installPath,
+      repository,
+      auditPath,
+    );
+
+    assert.equal(result.decision, 'allow');
+    assert.equal(result.agent_type, 'playwright-test-healer');
+    assert.equal(result.tool_name, 'Bash');
+    assert.equal(result.operation, 'other');
+    const filter = spawnSync(
+      process.execPath,
+      [
+        path.join(installPath, 'scripts', 'print-approved-spec-filter.cjs'),
+        runId,
+      ],
+      { cwd: repository, encoding: 'utf8' },
+    );
+    assert.equal(filter.status, 0, filter.stderr);
+    assert.match(filter.stdout, /order\\\.spec\\\.ts/iu);
+  } finally {
+    rmSync(temporaryRoot, { force: true, recursive: true });
+  }
+});
+
+test('rejects malformed installed-hook output before paid execution', async () => {
+  const { verifyInstalledHook } = modules().runner;
+  const temporaryRoot = mkdtempSync(
+    path.join(tmpdir(), 'testgen-installed-hook-invalid-'),
+  );
+  const installPath = path.join(temporaryRoot, 'plugin');
+  const repository = path.join(temporaryRoot, 'repository');
+  try {
+    mkdirSync(path.join(installPath, 'hooks'), { recursive: true });
+    mkdirSync(repository);
+    writeFileSync(
+      path.join(installPath, 'hooks', 'validate-bash.cjs'),
+      "process.stdout.write('{');",
+    );
+    writeFileSync(
+      path.join(installPath, 'hooks', 'hooks.json'),
+      JSON.stringify({ hooks: { PreToolUse: [{ hooks: [{ timeout: 5 }] }] } }),
+    );
+
+    await assert.rejects(
+      verifyInstalledHook(
+        installPath,
+        repository,
+        path.join(temporaryRoot, 'hook-preflight.jsonl'),
+      ),
+      /installed-hook-unavailable/u,
+    );
+  } finally {
+    rmSync(temporaryRoot, { force: true, recursive: true });
+  }
+});
+
+test('uses the installed hook timeout before paid execution', async () => {
+  const { verifyInstalledHook } = modules().runner;
+  const temporaryRoot = mkdtempSync(
+    path.join(tmpdir(), 'testgen-installed-hook-timeout-'),
+  );
+  const installPath = path.join(temporaryRoot, 'plugin');
+  const repository = path.join(temporaryRoot, 'repository');
+  try {
+    mkdirSync(path.join(installPath, 'hooks'), { recursive: true });
+    mkdirSync(repository);
+    writeFileSync(
+      path.join(installPath, 'hooks', 'validate-bash.cjs'),
+      'setTimeout(() => {}, 250);',
+    );
+    writeFileSync(
+      path.join(installPath, 'hooks', 'hooks.json'),
+      JSON.stringify({
+        hooks: { PreToolUse: [{ hooks: [{ timeout: 0.025 }] }] },
+      }),
+    );
+
+    await assert.rejects(
+      verifyInstalledHook(
+        installPath,
+        repository,
+        path.join(temporaryRoot, 'hook-preflight.jsonl'),
+      ),
+      /lifecycle-command-timeout/u,
+    );
+  } finally {
+    rmSync(temporaryRoot, { force: true, recursive: true });
+  }
+});
+
+test('preserves installed hook cancellation before paid execution', async () => {
+  const { verifyInstalledHook } = modules().runner;
+  const temporaryRoot = mkdtempSync(
+    path.join(tmpdir(), 'testgen-installed-hook-cancel-'),
+  );
+  const installPath = path.join(temporaryRoot, 'plugin');
+  const repository = path.join(temporaryRoot, 'repository');
+  const controller = new AbortController();
+  try {
+    mkdirSync(path.join(installPath, 'hooks'), { recursive: true });
+    mkdirSync(repository);
+    writeFileSync(
+      path.join(installPath, 'hooks', 'validate-bash.cjs'),
+      'setTimeout(() => {}, 250);',
+    );
+    writeFileSync(
+      path.join(installPath, 'hooks', 'hooks.json'),
+      JSON.stringify({ hooks: { PreToolUse: [{ hooks: [{ timeout: 5 }] }] } }),
+    );
+    const timer = setTimeout(() => controller.abort(), 25);
+    try {
+      await assert.rejects(
+        verifyInstalledHook(
+          installPath,
+          repository,
+          path.join(temporaryRoot, 'hook-preflight.jsonl'),
+          controller.signal,
+        ),
+        /evaluation-cancelled/u,
+      );
+    } finally {
+      clearTimeout(timer);
+    }
   } finally {
     rmSync(temporaryRoot, { force: true, recursive: true });
   }
@@ -1111,6 +1304,34 @@ test('preserves primary and cleanup failures independently', () => {
       },
     },
   );
+});
+
+test('reports bounded cleanup differences without exposing plugin names', () => {
+  const { stateDifferenceCategories } = modules().runner;
+  const before = [
+    { id: 'existing', scope: 'user', enabled: true },
+    { id: 'removed', scope: 'user', enabled: true },
+  ];
+  const after = [
+    { id: 'existing', scope: 'user', enabled: false },
+    { id: 'private-name', scope: 'user', enabled: true },
+    { id: 'testgen-eval', scope: 'local', enabled: true },
+  ];
+
+  const categories = stateDifferenceCategories(
+    before,
+    after,
+    'testgen-eval',
+    'plugin',
+  );
+
+  assert.deepEqual(categories, [
+    'evaluation-plugin-added',
+    'other-plugin-added',
+    'other-plugin-changed',
+    'other-plugin-removed',
+  ]);
+  assert.doesNotMatch(JSON.stringify(categories), /private-name|existing/u);
 });
 
 test('uses explicit unknowns for incomplete runtime provenance', () => {
