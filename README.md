@@ -43,8 +43,10 @@ sandbox.
 The implemented workflow has been exercised through clean marketplace
 installations against an owned target and a pinned real-world application.
 Those revision-specific observations are retained in the sanitized
-[installed-workflow record](docs/validation/installed-workflow.md). Additional
-negative-path validation remains in progress.
+[installed-workflow record](docs/validation/installed-workflow.md). The first
+[independently graded installed-Healer case](docs/validation/healer-defect-refusal-eval.md)
+also passed with verified hook governance and cleanup. Deliberately vacuous and
+unrelated-mutant validation remains pending.
 
 ## Prerequisites
 
