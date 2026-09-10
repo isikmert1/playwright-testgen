@@ -582,7 +582,11 @@ test('denies shell syntax that shell-quote leaves inside word tokens', () => {
 
 test('denies command substitution in an otherwise valid CLI command', () => {
   withTargetRepository(({ targetRepository }) => {
-    for (const value of ['"$(id)"', '"prefix$(echo nested)suffix"']) {
+    for (const value of [
+      '"$(id)"',
+      '"prefix$(echo nested)suffix"',
+      String.raw`"\\$(echo nested)"`,
+    ]) {
       const result = runCliHook(
         targetRepository,
         `-s=${runId} fill e1 ${value}`,
@@ -591,6 +595,17 @@ test('denies command substitution in an otherwise valid CLI command', () => {
       assert.equal(result.permissionDecision, 'deny');
       assert.match(result.permissionDecisionReason, /shell expansion syntax/iu);
     }
+  });
+});
+
+test('denies escaped command substitution before shell execution', () => {
+  withTargetRepository(({ targetRepository }) => {
+    const result = runCliHook(
+      targetRepository,
+      String.raw`-s=${runId} fill e1 \$(echo nested)`,
+    );
+
+    assert.equal(result.permissionDecision, 'deny');
   });
 });
 

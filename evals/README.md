@@ -46,6 +46,10 @@ installs this exact Testgen revision at project-local scope, applies hard turn,
 cost, and time limits, emits bounded JSON, and removes the temporary target.
 Before the paid agent call, it executes the installed hook in a fresh child
 process and requires an explicit audited allow decision.
+That preflight reserves 20% of Claude Code's configured hook timeout as startup
+margin. Claude Code still owns the timeout: if it terminates a hook, the hook
+cannot emit a blocking decision, so evaluator results without correlated
+governance evidence are rejected. This is not an independent security sandbox.
 Evaluation cases, tests, and grading scripts are omitted from the installed
 plugin source, so the Healer does not receive the expected verdict.
 Claude's shared plugin cache and Playwright browser cache may retain downloaded

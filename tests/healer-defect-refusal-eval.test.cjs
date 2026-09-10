@@ -456,6 +456,13 @@ test('uses the installed hook timeout before paid execution', async () => {
   }
 });
 
+test('reserves margin below the installed hook timeout', () => {
+  const { installedHookPreflightTimeout } = modules().runner;
+
+  assert.equal(installedHookPreflightTimeout(5), 4000);
+  assert.equal(installedHookPreflightTimeout(0.025), 20);
+});
+
 test('preserves installed hook cancellation before paid execution', async () => {
   const { verifyInstalledHook } = modules().runner;
   const temporaryRoot = mkdtempSync(

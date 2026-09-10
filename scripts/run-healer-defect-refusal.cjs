@@ -1557,6 +1557,10 @@ function findInstalledPlugin(plugins, pluginId, repository, revision) {
   };
 }
 
+function installedHookPreflightTimeout(timeoutSeconds) {
+  return Math.max(1, Math.floor(timeoutSeconds * 800));
+}
+
 async function verifyInstalledHook(installPath, repository, auditPath, signal) {
   const toolUseId = `hook-preflight-${randomBytes(8).toString('hex')}`;
   const payload = {
@@ -1588,7 +1592,7 @@ async function verifyInstalledHook(installPath, repository, auditPath, signal) {
     },
     input: JSON.stringify(payload),
     signal,
-    timeout_ms: timeoutSeconds * 1000,
+    timeout_ms: installedHookPreflightTimeout(timeoutSeconds),
     error: 'installed-hook-unavailable',
   });
   const response = readJsonOutput(output, 'installed-hook-unavailable');
@@ -2080,6 +2084,7 @@ module.exports = {
   emptyRuntime,
   evaluationFailure,
   findInstalledPlugin,
+  installedHookPreflightTimeout,
   matchesInstalledPlugin,
   parseAgentStream,
   preparePluginSource,
