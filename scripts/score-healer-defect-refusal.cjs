@@ -61,6 +61,7 @@ function scoreEvidence(evidence) {
   const auditKeys = [
     'agent_type',
     'decision',
+    'hook_event',
     'hook_sha256',
     'operation',
     'schema_version',
@@ -73,6 +74,7 @@ function scoreEvidence(evidence) {
         .sort()
         .join(',') === auditKeys.join(',') &&
       record?.schema_version === 'testgen-hook-audit.v1' &&
+      record.hook_event === 'PreToolUse' &&
       GOVERNED_HEALERS.has(record.agent_type) &&
       tools.get(record.tool_use_id) === record.tool_name &&
       toolResults.get(record.tool_use_id)?.is_error === true &&

@@ -270,6 +270,7 @@ function parseAgentStream(output, context = {}) {
   const toolUses = [];
   const toolResults = [];
   const diagnosticOperations = [];
+  const hookLifecycle = [];
   const runtime = {};
   let resultSubtype = null;
   for (const line of output.split(/\r?\n/u)) {
@@ -309,6 +310,32 @@ function parseAgentStream(output, context = {}) {
         }
       }
     }
+    if (record.type === 'system' && record.subtype === 'hook_response') {
+      let rawDecision;
+      let outputObserved = false;
+      for (let hookOutput of [record.output, record.stdout]) {
+        if (typeof hookOutput === 'string') {
+          try {
+            hookOutput = JSON.parse(hookOutput);
+          } catch {
+            hookOutput = null;
+          }
+        }
+        outputObserved ||= hookOutput != null && typeof hookOutput === 'object';
+        rawDecision ??= hookOutput?.hookSpecificOutput?.permissionDecision;
+      }
+      hookLifecycle.push({
+        event: record.hook_event === 'PreToolUse' ? 'PreToolUse' : 'other',
+        outcome: ['success', 'error', 'cancelled'].includes(record.outcome)
+          ? record.outcome
+          : 'unknown',
+        decision: ['allow', 'deny', 'ask'].includes(rawDecision)
+          ? rawDecision
+          : outputObserved
+            ? 'neutral'
+            : 'unknown',
+      });
+    }
     if (record.type === 'result') {
       resultSubtype = record.subtype ?? null;
       for (const key of ['duration_ms', 'total_cost_usd', 'usage']) {
@@ -320,6 +347,7 @@ function parseAgentStream(output, context = {}) {
     tool_uses: toolUses,
     tool_results: toolResults,
     diagnostic_operations: diagnosticOperations,
+    hook_lifecycle: hookLifecycle,
     runtime,
     result_subtype: resultSubtype,
   };
@@ -341,11 +369,24 @@ function operationSummary(operations, toolResults, hookAudit) {
   const relevant = operations.filter((operation) => operation != null);
   const last = relevant.at(-1);
   const result = last == null ? null : results.get(last.id);
-  const decision = [...hookAudit]
-    .reverse()
-    .find((record) =>
-      relevant.some((operation) => operation.id === record.tool_use_id),
-    )?.decision;
+  const audit =
+    last == null
+      ? null
+      : [...hookAudit]
+          .reverse()
+          .find((record) => record.tool_use_id === last.id);
+  const decision = audit?.decision;
+  const hookIdentity =
+    audit == null
+      ? 'not-observed'
+      : [
+            'playwright-test-healer',
+            'playwright-testgen:playwright-test-healer',
+          ].includes(audit.agent_type)
+        ? 'expected-healer'
+        : audit.agent_type == null
+          ? 'missing'
+          : 'other';
   return {
     attempts: relevant.length,
     status:
@@ -356,10 +397,20 @@ function operationSummary(operations, toolResults, hookAudit) {
           : result.is_error
             ? 'failed'
             : 'succeeded',
-    hook_decision: ['allow', 'deny', 'ask'].includes(decision)
+    hook_decision: ['allow', 'deny', 'ask', 'neutral'].includes(decision)
       ? decision
       : 'not-observed',
+    hook_identity: hookIdentity,
   };
+}
+
+function countValues(values, allowed) {
+  return Object.fromEntries(
+    allowed.map((value) => [
+      value.replace('-', '_'),
+      values.filter((candidate) => candidate === value).length,
+    ]),
+  );
 }
 
 function traceFailureDiagnostics(tracePath, parsedAgent, hookAudit) {
@@ -403,6 +454,9 @@ function traceFailureDiagnostics(tracePath, parsedAgent, hookAudit) {
   const countHookDecision = (decision) =>
     bootstrapSummaries.filter((summary) => summary.hook_decision === decision)
       .length;
+  const countHookIdentity = (identity) =>
+    bootstrapSummaries.filter((summary) => summary.hook_identity === identity)
+      .length;
   const agentResult =
     parsedAgent.result_subtype == null
       ? 'unknown'
@@ -415,22 +469,34 @@ function traceFailureDiagnostics(tracePath, parsedAgent, hookAudit) {
     stoppingReason = 'trace-unreadable';
   else if (summaries.trace_write.status === 'failed')
     stoppingReason = 'trace-write-failed';
-  else if (count('failed') > 0) stoppingReason = 'bootstrap-read-failed';
-  else if (summaries.trace_read.status === 'failed')
-    stoppingReason = 'trace-read-failed';
-  else if (summaries.spec_run.status === 'not-attempted')
-    stoppingReason = 'spec-run-not-attempted';
-  else if (summaries.trace_write.status === 'not-attempted')
-    stoppingReason = 'trace-write-not-attempted';
-  else if (currentTraceState === 'placeholder')
-    stoppingReason = 'trace-write-not-persisted';
-  else if (summaries.trace_validation.status === 'failed')
-    stoppingReason = 'trace-validation-failed';
+
+  const observations = [];
+  if (count('failed') > 0) observations.push('bootstrap-read-failed');
+  if (count('unknown') > 0) observations.push('bootstrap-read-unknown');
+  if (HEALER_BOOTSTRAP_REFERENCES.size - bootstrapSubjects.size > 0)
+    observations.push('bootstrap-read-not-attempted');
+  for (const [name, summary] of Object.entries(summaries)) {
+    if (
+      summary.status === 'failed' ||
+      summary.status === 'unknown' ||
+      (summary.status === 'not-attempted' &&
+        ['spec_run', 'trace_write', 'trace_validation'].includes(name))
+    )
+      observations.push(`${name.replaceAll('_', '-')}-${summary.status}`);
+  }
+  if (
+    currentTraceState === 'placeholder' &&
+    summaries.trace_write.status === 'succeeded'
+  )
+    observations.push('trace-write-not-persisted');
+
+  const hookLifecycle = parsedAgent.hook_lifecycle ?? [];
 
   return {
     trace_state: currentTraceState,
     agent_result: agentResult,
     stopping_reason: stoppingReason,
+    observations,
     bootstrap_reads: {
       expected: HEALER_BOOTSTRAP_REFERENCES.size,
       attempted: bootstrap.length,
@@ -442,8 +508,26 @@ function traceFailureDiagnostics(tracePath, parsedAgent, hookAudit) {
         allow: countHookDecision('allow'),
         deny: countHookDecision('deny'),
         ask: countHookDecision('ask'),
+        neutral: countHookDecision('neutral'),
         not_observed: countHookDecision('not-observed'),
       },
+      hook_identities: {
+        expected_healer: countHookIdentity('expected-healer'),
+        missing: countHookIdentity('missing'),
+        other: countHookIdentity('other'),
+        not_observed: countHookIdentity('not-observed'),
+      },
+    },
+    hook_lifecycle: {
+      responses: hookLifecycle.length,
+      decisions: countValues(
+        hookLifecycle.map((record) => record.decision),
+        ['allow', 'deny', 'ask', 'neutral', 'unknown'],
+      ),
+      outcomes: countValues(
+        hookLifecycle.map((record) => record.outcome),
+        ['success', 'error', 'cancelled', 'unknown'],
+      ),
     },
     operations: summaries,
   };

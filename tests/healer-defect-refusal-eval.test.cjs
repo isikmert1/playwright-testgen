@@ -92,6 +92,7 @@ function evidence(overrides = {}) {
       {
         schema_version: 'testgen-hook-audit.v1',
         agent_type: 'playwright-test-healer',
+        hook_event: 'PreToolUse',
         tool_name: 'Bash',
         tool_use_id: 'tool-1',
         decision: 'allow',
@@ -576,6 +577,60 @@ test('records governed hook identity and decision without command content', () =
   }
 });
 
+test('records neutral hook input without changing its permission response', () => {
+  const temporaryRoot = mkdtempSync(path.join(tmpdir(), 'testgen-hook-audit-'));
+  const auditPath = path.join(temporaryRoot, 'hook-audit.jsonl');
+  const payload = {
+    cwd: repositoryRoot,
+    hook_event_name: 'PreToolUse',
+    tool_name: 'Read',
+    tool_input: { file_path: 'sensitive-path' },
+    tool_use_id: 'tool-neutral',
+  };
+  try {
+    const result = spawnSync(
+      process.execPath,
+      [path.join(repositoryRoot, 'hooks', 'validate-bash.cjs')],
+      {
+        cwd: repositoryRoot,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          PLAYWRIGHT_TESTGEN_HOOK_AUDIT_PATH: auditPath,
+        },
+        input: JSON.stringify(payload),
+      },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), {});
+    const [record] = readFileSync(auditPath, 'utf8')
+      .trim()
+      .split(/\r?\n/u)
+      .map(JSON.parse);
+    assert.deepEqual(
+      {
+        agent_type: record.agent_type,
+        decision: record.decision,
+        hook_event: record.hook_event,
+        operation: record.operation,
+        tool_name: record.tool_name,
+        tool_use_id: record.tool_use_id,
+      },
+      {
+        agent_type: null,
+        decision: 'neutral',
+        hook_event: 'PreToolUse',
+        operation: 'other',
+        tool_name: 'Read',
+        tool_use_id: 'tool-neutral',
+      },
+    );
+    assert.doesNotMatch(JSON.stringify(record), /sensitive-path/u);
+  } finally {
+    rmSync(temporaryRoot, { force: true, recursive: true });
+  }
+});
+
 test('parses bounded agent evidence without retaining response prose', () => {
   const { parseAgentStream } = modules().runner;
   const records = [
@@ -604,6 +659,32 @@ test('parses bounded agent evidence without retaining response prose', () => {
       },
     },
     {
+      type: 'system',
+      subtype: 'hook_response',
+      hook_event: 'PreToolUse',
+      outcome: 'success',
+      output: {
+        hookSpecificOutput: { permissionDecision: 'allow' },
+        secret: 'sensitive hook output',
+      },
+    },
+    {
+      type: 'system',
+      subtype: 'hook_response',
+      hook_event: 'PreToolUse',
+      outcome: 'error',
+      stdout: JSON.stringify({
+        hookSpecificOutput: { permissionDecision: 'deny' },
+        secret: 'sensitive hook stdout',
+      }),
+    },
+    {
+      type: 'system',
+      subtype: 'hook_response',
+      hook_event: 'PreToolUse',
+      outcome: 'cancelled',
+    },
+    {
       type: 'result',
       subtype: 'success',
       duration_ms: 1234,
@@ -629,8 +710,15 @@ test('parses bounded agent evidence without retaining response prose', () => {
     total_cost_usd: 0.5,
     usage: { input_tokens: 10, output_tokens: 20 },
   });
+  assert.deepEqual(parsed.hook_lifecycle, [
+    { event: 'PreToolUse', outcome: 'success', decision: 'allow' },
+    { event: 'PreToolUse', outcome: 'error', decision: 'deny' },
+    { event: 'PreToolUse', outcome: 'cancelled', decision: 'unknown' },
+  ]);
   assert.doesNotMatch(JSON.stringify(parsed), /sensitive response prose/u);
   assert.doesNotMatch(JSON.stringify(parsed), /sensitive tool output/u);
+  assert.doesNotMatch(JSON.stringify(parsed), /sensitive hook output/u);
+  assert.doesNotMatch(JSON.stringify(parsed), /sensitive hook stdout/u);
 });
 
 test('reports bounded trace lifecycle diagnostics before cleanup', () => {
@@ -752,6 +840,12 @@ test('reports bounded trace lifecycle diagnostics before cleanup', () => {
       trace_state: 'placeholder',
       agent_result: 'succeeded',
       stopping_reason: 'trace-write-failed',
+      observations: [
+        'bootstrap-read-failed',
+        'spec-run-failed',
+        'trace-write-failed',
+        'trace-validation-unknown',
+      ],
       bootstrap_reads: {
         expected: 3,
         attempted: 3,
@@ -763,29 +857,45 @@ test('reports bounded trace lifecycle diagnostics before cleanup', () => {
           allow: 1,
           deny: 0,
           ask: 0,
+          neutral: 0,
           not_observed: 2,
         },
+        hook_identities: {
+          expected_healer: 0,
+          missing: 1,
+          other: 0,
+          not_observed: 2,
+        },
+      },
+      hook_lifecycle: {
+        responses: 0,
+        decisions: { allow: 0, deny: 0, ask: 0, neutral: 0, unknown: 0 },
+        outcomes: { success: 0, error: 0, cancelled: 0, unknown: 0 },
       },
       operations: {
         spec_run: {
           attempts: 1,
           status: 'failed',
           hook_decision: 'allow',
+          hook_identity: 'missing',
         },
         trace_read: {
           attempts: 1,
           status: 'succeeded',
           hook_decision: 'not-observed',
+          hook_identity: 'not-observed',
         },
         trace_write: {
           attempts: 1,
           status: 'failed',
           hook_decision: 'deny',
+          hook_identity: 'missing',
         },
         trace_validation: {
           attempts: 1,
           status: 'unknown',
           hook_decision: 'ask',
+          hook_identity: 'missing',
         },
       },
     });
@@ -796,6 +906,7 @@ test('reports bounded trace lifecycle diagnostics before cleanup', () => {
         attempts: 1,
         status: 'failed',
         hook_decision: 'not-observed',
+        hook_identity: 'not-observed',
       },
     );
   } finally {
@@ -820,6 +931,7 @@ test('distinguishes unavailable trace states without throwing', () => {
       attempts: 0,
       status: 'not-attempted',
       hook_decision: 'not-observed',
+      hook_identity: 'not-observed',
     });
     mkdirSync(tracePath);
     assert.equal(
@@ -832,6 +944,115 @@ test('distinguishes unavailable trace states without throwing', () => {
       traceFailureDiagnostics(tracePath, parsed, []).trace_state,
       'changed',
     );
+  } finally {
+    rmSync(repository, { force: true, recursive: true });
+  }
+});
+
+test('reports every observed trace failure without inventing one root cause', () => {
+  const { parseAgentStream, traceFailureDiagnostics } = modules().runner;
+  const repository = mkdtempSync(path.join(tmpdir(), 'testgen-trace-diag-'));
+  const tracePath = path.join(repository, 'healer-trace.json');
+  const toolUses = [
+    ...[
+      'healing-protocol.md',
+      'artifact-contract.md',
+      'cleanup-contract.md',
+    ].map((subject, index) => ({
+      type: 'tool_use',
+      id: `bootstrap-${index}`,
+      name: 'Read',
+      input: { file_path: `/plugin/references/${subject}` },
+    })),
+    ...Array.from({ length: 4 }, (_, index) => ({
+      type: 'tool_use',
+      id: `runner-${index}`,
+      name: 'Bash',
+      input: {
+        command:
+          "PLAYWRIGHT_HTML_OPEN=never npx --no playwright test 'approved-filter'",
+      },
+    })),
+    {
+      type: 'tool_use',
+      id: 'trace-read',
+      name: 'Read',
+      input: { file_path: tracePath },
+    },
+    {
+      type: 'tool_use',
+      id: 'trace-validator',
+      name: 'Bash',
+      input: {
+        command:
+          'node validator/validate-testgen-artifact.cjs --type trace healer-trace.json',
+      },
+    },
+  ];
+  const results = toolUses.map((toolUse) => ({
+    type: 'tool_result',
+    tool_use_id: toolUse.id,
+    is_error: toolUse.id !== 'trace-read',
+    content: toolUse.id.startsWith('runner-')
+      ? 'Running 1 test using 1 worker\n1 failed'
+      : 'sensitive failure',
+  }));
+  const records = [
+    { type: 'assistant', message: { content: toolUses } },
+    { type: 'user', message: { content: results } },
+    {
+      type: 'system',
+      subtype: 'hook_response',
+      hook_event: 'PreToolUse',
+      outcome: 'success',
+      output: {},
+    },
+    { type: 'result', subtype: 'success' },
+  ];
+  const hookAudit = toolUses.slice(0, 3).map((toolUse) => ({
+    agent_type: null,
+    decision: 'neutral',
+    hook_event: 'PreToolUse',
+    operation: 'other',
+    tool_name: toolUse.name,
+    tool_use_id: toolUse.id,
+  }));
+  hookAudit.push({
+    agent_type: 'playwright-test-healer',
+    decision: 'allow',
+    hook_event: 'PreToolUse',
+    operation: 'approved-spec-run',
+    tool_name: 'Bash',
+    tool_use_id: 'runner-0',
+  });
+  try {
+    writeFileSync(tracePath, '{}');
+    const parsed = parseAgentStream(
+      `${records.map((value) => JSON.stringify(value)).join('\n')}\n`,
+      {
+        approved_spec_filter: 'approved-filter',
+        repository,
+        trace_path: tracePath,
+      },
+    );
+    const diagnostics = traceFailureDiagnostics(tracePath, parsed, hookAudit);
+    assert.equal(diagnostics.stopping_reason, 'trace-invalid');
+    assert.deepEqual(diagnostics.observations, [
+      'bootstrap-read-failed',
+      'spec-run-failed',
+      'trace-write-not-attempted',
+      'trace-validation-failed',
+    ]);
+    assert.equal(diagnostics.bootstrap_reads.hook_decisions.neutral, 3);
+    assert.equal(diagnostics.bootstrap_reads.hook_identities.missing, 3);
+    assert.equal(diagnostics.operations.spec_run.hook_decision, 'not-observed');
+    assert.equal(diagnostics.operations.spec_run.hook_identity, 'not-observed');
+    assert.deepEqual(diagnostics.hook_lifecycle, {
+      responses: 1,
+      decisions: { allow: 0, deny: 0, ask: 0, neutral: 1, unknown: 0 },
+      outcomes: { success: 1, error: 0, cancelled: 0, unknown: 0 },
+    });
+    assert.doesNotMatch(JSON.stringify(diagnostics), /sensitive/u);
   } finally {
     rmSync(repository, { force: true, recursive: true });
   }
