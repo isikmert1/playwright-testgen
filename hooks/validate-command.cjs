@@ -20,9 +20,6 @@ const {
 
 const ENVIRONMENT_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/u;
 const PACKAGE_SCRIPT_RUNNERS = new Set(['bun', 'npm', 'pnpm', 'yarn']);
-const RUNTIME_PREFLIGHT =
-  "for (const id of ['playwright/package.json','@playwright/test/package.json']) require.resolve(id)";
-
 function repositoryPolicies(cwd) {
   let entries;
   try {
@@ -306,19 +303,6 @@ function validateCommand(payload) {
   ) {
     return decision('allow', 'Read-only Node.js runtime version check.');
   }
-  if (
-    executable === 'node' &&
-    split.assignments.length === 0 &&
-    args.length === 2 &&
-    args[0] === '-e' &&
-    args[1] === RUNTIME_PREFLIGHT
-  ) {
-    return decision(
-      'allow',
-      "Read-only resolution check for the repository's Playwright packages.",
-    );
-  }
-
   if (executable === 'node' && split.assignments.length === 0) {
     return validateArtifactValidator(parsed.cwd, args, payload.agent_type);
   }

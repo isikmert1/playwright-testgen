@@ -39,8 +39,8 @@ evaluation metadata, not an operational profile, and must not be sent to Author.
 
 ## Ordered flow
 
-1. Main runs each read-only runtime preflight command from `SKILL.md` in its own
-   Bash call from the repository root. Missing or outdated prerequisites
+1. Main runs the single read-only runtime preflight command from `SKILL.md`
+   from the repository root. Missing or unsupported required prerequisites
    stop the flow before Author; generation never installs them. Main also
    confirms the application is already running at the approved origin and
    records separate readiness facts for the Playwright CLI exploration browser
@@ -59,7 +59,8 @@ evaluation metadata, not an operational profile, and must not be sent to Author.
       spec presence, browser readiness, and the selected validation path;
    2. create the run ID, write the run policy, and obtain its exact approved
       spec filter;
-   3. ask whether to run the matching mutation check;
+   3. when a prepared matching mutation entry exists, ask whether to run it;
+      otherwise record no-adapter mode without presenting mutation details;
    4. capture the `pre-author` boundary when that check is approved; and
    5. delegate Author with the concrete values and readiness facts, including
       `runtime preflight: passed`.
@@ -89,7 +90,8 @@ evaluation metadata, not an operational profile, and must not be sent to Author.
      "allowed_write_paths": [],
      "format_version": 1,
      "run_id": "tg-<24hex>",
-     "allowed_origins": ["https://app.example.test"]
+     "allowed_origins": ["https://app.example.test"],
+     "trace_snapshot_option": "--name"
    }
    ```
 
@@ -112,6 +114,10 @@ evaluation metadata, not an operational profile, and must not be sent to Author.
    writable separately and may be new. If Author discovers that another edit
    is necessary, it returns the exact path and evidence to Main for approval
    and redispatch instead of attempting the edit.
+   `trace_snapshot_option` is the exact `--name` or `--phase` spelling selected
+   by runtime preflight for this Playwright/CLI combination, or `null` when
+   optional trace snapshot inspection is unavailable. Agents never select or
+   substitute it themselves.
    This transient Main-owned policy binds the shared PreToolUse hook to the run.
    Author and Healer must never edit it; preserve it through Healer and never
    treat it as a handoff artifact.
@@ -131,9 +137,11 @@ evaluation metadata, not an operational profile, and must not be sent to Author.
 
    Before enabling mutation verification, Main identifies one exact
    criterion-linked adapter entry and digest under `mutation-check.md` and uses
-   its exact user-first approval question. If several entries could apply, ask now; never
-   choose one implicitly. When that approval exists, Main captures the
-   `pre-author` boundary with the exact command in `artifact-contract.md`. Do
+   its exact user-first approval question. If several entries could apply, ask
+   now; never choose one implicitly. If no prepared adapter exists, do not ask
+   for mutation approval or expose patch/digest setup instructions. When approval
+   exists, Main captures the `pre-author` boundary with the exact command in
+   `mutation-check.md`. Do
    this after the policy exists and before delegating Author. If an approved
    adapter has no entry for the required criterion, retain its path for the
    later `criterion-unmapped` coverage check but continue without a change
@@ -165,7 +173,8 @@ evaluation metadata, not an operational profile, and must not be sent to Author.
      and delegate `playwright-testgen:playwright-test-healer` in fresh context
      with explicit approval, the run ID, repository root, exact approved spec
      path, original criteria, validated handoff, `runtime preflight: passed`,
-     and known project, config, route, auth, environment, and test-data facts.
+     the selected trace snapshot option or explicit `unavailable`, and known
+     project, config, route, auth, environment, and test-data facts.
      Before delegation, Main confirms `approved_spec` still names the reviewed
      file and obtains its shell-safe approved spec filter argument from the
      repository root:
@@ -230,7 +239,8 @@ evaluation metadata, not an operational profile, and must not be sent to Author.
      Unless a separate assertion-sensitivity check actually ran, record its
      complete status as `not-run`; do not infer evidence from the spec.
    - Main writes and validates `vacuity-report.json` with the exact command in
-     `artifact-contract.md`, then reports only its derived disposition. A
+     `mutation-check.md`, then reports the validator's separate execution and
+     mutation-verification summary plus its derived disposition. A
      surviving product mutation is `rejected-vacuous`; include its mutation ID
      as evidence. It never automatically returns to Author. The human may start
      a new approved Author run using that evidence.

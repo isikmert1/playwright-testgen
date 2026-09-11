@@ -532,14 +532,21 @@ function validateTrace(cwd, args) {
       'trace action requires one numeric action ID. Select an ID reported by trace actions.',
     );
   } else if (subcommand === 'snapshot') {
-    const validName =
-      (args.length === 3 &&
-        args[1] === '--name' &&
-        ['before', 'after'].includes(args[2])) ||
-      (args.length === 2 && /^--name=(?:before|after)$/u.test(args[1]));
-    if (!/^\d+$/u.test(args[0] ?? '') || !validName) {
+    const option = loaded.policy.traceSnapshotOption;
+    if (option == null) {
       return deny(
-        'trace snapshot requires a numeric action ID and --name before or --name after. Use an action reported by trace actions.',
+        'Trace snapshot inspection is unavailable for this runtime. Use current runner evidence or attached CLI inspection; missing trace support is not a product defect.',
+      );
+    }
+    const validOption =
+      (args.length === 3 &&
+        args[1] === option &&
+        ['before', 'after'].includes(args[2])) ||
+      (args.length === 2 &&
+        new RegExp(`^${option}=(?:before|after)$`, 'u').test(args[1]));
+    if (!/^\d+$/u.test(args[0] ?? '') || !validOption) {
+      return deny(
+        `trace snapshot requires a numeric action ID and ${option} before or ${option} after. Use an action reported by trace actions.`,
       );
     }
   } else if (subcommand === 'close') {

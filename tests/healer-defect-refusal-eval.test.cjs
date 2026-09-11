@@ -140,6 +140,7 @@ test('keeps mutation and grading answers out of the Healer prompt', () => {
     run_id: 'tg-0123456789abcdef01234567',
     approved_spec_filter: '/approved/',
     origin: 'http://127.0.0.1:4173',
+    trace_snapshot_option: '--name',
   });
   const seededBug = JSON.parse(
     readFileSync(path.join(repositoryRoot, definition.seeded_bug_path), 'utf8'),
@@ -148,6 +149,7 @@ test('keeps mutation and grading answers out of the Healer prompt', () => {
   assert.match(prompt, /runtime preflight: passed/iu);
   assert.match(prompt, /human checkpoint decision: run approved/iu);
   assert.match(prompt, /approved project\/config options: none/iu);
+  assert.match(prompt, /trace snapshot option: --name/iu);
   assert.match(
     prompt,
     /trace draft: \.playwright-cli\/testgen\/tg-0123456789abcdef01234567\/healer-trace\.json \(exact current contents: \{\}\)/u,
@@ -454,6 +456,13 @@ test('uses the installed hook timeout before paid execution', async () => {
   } finally {
     rmSync(temporaryRoot, { force: true, recursive: true });
   }
+});
+
+test('reserves margin below the installed hook timeout', () => {
+  const { installedHookPreflightTimeout } = modules().runner;
+
+  assert.equal(installedHookPreflightTimeout(5), 4000);
+  assert.equal(installedHookPreflightTimeout(0.025), 20);
 });
 
 test('preserves installed hook cancellation before paid execution', async () => {
@@ -934,12 +943,6 @@ test('reports bounded trace lifecycle diagnostics before cleanup', () => {
             type: 'tool_use',
             id: 'bootstrap-2',
             name: 'Read',
-            input: { file_path: '/plugin/references/artifact-contract.md' },
-          },
-          {
-            type: 'tool_use',
-            id: 'bootstrap-3',
-            name: 'Read',
             input: { file_path: '/plugin/references/cleanup-contract.md' },
           },
           {
@@ -989,7 +992,6 @@ test('reports bounded trace lifecycle diagnostics before cleanup', () => {
             is_error: true,
             content: 'sensitive bootstrap failure',
           },
-          { type: 'tool_result', tool_use_id: 'bootstrap-3' },
           {
             type: 'tool_result',
             tool_use_id: 'runner',
@@ -1040,10 +1042,10 @@ test('reports bounded trace lifecycle diagnostics before cleanup', () => {
         'trace-validation-unknown',
       ],
       bootstrap_reads: {
-        expected: 3,
-        attempted: 3,
+        expected: 2,
+        attempted: 2,
         not_attempted: 0,
-        succeeded: 2,
+        succeeded: 1,
         failed: 1,
         unknown: 0,
         hook_decisions: {
@@ -1051,13 +1053,13 @@ test('reports bounded trace lifecycle diagnostics before cleanup', () => {
           deny: 0,
           ask: 0,
           neutral: 0,
-          not_observed: 2,
+          not_observed: 1,
         },
         hook_identities: {
           expected_healer: 0,
           missing: 1,
           other: 0,
-          not_observed: 2,
+          not_observed: 1,
         },
       },
       hook_lifecycle: {
@@ -1119,7 +1121,7 @@ test('distinguishes unavailable trace states without throwing', () => {
   try {
     const missing = traceFailureDiagnostics(tracePath, parsed, []);
     assert.equal(missing.trace_state, 'missing');
-    assert.equal(missing.bootstrap_reads.not_attempted, 3);
+    assert.equal(missing.bootstrap_reads.not_attempted, 2);
     assert.deepEqual(missing.operations.trace_write, {
       attempts: 0,
       status: 'not-attempted',
@@ -1147,11 +1149,7 @@ test('reports every observed trace failure without inventing one root cause', ()
   const repository = mkdtempSync(path.join(tmpdir(), 'testgen-trace-diag-'));
   const tracePath = path.join(repository, 'healer-trace.json');
   const toolUses = [
-    ...[
-      'healing-protocol.md',
-      'artifact-contract.md',
-      'cleanup-contract.md',
-    ].map((subject, index) => ({
+    ...['healing-protocol.md', 'cleanup-contract.md'].map((subject, index) => ({
       type: 'tool_use',
       id: `bootstrap-${index}`,
       name: 'Read',
@@ -1236,8 +1234,8 @@ test('reports every observed trace failure without inventing one root cause', ()
       'trace-write-not-attempted',
       'trace-validation-failed',
     ]);
-    assert.equal(diagnostics.bootstrap_reads.hook_decisions.neutral, 3);
-    assert.equal(diagnostics.bootstrap_reads.hook_identities.missing, 3);
+    assert.equal(diagnostics.bootstrap_reads.hook_decisions.neutral, 2);
+    assert.equal(diagnostics.bootstrap_reads.hook_identities.missing, 2);
     assert.equal(diagnostics.operations.spec_run.hook_decision, 'not-observed');
     assert.equal(diagnostics.operations.spec_run.hook_identity, 'not-observed');
     assert.deepEqual(diagnostics.hook_lifecycle, {
@@ -1380,46 +1378,6 @@ test('bounds the non-interactive Healer invocation with native controls', () => 
   assert.ok(args.includes('--setting-sources'));
   assert.ok(args.includes('local'));
   assert.ok(args.includes('--strict-mcp-config'));
-});
-
-test('accepts current Playwright CLI help without an Agent skill marker', () => {
-  const { validPlaywrightHelp } = modules().runner;
-  assert.equal(typeof validPlaywrightHelp, 'function');
-  const currentHelp = [
-    'attach [name]',
-    'find [text]',
-    'generate-locator <target>',
-    'requests',
-  ].join('\n');
-
-  assert.equal(validPlaywrightHelp(currentHelp), true);
-  assert.equal(
-    validPlaywrightHelp(
-      `${currentHelp}\nThe installed Playwright CLI skill is stale.`,
-    ),
-    false,
-  );
-});
-
-test('verifies the Playwright CLI skill file installed in the project', () => {
-  const { validPlaywrightSkillInstall } = modules().runner;
-  assert.equal(typeof validPlaywrightSkillInstall, 'function');
-  const target = mkdtempSync(path.join(tmpdir(), 'testgen-cli-skill-test-'));
-  const skill = path.join(
-    target,
-    '.claude',
-    'skills',
-    'playwright-cli',
-    'SKILL.md',
-  );
-  try {
-    assert.equal(validPlaywrightSkillInstall(target), false);
-    mkdirSync(path.dirname(skill), { recursive: true });
-    writeFileSync(skill, '# Playwright CLI\n');
-    assert.equal(validPlaywrightSkillInstall(target), true);
-  } finally {
-    rmSync(target, { force: true, recursive: true });
-  }
 });
 
 test('caps the single Sonnet evaluation at two dollars', () => {
@@ -1623,6 +1581,14 @@ test('separates missing prerequisites from grading failures', () => {
     error: 'prerequisite-unavailable',
     reason: 'authentication-unavailable',
   });
+  assert.equal(
+    evaluationFailure({ code: 'playwright-cli-skill-outdated' }).error,
+    'prerequisite-unavailable',
+  );
+  assert.equal(
+    evaluationFailure({ code: 'playwright-version-mismatch' }).error,
+    'prerequisite-unavailable',
+  );
   assert.deepEqual(evaluationFailure(new Error('spec-changed')), {
     status: 'failed',
     error: 'grading-failed',

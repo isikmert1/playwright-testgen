@@ -6,7 +6,6 @@ const {
   copyFileSync,
   cpSync,
   existsSync,
-  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -20,6 +19,7 @@ const { digestAdapter, parseAdapter } = require('./mutation-adapter.cjs');
 const { captureSnapshot, currentHead } = require('./repository-snapshot.cjs');
 const { scoreEvidence } = require('./score-healer-defect-refusal.cjs');
 const { windowsProcessTree } = require('./windows-process-tree.cjs');
+const { versionAtLeast } = require('./runtime-preflight.cjs');
 const { exactPlaywrightFilter } = require('../hooks/run-policy.cjs');
 
 const repositoryRoot = path.resolve(__dirname, '..');
@@ -43,6 +43,7 @@ const CRITICAL_PLUGIN_FILES = [
   'hooks/validate-command.cjs',
   'schemas/healer-trace.v1.schema.json',
   'scripts/print-approved-spec-filter.cjs',
+  'scripts/runtime-preflight.cjs',
   'scripts/validate-healer-trace.cjs',
   'scripts/validate-testgen-artifact.cjs',
   'skills/playwright-testgen/SKILL.md',
@@ -165,6 +166,7 @@ function buildHealerPrompt(definition, runtime) {
     `origin: ${runtime.origin}`,
     `scenario_ref: ${definition.scenario_ref}`,
     `criterion ${definition.criterion.id}: ${definition.criterion.outcome}`,
+    `trace snapshot option: ${runtime.trace_snapshot_option ?? 'unavailable'}`,
     'The application and runner browser are ready. Each Bash call starts at the repository root. Execute only the approved spec, diagnose from current-run evidence, preserve the criterion, write and validate the complete Healer trace, then stop.',
   ].join('\n');
 }
@@ -199,7 +201,6 @@ function buildClaudeArguments(definition, prompt) {
 
 const MAX_TOOL_RESULT_BYTES = 256 * 1024;
 const HEALER_BOOTSTRAP_REFERENCES = new Set([
-  'artifact-contract.md',
   'cleanup-contract.md',
   'healing-protocol.md',
 ]);
@@ -584,9 +585,13 @@ function evaluationFailure(error) {
   const prerequisite =
     reason.endsWith('-unavailable') ||
     reason.endsWith('-unsupported') ||
+    reason.endsWith('-outdated') ||
     [
       'installed-revision-unverified',
       'playwright-cli-contract-mismatch',
+      'playwright-cli-installation-mismatch',
+      'playwright-runner-contract-mismatch',
+      'playwright-version-mismatch',
       'plugin-installation-failed',
       'target-dependencies-unavailable',
       'testgen-repository-not-clean',
@@ -1042,20 +1047,6 @@ function normalizedMarketplaceState(value) {
     .sort((left, right) => left.name.localeCompare(right.name));
 }
 
-function versionAtLeast(value, minimum) {
-  const actual = value
-    .match(/\d+\.\d+\.\d+/u)?.[0]
-    ?.split('.')
-    .map(Number);
-  const required = minimum.split('.').map(Number);
-  if (actual == null) return false;
-  for (let index = 0; index < required.length; index += 1) {
-    if (actual[index] > required[index]) return true;
-    if (actual[index] < required[index]) return false;
-  }
-  return true;
-}
-
 async function preflight(signal, runtime) {
   if (!versionAtLeast(process.versions.node, '22.13.0'))
     fail('node-version-unsupported');
@@ -1094,17 +1085,6 @@ async function preflight(signal, runtime) {
     'cli',
     cliBin,
   );
-  const cliVersion = await command(
-    process.execPath,
-    [playwrightCli, '--version'],
-    {
-      error: 'playwright-cli-unavailable',
-      signal,
-    },
-  );
-  runtime.playwright_cli = cliVersion;
-  if (!versionAtLeast(cliVersion, '0.1.19'))
-    fail('playwright-cli-version-unsupported');
   const npmVersion = await command(process.execPath, [npmCli, '--version'], {
     error: 'npm-unavailable',
     signal,
@@ -1166,19 +1146,6 @@ async function prepareTarget(definition, temporaryRoot, tooling, signal) {
       signal,
     },
   );
-  if (!validPlaywrightSkillInstall(target))
-    fail('playwright-cli-skill-unavailable');
-  const cliHelp = await command(
-    process.execPath,
-    [tooling.playwright_cli, '--help'],
-    {
-      cwd: target,
-      error: 'playwright-cli-unavailable',
-      signal,
-    },
-  );
-  if (!validPlaywrightHelp(cliHelp)) fail('playwright-cli-contract-mismatch');
-
   await command(executable('git'), ['init', '--quiet'], {
     cwd: target,
     error: 'target-git-unavailable',
@@ -1308,7 +1275,7 @@ async function applyMutation(definition, repository, signal) {
   return mutation;
 }
 
-function writeRunArtifacts(definition, repository, runId) {
+function writeRunArtifacts(definition, repository, runId, traceSnapshotOption) {
   const runDirectory = path.join(
     repository,
     '.playwright-cli',
@@ -1334,6 +1301,7 @@ function writeRunArtifacts(definition, repository, runId) {
       allowed_write_paths: [],
       format_version: 1,
       run_id: runId,
+      trace_snapshot_option: traceSnapshotOption,
     }),
   );
   writeFileSync(
@@ -1557,6 +1525,10 @@ function findInstalledPlugin(plugins, pluginId, repository, revision) {
   };
 }
 
+function installedHookPreflightTimeout(timeoutSeconds) {
+  return Math.max(1, Math.floor(timeoutSeconds * 800));
+}
+
 async function verifyInstalledHook(installPath, repository, auditPath, signal) {
   const toolUseId = `hook-preflight-${randomBytes(8).toString('hex')}`;
   const payload = {
@@ -1588,7 +1560,7 @@ async function verifyInstalledHook(installPath, repository, auditPath, signal) {
     },
     input: JSON.stringify(payload),
     signal,
-    timeout_ms: timeoutSeconds * 1000,
+    timeout_ms: installedHookPreflightTimeout(timeoutSeconds),
     error: 'installed-hook-unavailable',
   });
   const response = readJsonOutput(output, 'installed-hook-unavailable');
@@ -1618,35 +1590,50 @@ function readHookAudit(filename) {
     .map((line) => readJsonOutput(line, 'hook-governance-unverified'));
 }
 
-function validPlaywrightHelp(output) {
-  return (
-    ['attach', 'find', 'generate-locator', 'requests'].every((commandName) =>
-      new RegExp(`\\b${commandName}\\b`, 'u').test(output),
-    ) && !/The installed Playwright CLI skill is stale\./u.test(output)
+async function runRuntimePreflight(
+  installPath,
+  repository,
+  playwrightCli,
+  signal,
+) {
+  const result = await runBounded(
+    process.execPath,
+    [
+      path.join(installPath, 'scripts', 'runtime-preflight.cjs'),
+      '--repo',
+      repository,
+      '--playwright-cli',
+      playwrightCli,
+    ],
+    {
+      capture_stderr: true,
+      cwd: repository,
+      env: process.env,
+      signal,
+      timeout_ms: LIFECYCLE_COMMAND_TIMEOUT_MS,
+      verify_process_tree: true,
+    },
   );
-}
-
-function validPlaywrightSkillInstall(target) {
-  const skill = path.join(
-    target,
-    '.claude',
-    'skills',
-    'playwright-cli',
-    'SKILL.md',
+  if (result.tree_cleanup_failed) fail('process-tree-cleanup-failed');
+  if (result.cancelled) fail('evaluation-cancelled');
+  if (result.timed_out) fail('runtime-preflight-timeout');
+  if (result.output_overflow || result.spawn_error != null)
+    fail('runtime-preflight-failed');
+  const report = readJsonOutput(
+    result.output.trim(),
+    'runtime-preflight-invalid',
   );
-  try {
-    return lstatSync(skill).isFile() && readFileSync(skill).length > 0;
-  } catch {
-    return false;
+  if (
+    result.status !== 0 ||
+    report?.ok !== true ||
+    typeof report.playwright?.version !== 'string' ||
+    typeof report.playwright_cli?.version !== 'string' ||
+    ![null, '--name', '--phase'].includes(report.trace_snapshot_option)
+  ) {
+    if (SAFE_ERROR_CODE.test(report?.error ?? '')) fail(report.error);
+    fail('runtime-preflight-invalid');
   }
-}
-
-function recordTargetRuntime(target, runtime) {
-  const versions = readJson(
-    path.join(target, 'node_modules', '@playwright', 'test', 'package.json'),
-    'playwright-unavailable',
-  );
-  runtime.playwright = versions.version;
+  return report;
 }
 
 async function evaluateInstalledHealer(signal) {
@@ -1703,7 +1690,6 @@ async function evaluateInstalledHealer(signal) {
       prerequisite,
       signal,
     );
-    recordTargetRuntime(state.repository, runtime);
     const sourceTarget = realpathSync(
       path.resolve(repositoryRoot, definition.target_path),
     );
@@ -1770,8 +1756,22 @@ async function evaluateInstalledHealer(signal) {
     );
     runtime.plugin_runtime_sha256 = installed.runtime_sha256;
 
+    const compatibility = await runRuntimePreflight(
+      installed.installPath,
+      state.repository,
+      prerequisite.playwright_cli,
+      signal,
+    );
+    runtime.playwright = compatibility.playwright.version;
+    runtime.playwright_cli = compatibility.playwright_cli.version;
+
     const runId = `tg-${randomBytes(12).toString('hex')}`;
-    const runDirectory = writeRunArtifacts(definition, state.repository, runId);
+    const runDirectory = writeRunArtifacts(
+      definition,
+      state.repository,
+      runId,
+      compatibility.trace_snapshot_option,
+    );
     const tracePath = path.join(runDirectory, 'healer-trace.json');
     await validateArtifact(
       installed.installPath,
@@ -1808,6 +1808,7 @@ async function evaluateInstalledHealer(signal) {
       origin: definition.origin,
       repository: state.repository,
       run_id: runId,
+      trace_snapshot_option: compatibility.trace_snapshot_option,
     });
     const agent = await runBounded(
       executable('claude'),
@@ -2080,6 +2081,7 @@ module.exports = {
   emptyRuntime,
   evaluationFailure,
   findInstalledPlugin,
+  installedHookPreflightTimeout,
   matchesInstalledPlugin,
   parseAgentStream,
   preparePluginSource,
@@ -2088,8 +2090,6 @@ module.exports = {
   stopProcessTree,
   traceFailureDiagnostics,
   validateArtifact,
-  validPlaywrightHelp,
-  validPlaywrightSkillInstall,
   verifyInstalledHook,
   windowsProcessTree,
 };

@@ -49,11 +49,41 @@ const REPAIRABLE_CLASSIFICATIONS = new Set([
   'timing',
   'expectation-drift',
 ]);
-const PROHIBITED_KEY =
-  /(?:credential|password|passwd|secret|token|cookie|authorization|storage.?state|environment|snapshot|screenshot|video|trace|dom|(?:raw_)?log|request|response|ticket|scenario(?:_|-)?body|spec(?:_|-)?body)/iu;
-const PROHIBITED_VALUE =
-  /(?:-----BEGIN [A-Z ]*PRIVATE KEY-----|authorization\s*:|(?:api[-_ ]?key|token|secret|password|passwd|cookie|set-cookie)\s*[:=]|\bsnapshot\s*:|\b(?:test|describe|expect)\s*\(|```|\bhttps?:\/\/[^\s/@]+@[^\s]+)/iu;
-const ENVIRONMENT_VALUE = /(?:^|[^A-Za-z0-9_])[A-Za-z_][A-Za-z0-9_]*=[^\s]+/u;
+const SECRET_KEYS = new Set([
+  'apikey',
+  'authorization',
+  'cookie',
+  'credential',
+  'credentials',
+  'password',
+  'passwd',
+  'secret',
+  'setcookie',
+  'storagestate',
+  'token',
+]);
+const RAW_CONTENT_KEYS = new Set([
+  'dom',
+  'log',
+  'rawlog',
+  'request',
+  'requestbody',
+  'response',
+  'responsebody',
+  'scenariobody',
+  'screenshot',
+  'snapshot',
+  'specbody',
+  'ticket',
+  'trace',
+  'video',
+]);
+const SECRET_VALUE =
+  /(?:-----BEGIN [A-Z ]*PRIVATE KEY-----|authorization\s*:|(?:api[-_ ]?key|token|secret|password|passwd|cookie|set-cookie)\s*[:=]|\bhttps?:\/\/[^\s/@]+@[^\s]+)/iu;
+const RAW_CONTENT_VALUE =
+  /(?:\bsnapshot\s*:|\b(?:test|describe|expect)\s*\(|```)/iu;
+const ENVIRONMENT_VALUE =
+  /(?:^|[^A-Za-z0-9_])(?:env:)?(?:[A-Z_][A-Z0-9_]*|[a-z][a-z0-9]*_[a-z0-9_]+)=[^\s]+/u;
 const CSS_ATTRIBUTE_SELECTOR =
   /\[[A-Za-z_][A-Za-z0-9_.:-]*\s*(?:[~|^$*]?=)\s*(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\]\s]+)\s*\]/gu;
 const RAW_DOM_TAG = /<\/?[A-Za-z][A-Za-z0-9:-]*(?:\s[^<>]*?)?\/?>/u;
@@ -208,23 +238,38 @@ function requireFields(value, fields, errors, label) {
   }
 }
 
-function containsProhibited(value, key = '') {
-  if (PROHIBITED_KEY.test(key)) return true;
+function normalizedKey(value) {
+  return value.replaceAll(/[^A-Za-z0-9]/gu, '').toLowerCase();
+}
+
+function prohibitedReasons(value, key = '') {
+  const reasons = new Set();
+  const normalized = normalizedKey(key);
+  if (SECRET_KEYS.has(normalized)) reasons.add('secret');
+  if (RAW_CONTENT_KEYS.has(normalized)) reasons.add('raw-content');
+  if (normalized === 'environment') reasons.add('environment-value');
   if (typeof value === 'string') {
     const environmentInput =
       key === 'locator' ? value.replace(CSS_ATTRIBUTE_SELECTOR, '') : value;
-    return (
-      PROHIBITED_VALUE.test(value) ||
-      ENVIRONMENT_VALUE.test(environmentInput) ||
-      RAW_DOM_TAG.test(value)
-    );
+    if (SECRET_VALUE.test(value)) reasons.add('secret');
+    if (RAW_CONTENT_VALUE.test(value) || RAW_DOM_TAG.test(value))
+      reasons.add('raw-content');
+    if (ENVIRONMENT_VALUE.test(environmentInput))
+      reasons.add('environment-value');
+    return [...reasons];
   }
-  if (Array.isArray(value))
-    return value.some((item) => containsProhibited(item));
-  return (
-    isObject(value) &&
-    Object.entries(value).some(([name, item]) => containsProhibited(item, name))
-  );
+  if (Array.isArray(value)) {
+    for (const item of value)
+      for (const reason of prohibitedReasons(item)) reasons.add(reason);
+  } else if (isObject(value)) {
+    for (const [name, item] of Object.entries(value))
+      for (const reason of prohibitedReasons(item, name)) reasons.add(reason);
+  }
+  return [...reasons];
+}
+
+function containsProhibited(value, key = '') {
+  return prohibitedReasons(value, key).length > 0;
 }
 
 function validatePath(value, repository, errors, label) {
@@ -286,6 +331,7 @@ module.exports = {
   loadSchema,
   parseArgs,
   portable,
+  prohibitedReasons,
   rejectUnknown,
   report,
   requireFields,

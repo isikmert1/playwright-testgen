@@ -14,7 +14,7 @@ resource when it is created so each exit can release only run-owned resources.
   inside the run directory before Author starts. Keep it until the run exits
   so the shared PreToolUse hook can bind commands and navigation to that run.
 - When mutation verification is available, Main also owns the transient
-  `change-manifest.json` defined by `artifact-contract.md`. Retain it through
+  `change-manifest.json` defined by `mutation-check.md`. Retain it through
   the post-Healer mutation check so the active checkout and disposable checkout
   can be compared without storing file content.
 - Main owns `vacuity-report.json`. Write and validate it only when a fixed

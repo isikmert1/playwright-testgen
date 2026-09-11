@@ -76,8 +76,9 @@ diagnostic attempt:
    `--repeat-each=1` ensure one runner invocation is one attempt. Run the attach
    command and every attached CLI command from the validated run directory so
    their generated output remains inside owned scratch. The hook atomically
-   reserves the attempt before the process starts; if startup fails, keep that
-   reservation and advance to the next unused attempt. Keep
+   reserves the attempt when it allows the command. If startup fails, that
+   reservation remains consumed: advance to the next unused attempt and refuse
+   any reuse of the reserved path. Keep
    `PWTEST_CLI_GLOBAL_CONFIG=.` on every CLI command and never create a CLI
    config there; this suppresses automatic home/repository config-file loading.
    The hook also rejects inherited `PLAYWRIGHT_MCP_*` configuration and
@@ -98,19 +99,25 @@ diagnostic attempt:
    ```
 
 4. Inspect only the evidence needed to classify the failure: current snapshot,
-   console, network, trace, and step state. For a retained trace from the current
-   attempt, use the local runner's bounded agent trace flow from the validated
-   run directory:
+   console, network, trace, and step state. Trace creation depends on the
+   repository's existing Playwright configuration; a missing trace is
+   unavailable evidence, not a product defect. Never add a trace flag or change
+   repository configuration. For a retained trace from the current attempt,
+   use the local runner's bounded agent trace flow from the validated run
+   directory:
 
    ```sh
    cd <validated-run-directory> && npx --no playwright trace open <current-attempt-trace>
    cd <validated-run-directory> && npx --no playwright trace actions --grep=<bounded-query>
    cd <validated-run-directory> && npx --no playwright trace action <action-id>
-   cd <validated-run-directory> && npx --no playwright trace snapshot <action-id> --name <before-or-after>
+   cd <validated-run-directory> && npx --no playwright trace snapshot <action-id> <supplied-snapshot-option> <before-or-after>
    cd <validated-run-directory> && npx --no playwright trace close
    ```
 
-   Open only one trace at a time and close it before cleanup.
+   Main supplies `<supplied-snapshot-option>` as exactly `--name` or `--phase`
+   from runtime preflight. When it is unavailable, do not run `trace snapshot`;
+   use other current-attempt evidence. Open only one trace at a time and close
+   it before cleanup.
 
 5. After a failed runner exits, read its `error-context.md` only when the exact
    runner-reported path canonically resolves inside the current attempt
@@ -173,9 +180,10 @@ otherwise source changes route to Author or the product owner.
 ## Reporting and cleanup
 
 Report the attempt count, last signature, evidence summary, classification,
-repairs, final disposition, and required next owner using
-`artifact-contract.md`. `fixed` requires a passing non-debug run in the approved
-scope after the last edit and sets `next_owner` to `main` for the vacuity gate.
+repairs, final disposition, and required next owner using the trace schema and
+the Healer role contract. `fixed` requires a passing non-debug run in the
+approved scope after the last edit and sets `next_owner` to `main` for the
+vacuity gate.
 
 Assemble the complete scrubbed trace before replacing Main's declared draft.
 Make one whole-file `Write`, validate once, and use validation error codes to

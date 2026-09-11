@@ -26,35 +26,37 @@ documented script call reports it missing, stop and ask the human to restart
 Claude Code after installing or reloading the plugin. Never infer it from
 `SKILL.md`, search for another checkout, or hardcode a development path.
 
-Main runs this read-only preflight from the repository's package directory before
+Main runs one read-only preflight from the repository's package directory before
 every generation:
 
 ```sh
-node --version
-node -e "for (const id of ['playwright/package.json','@playwright/test/package.json']) require.resolve(id)"
-playwright-cli --version
-playwright-cli --help
+node "$PLAYWRIGHT_TESTGEN_ROOT/scripts/runtime-preflight.cjs" --repo .
 ```
 
-Run each line as a separate Bash call from the repository root. Do not
-prefix it with `cd`, combine it with another command, or append discovery
-probes. Use `Read`, `Glob`, or `Grep` separately for repository discovery.
+Run it bare from the repository root; do not prefix it with `cd`, combine it
+with another command, or append discovery probes. It resolves and records the
+repository's local `playwright` and `@playwright/test`, the global
+`playwright-cli`, its installed project skill, required runner/CLI capabilities,
+Git HEAD, hook dependency readiness, and the supported trace snapshot spelling.
+It checks the skill file itself and does not rely on the obsolete `Agent skill:`
+help heading. `ok: false` stops before Author with the reported bounded reason;
+an unborn or missing Git HEAD is `git-head-unavailable`. Never create a commit
+or install anything to make preflight pass.
 
-Node must be 22.13 or newer. The CLI must be version 0.1.19 or newer. Its help must list `attach`, `find`,
-`generate-locator`, and `requests`, and print an `Agent skill:` path. Treat the
-warning `The playwright-cli skill at '<path>' does not match the tool version.`
-as outdated. If any package, CLI capability, or skill is missing or outdated,
-stop before Author. Run the official install from the same Node/npm environment
-that launches the agent; a different global npm prefix does not satisfy this
-check.
+Node must be 22.13 or newer and the CLI must be 0.1.19 or newer. A newer
+version is not assumed trace-compatible: unknown combinations leave optional
+trace snapshot inspection unavailable while the required workflow can continue.
+Run the official install from the same Node/npm environment that launches the
+agent; a different global npm prefix does not satisfy this check.
 
-Package resolution alone does not prove that either browser runtime is ready.
-Before Author, Main records separate facts for the Playwright CLI exploration
-browser and the repository runner browser selected by its existing config and
-project, and confirms the application is already running at the approved
-origin. Do not hardcode Chromium or change repository configuration. A browser
-installation listing is supporting evidence, not proof that the selected local
-Playwright version can launch it; stop when readiness cannot be confirmed.
+Preflight does not launch the application or a browser. Before Author, Main
+records separate fresh facts for authentication, the application at the
+approved origin, the Playwright CLI exploration browser, and the repository
+runner browser selected by existing config and project. Reuse equivalent fresh
+readiness evidence; do not launch a second browser merely for preflight. Do not
+hardcode Chromium or change repository configuration. A browser installation
+listing is supporting evidence, not proof that the selected local Playwright
+version can launch it; stop when readiness cannot be confirmed.
 
 `/setup` is planned but not shipped. Until it exists, Main offers only the
 relevant official remediation:
@@ -82,7 +84,8 @@ route, auth, environment, and data facts. Healer
 executes, diagnoses, makes bounded repairs, and reports its trace; Main never
 performs Healer work. A validated `fixed` trace enters Main's vacuity gate:
 Main runs one approved criterion-linked product mutation when available,
-writes and validates `vacuity-report.json`, and reports only its derived
+writes and validates `vacuity-report.json`, then reports the validator's
+separate execution and mutation-verification summary plus its derived
 disposition. Without an adapter, record mutation verification as unavailable;
 unless a separate assertion-sensitivity check ran, its status is `not-run`.
 Skipped runs remain `generated-unverified`; nonfixed runs keep their Healer
@@ -95,10 +98,9 @@ create a second routing layer.
 
 - [pipeline.md](references/pipeline.md) — Read this when starting this skill's generation workflow or its post-checkpoint run or repair path, to establish ordering, ownership, checkpoints, and handoffs.
 - [test-policy.md](references/test-policy.md) — Read this when planning, writing, or revising a spec or helper.
-- [vacuity-policy.md](references/vacuity-policy.md) — Read this when planning, writing, or revising assertions, and during Author's pre-write self-check.
 - [locator-policy.md](references/locator-policy.md) — Read this when choosing, verifying, or changing any locator.
 - [failure-taxonomy.md](references/failure-taxonomy.md) — Read this when a run fails, before assigning its cause, remedy, or next owner.
 - [healing-protocol.md](references/healing-protocol.md) — Read this when Healer is authorized to run or debug a spec, and before repairing a failure.
-- [artifact-contract.md](references/artifact-contract.md) — Read this before starting Author to create the run ID, and when creating, validating, or consuming an Author handoff, Healer trace, or vacuity report.
+- [artifact-contract.md](references/artifact-contract.md) — Main reads this before starting Author and when validating or consuming an Author handoff or Healer trace.
 - [mutation-check.md](references/mutation-check.md) — Read this before approving any mutation adapter, and after a fixed Healer result to run the approved mutation or record that verification is unavailable.
 - [cleanup-contract.md](references/cleanup-contract.md) — Read this when browser sessions or scratch artifacts may be created, and before any exit path.
