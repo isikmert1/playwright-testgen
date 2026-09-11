@@ -196,11 +196,11 @@ test('workflow guidance removes avoidable pre-Author ambiguity', () => {
     'utf8',
   );
 
-  assert.match(skill, /separate Bash call/iu);
+  assert.match(skill, /scripts\/runtime-preflight\.cjs.*--repo \./iu);
   assert.match(skill, /Node(?:\.js)? 22\.13/iu);
   assert.match(skill, /exploration\s+browser.*runner\s+browser/isu);
-  assert.match(skill, /Agent skill:/u);
-  assert.match(skill, /does not match the tool version/iu);
+  assert.match(skill, /checks the skill file itself/iu);
+  assert.match(skill, /newer\s+version is not assumed trace-compatible/iu);
   assert.match(pipeline, /actual derived\s+`scenario_ref`/iu);
   assert.match(pipeline, /application is already running/iu);
   assert.match(pipeline, /feature source.*Author/isu);
@@ -226,11 +226,13 @@ test('workflow guidance removes avoidable pre-Author ambiguity', () => {
     /inherited `PLAYWRIGHT_MCP_\*`.*`PLAYWRIGHT_CLI_SESSION`.*blocker/isu,
   );
   assert.doesNotMatch(author, /references\/pipeline\.md/iu);
+  assert.match(author, /stop and return the missing\s+prerequisite to Main/iu);
   assert.match(
     author,
     /rm -rf -- \.playwright-cli\/testgen\/<run_id>\/\.playwright-cli/iu,
   );
   assert.match(healer, /do not repeat the runtime\s+preflight/iu);
+  assert.match(healer, /stop and return the missing prerequisite to\s+Main/iu);
   assert.match(healer, /hook rejection.*does not consume an\s+attempt/isu);
   assert.match(
     healer,

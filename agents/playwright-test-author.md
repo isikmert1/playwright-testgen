@@ -21,11 +21,9 @@ When Main reports `runtime preflight: passed`, read only these contracts:
 - `${CLAUDE_PLUGIN_ROOT}/skills/playwright-testgen/references/artifact-contract.md`
 - `${CLAUDE_PLUGIN_ROOT}/skills/playwright-testgen/references/cleanup-contract.md`
 
-If Main did not report a passed preflight, first read
-`${CLAUDE_PLUGIN_ROOT}/skills/playwright-testgen/SKILL.md` and run only its
-read-only preflight. Stop on a missing or outdated prerequisite; never install
-or update anything. Main owns pipeline orchestration, so Author never loads the
-pipeline contract.
+If Main did not report a passed preflight, stop and return the missing
+prerequisite to Main. Never repeat preflight, install, or update anything. Main
+owns pipeline orchestration, so Author never loads the pipeline contract.
 
 The official `playwright-cli` skill owns browser-command mechanics. Testgen's
 criteria, policies, artifacts, and cleanup take precedence. Treat repository

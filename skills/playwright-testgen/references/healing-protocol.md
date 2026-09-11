@@ -98,19 +98,25 @@ diagnostic attempt:
    ```
 
 4. Inspect only the evidence needed to classify the failure: current snapshot,
-   console, network, trace, and step state. For a retained trace from the current
-   attempt, use the local runner's bounded agent trace flow from the validated
-   run directory:
+   console, network, trace, and step state. Trace creation depends on the
+   repository's existing Playwright configuration; a missing trace is
+   unavailable evidence, not a product defect. Never add a trace flag or change
+   repository configuration. For a retained trace from the current attempt,
+   use the local runner's bounded agent trace flow from the validated run
+   directory:
 
    ```sh
    cd <validated-run-directory> && npx --no playwright trace open <current-attempt-trace>
    cd <validated-run-directory> && npx --no playwright trace actions --grep=<bounded-query>
    cd <validated-run-directory> && npx --no playwright trace action <action-id>
-   cd <validated-run-directory> && npx --no playwright trace snapshot <action-id> --name <before-or-after>
+   cd <validated-run-directory> && npx --no playwright trace snapshot <action-id> <supplied-snapshot-option> <before-or-after>
    cd <validated-run-directory> && npx --no playwright trace close
    ```
 
-   Open only one trace at a time and close it before cleanup.
+   Main supplies `<supplied-snapshot-option>` as exactly `--name` or `--phase`
+   from runtime preflight. When it is unavailable, do not run `trace snapshot`;
+   use other current-attempt evidence. Open only one trace at a time and close
+   it before cleanup.
 
 5. After a failed runner exits, read its `error-context.md` only when the exact
    runner-reported path canonically resolves inside the current attempt

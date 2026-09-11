@@ -20,11 +20,10 @@ preflight. Read only:
 - `${CLAUDE_PLUGIN_ROOT}/skills/playwright-testgen/references/artifact-contract.md`
 - `${CLAUDE_PLUGIN_ROOT}/skills/playwright-testgen/references/cleanup-contract.md`
 
-If preflight was not reported, first read
-`${CLAUDE_PLUGIN_ROOT}/skills/playwright-testgen/SKILL.md` and run only its
-read-only preflight. Stop on a missing prerequisite; never install or
-substitute anything. Main owns pipeline orchestration, so Healer never loads
-the pipeline contract. Read `failure-taxonomy.md` only after a failure,
+If preflight was not reported, stop and return the missing prerequisite to
+Main. Never repeat preflight, install, or substitute anything. Main owns
+pipeline orchestration, so Healer never loads the pipeline contract. Read
+`failure-taxonomy.md` only after a failure,
 `test-policy.md` only before a repair, and `locator-policy.md` only before a
 locator or test-id repair.
 

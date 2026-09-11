@@ -39,8 +39,8 @@ evaluation metadata, not an operational profile, and must not be sent to Author.
 
 ## Ordered flow
 
-1. Main runs each read-only runtime preflight command from `SKILL.md` in its own
-   Bash call from the repository root. Missing or outdated prerequisites
+1. Main runs the single read-only runtime preflight command from `SKILL.md`
+   from the repository root. Missing or unsupported required prerequisites
    stop the flow before Author; generation never installs them. Main also
    confirms the application is already running at the approved origin and
    records separate readiness facts for the Playwright CLI exploration browser
@@ -89,7 +89,8 @@ evaluation metadata, not an operational profile, and must not be sent to Author.
      "allowed_write_paths": [],
      "format_version": 1,
      "run_id": "tg-<24hex>",
-     "allowed_origins": ["https://app.example.test"]
+     "allowed_origins": ["https://app.example.test"],
+     "trace_snapshot_option": "--name"
    }
    ```
 
@@ -112,6 +113,10 @@ evaluation metadata, not an operational profile, and must not be sent to Author.
    writable separately and may be new. If Author discovers that another edit
    is necessary, it returns the exact path and evidence to Main for approval
    and redispatch instead of attempting the edit.
+   `trace_snapshot_option` is the exact `--name` or `--phase` spelling selected
+   by runtime preflight for this Playwright/CLI combination, or `null` when
+   optional trace snapshot inspection is unavailable. Agents never select or
+   substitute it themselves.
    This transient Main-owned policy binds the shared PreToolUse hook to the run.
    Author and Healer must never edit it; preserve it through Healer and never
    treat it as a handoff artifact.
@@ -165,7 +170,8 @@ evaluation metadata, not an operational profile, and must not be sent to Author.
      and delegate `playwright-testgen:playwright-test-healer` in fresh context
      with explicit approval, the run ID, repository root, exact approved spec
      path, original criteria, validated handoff, `runtime preflight: passed`,
-     and known project, config, route, auth, environment, and test-data facts.
+     the selected trace snapshot option or explicit `unavailable`, and known
+     project, config, route, auth, environment, and test-data facts.
      Before delegation, Main confirms `approved_spec` still names the reviewed
      file and obtains its shell-safe approved spec filter argument from the
      repository root:

@@ -171,6 +171,9 @@ function loadPolicy(cwd, runId) {
     ) ||
     new Set(policy.allowed_write_paths).size !==
       policy.allowed_write_paths.length ||
+    ![undefined, null, '--name', '--phase'].includes(
+      policy.trace_snapshot_option,
+    ) ||
     !Array.isArray(policy.allowed_origins) ||
     policy.allowed_origins.length === 0 ||
     policy.allowed_origins.length > 8
@@ -284,6 +287,7 @@ function loadPolicy(cwd, runId) {
     repositoryRoot,
     runDirectory,
     runId,
+    traceSnapshotOption: policy.trace_snapshot_option ?? null,
   };
 }
 

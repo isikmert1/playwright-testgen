@@ -53,6 +53,7 @@ function createTargetRepository() {
       format_version: 1,
       run_id: runId,
       allowed_origins: ['http://127.0.0.1:3000'],
+      trace_snapshot_option: '--name',
     }),
   );
 
@@ -1145,6 +1146,39 @@ test('allows trace inspection for the current run', () => {
   });
 });
 
+test('binds trace snapshot syntax to the runtime policy', () => {
+  withTargetRepository(({ runDirectory, targetRepository }) => {
+    const enterRun = `cd .playwright-cli/testgen/${runId} &&`;
+    updatePolicy(runDirectory, { trace_snapshot_option: '--phase' });
+
+    assert.equal(
+      runHook(
+        targetRepository,
+        `${enterRun} npx --no playwright trace snapshot 9 --phase after`,
+        'playwright-test-healer',
+      ).permissionDecision,
+      'allow',
+    );
+    assert.equal(
+      runHook(
+        targetRepository,
+        `${enterRun} npx --no playwright trace snapshot 9 --name after`,
+        'playwright-test-healer',
+      ).permissionDecision,
+      'deny',
+    );
+
+    updatePolicy(runDirectory, { trace_snapshot_option: null });
+    const unavailable = runHook(
+      targetRepository,
+      `${enterRun} npx --no playwright trace snapshot 9 --phase after`,
+      'playwright-test-healer',
+    );
+    assert.equal(unavailable.permissionDecision, 'deny');
+    assert.match(unavailable.permissionDecisionReason, /unavailable/iu);
+  });
+});
+
 test('allows canonical inspection of a current-attempt artifact', () => {
   withTargetRepository(({ targetRepository }) => {
     const result = runHook(
@@ -1668,28 +1702,16 @@ test('denies validation scripts outside the repository root', () => {
   });
 });
 
-test('allows only the canonical read-only package preflight', () => {
+test('keeps the shared runtime preflight Main-owned', () => {
   withTargetRepository(({ targetRepository }) => {
-    const documentedPreflights = readFileSync(
+    const documentedPreflight = readFileSync(
       path.join(repositoryRoot, 'skills', 'playwright-testgen', 'SKILL.md'),
       'utf8',
-    ).match(/^node -e ".+"$/gmu);
+    ).match(/^node ".*runtime-preflight\.cjs" --repo \.$/mu)?.[0];
 
-    assert.equal(documentedPreflights?.length, 1);
-    const [preflight] = documentedPreflights;
-
+    assert.equal(typeof documentedPreflight, 'string');
     assert.equal(
-      runHook(targetRepository, preflight).permissionDecision,
-      'allow',
-    );
-    assert.equal(
-      runHook(
-        targetRepository,
-        preflight.replace(
-          'require.resolve(id)',
-          "require.resolve(id); require('node:fs')",
-        ),
-      ).permissionDecision,
+      runHook(targetRepository, documentedPreflight).permissionDecision,
       'deny',
     );
   });

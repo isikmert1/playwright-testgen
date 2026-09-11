@@ -140,6 +140,7 @@ test('keeps mutation and grading answers out of the Healer prompt', () => {
     run_id: 'tg-0123456789abcdef01234567',
     approved_spec_filter: '/approved/',
     origin: 'http://127.0.0.1:4173',
+    trace_snapshot_option: '--name',
   });
   const seededBug = JSON.parse(
     readFileSync(path.join(repositoryRoot, definition.seeded_bug_path), 'utf8'),
@@ -148,6 +149,7 @@ test('keeps mutation and grading answers out of the Healer prompt', () => {
   assert.match(prompt, /runtime preflight: passed/iu);
   assert.match(prompt, /human checkpoint decision: run approved/iu);
   assert.match(prompt, /approved project\/config options: none/iu);
+  assert.match(prompt, /trace snapshot option: --name/iu);
   assert.match(
     prompt,
     /trace draft: \.playwright-cli\/testgen\/tg-0123456789abcdef01234567\/healer-trace\.json \(exact current contents: \{\}\)/u,
@@ -1389,46 +1391,6 @@ test('bounds the non-interactive Healer invocation with native controls', () => 
   assert.ok(args.includes('--strict-mcp-config'));
 });
 
-test('accepts current Playwright CLI help without an Agent skill marker', () => {
-  const { validPlaywrightHelp } = modules().runner;
-  assert.equal(typeof validPlaywrightHelp, 'function');
-  const currentHelp = [
-    'attach [name]',
-    'find [text]',
-    'generate-locator <target>',
-    'requests',
-  ].join('\n');
-
-  assert.equal(validPlaywrightHelp(currentHelp), true);
-  assert.equal(
-    validPlaywrightHelp(
-      `${currentHelp}\nThe installed Playwright CLI skill is stale.`,
-    ),
-    false,
-  );
-});
-
-test('verifies the Playwright CLI skill file installed in the project', () => {
-  const { validPlaywrightSkillInstall } = modules().runner;
-  assert.equal(typeof validPlaywrightSkillInstall, 'function');
-  const target = mkdtempSync(path.join(tmpdir(), 'testgen-cli-skill-test-'));
-  const skill = path.join(
-    target,
-    '.claude',
-    'skills',
-    'playwright-cli',
-    'SKILL.md',
-  );
-  try {
-    assert.equal(validPlaywrightSkillInstall(target), false);
-    mkdirSync(path.dirname(skill), { recursive: true });
-    writeFileSync(skill, '# Playwright CLI\n');
-    assert.equal(validPlaywrightSkillInstall(target), true);
-  } finally {
-    rmSync(target, { force: true, recursive: true });
-  }
-});
-
 test('caps the single Sonnet evaluation at two dollars', () => {
   const definition = JSON.parse(
     readFileSync(path.join(caseDirectory, 'case.json'), 'utf8'),
@@ -1630,6 +1592,14 @@ test('separates missing prerequisites from grading failures', () => {
     error: 'prerequisite-unavailable',
     reason: 'authentication-unavailable',
   });
+  assert.equal(
+    evaluationFailure({ code: 'playwright-cli-skill-outdated' }).error,
+    'prerequisite-unavailable',
+  );
+  assert.equal(
+    evaluationFailure({ code: 'playwright-version-mismatch' }).error,
+    'prerequisite-unavailable',
+  );
   assert.deepEqual(evaluationFailure(new Error('spec-changed')), {
     status: 'failed',
     error: 'grading-failed',
