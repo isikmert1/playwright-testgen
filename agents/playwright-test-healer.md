@@ -17,7 +17,6 @@ When Main reports `runtime preflight: passed`, do not repeat the runtime
 preflight. Read only:
 
 - `${CLAUDE_PLUGIN_ROOT}/skills/playwright-testgen/references/healing-protocol.md`
-- `${CLAUDE_PLUGIN_ROOT}/skills/playwright-testgen/references/artifact-contract.md`
 - `${CLAUDE_PLUGIN_ROOT}/skills/playwright-testgen/references/cleanup-contract.md`
 
 If preflight was not reported, stop and return the missing prerequisite to
@@ -97,15 +96,23 @@ when five attempts are consumed.
 
 ## Report and clean up
 
-Build the complete scrubbed `healer-trace.v1` from
-`artifact-contract.md`. A `fixed` trace uses `next_owner: main` because Main
-owns the vacuity gate; owner-terminal traces use the contract's matching owner.
-The cleanup `runner` field describes only an owned background debug runner;
-use `not-started` when foreground verification completed without one.
-
-If exact schema shape is needed, use `Read` on
+Before writing the trace, use `Read` on
 `${CLAUDE_PLUGIN_ROOT}/schemas/healer-trace.v1.schema.json`; never use Bash,
-`cat`, or an environment-variable probe. Assemble the complete trace first.
+`cat`, or an environment-variable probe. Build one complete artifact with the
+run/spec identity, `handoff_read`, every attempt, repairs, final classification,
+disposition, next owner, escalation, and cleanup. Each evidence summary is one
+behavior-focused sentence of at most 200 characters; use dedicated fields for
+paths and signatures. Raw commands, selectors, code, tool output, snapshots,
+bodies, environment values, and secrets never enter trace prose.
+
+`final_classification` is the last failed or blocked attempt's classification,
+even after confirmation passes, and is `null` only when nothing failed or
+blocked. `product-behavior-wrong` includes the retained criterion, required and
+observed behavior, contradiction, and why expectation drift does not apply. A
+`fixed` trace has no escalation and uses `next_owner: main`; owner-terminal
+traces use the matching human, product, or Author owner. The cleanup `runner`
+field describes only an owned background debug runner; use `not-started` when
+foreground verification completed without one. Assemble the complete trace.
 Read Main's declared draft once and verify its complete contents are exactly
 `{}`; stop if they are not. Then replace it with one whole-file `Write` and
 validate once. If validation fails, rebuild the complete artifact from its

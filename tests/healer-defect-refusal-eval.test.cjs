@@ -943,12 +943,6 @@ test('reports bounded trace lifecycle diagnostics before cleanup', () => {
             type: 'tool_use',
             id: 'bootstrap-2',
             name: 'Read',
-            input: { file_path: '/plugin/references/artifact-contract.md' },
-          },
-          {
-            type: 'tool_use',
-            id: 'bootstrap-3',
-            name: 'Read',
             input: { file_path: '/plugin/references/cleanup-contract.md' },
           },
           {
@@ -998,7 +992,6 @@ test('reports bounded trace lifecycle diagnostics before cleanup', () => {
             is_error: true,
             content: 'sensitive bootstrap failure',
           },
-          { type: 'tool_result', tool_use_id: 'bootstrap-3' },
           {
             type: 'tool_result',
             tool_use_id: 'runner',
@@ -1049,10 +1042,10 @@ test('reports bounded trace lifecycle diagnostics before cleanup', () => {
         'trace-validation-unknown',
       ],
       bootstrap_reads: {
-        expected: 3,
-        attempted: 3,
+        expected: 2,
+        attempted: 2,
         not_attempted: 0,
-        succeeded: 2,
+        succeeded: 1,
         failed: 1,
         unknown: 0,
         hook_decisions: {
@@ -1060,13 +1053,13 @@ test('reports bounded trace lifecycle diagnostics before cleanup', () => {
           deny: 0,
           ask: 0,
           neutral: 0,
-          not_observed: 2,
+          not_observed: 1,
         },
         hook_identities: {
           expected_healer: 0,
           missing: 1,
           other: 0,
-          not_observed: 2,
+          not_observed: 1,
         },
       },
       hook_lifecycle: {
@@ -1128,7 +1121,7 @@ test('distinguishes unavailable trace states without throwing', () => {
   try {
     const missing = traceFailureDiagnostics(tracePath, parsed, []);
     assert.equal(missing.trace_state, 'missing');
-    assert.equal(missing.bootstrap_reads.not_attempted, 3);
+    assert.equal(missing.bootstrap_reads.not_attempted, 2);
     assert.deepEqual(missing.operations.trace_write, {
       attempts: 0,
       status: 'not-attempted',
@@ -1156,11 +1149,7 @@ test('reports every observed trace failure without inventing one root cause', ()
   const repository = mkdtempSync(path.join(tmpdir(), 'testgen-trace-diag-'));
   const tracePath = path.join(repository, 'healer-trace.json');
   const toolUses = [
-    ...[
-      'healing-protocol.md',
-      'artifact-contract.md',
-      'cleanup-contract.md',
-    ].map((subject, index) => ({
+    ...['healing-protocol.md', 'cleanup-contract.md'].map((subject, index) => ({
       type: 'tool_use',
       id: `bootstrap-${index}`,
       name: 'Read',
@@ -1245,8 +1234,8 @@ test('reports every observed trace failure without inventing one root cause', ()
       'trace-write-not-attempted',
       'trace-validation-failed',
     ]);
-    assert.equal(diagnostics.bootstrap_reads.hook_decisions.neutral, 3);
-    assert.equal(diagnostics.bootstrap_reads.hook_identities.missing, 3);
+    assert.equal(diagnostics.bootstrap_reads.hook_decisions.neutral, 2);
+    assert.equal(diagnostics.bootstrap_reads.hook_identities.missing, 2);
     assert.equal(diagnostics.operations.spec_run.hook_decision, 'not-observed');
     assert.equal(diagnostics.operations.spec_run.hook_identity, 'not-observed');
     assert.deepEqual(diagnostics.hook_lifecycle, {

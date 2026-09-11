@@ -9,8 +9,10 @@ permission to invent a mutation.
 
 - [Adapter contract](#adapter-contract)
 - [Approval](#approval)
+- [Main-owned bookkeeping](#main-owned-bookkeeping)
 - [Verification](#verification)
 - [Results](#results)
+- [Vacuity report](#vacuity-report)
 
 ## Adapter contract
 
@@ -54,8 +56,12 @@ environment values, and secrets never enter this protocol.
 
 ## Approval
 
-Use this exact user-first question and choices, then append the technical
-identifiers:
+Only ask when Main has identified one exact prepared adapter entry for the
+required criterion. With no prepared adapter, do not ask this question or show
+patch/digest instructions; continue in no-adapter mode.
+
+For a prepared matching entry, use this exact user-first question and choices,
+then append the technical identifiers:
 
 > **Run mutation check after the generated test passes?**
 >
@@ -92,6 +98,31 @@ approval. Never feed `digest` output directly into verification as automatic
 approval. Obtain approval before the pre-Author boundary and Author delegation;
 a later approval requires a new run. A controlled fixture harness may instead
 provide a separately pinned digest.
+
+## Main-owned bookkeeping
+
+When Main has a controlled fixture or an explicitly approved mutation entry,
+it creates `change-manifest.v1` at
+`.playwright-cli/testgen/<run_id>/change-manifest.json`. This transient artifact
+records `HEAD` plus sorted repository-relative paths, state kinds, and SHA-256
+fingerprints; it never stores diffs or file contents. Author and Healer may read
+its paths and fingerprints but never mutate it.
+
+Capture its boundaries from the repository root:
+
+```sh
+node "$PLAYWRIGHT_TESTGEN_ROOT/scripts/mutation-check.cjs" capture --repo . --run-id <run_id> --boundary pre-author
+node "$PLAYWRIGHT_TESTGEN_ROOT/scripts/mutation-check.cjs" capture --repo . --run-id <run_id> --boundary checkpoint
+node "$PLAYWRIGHT_TESTGEN_ROOT/scripts/mutation-check.cjs" capture --repo . --run-id <run_id> --boundary post-healer
+```
+
+Capture `pre-author` after writing policy and before Author, `checkpoint` after
+human run approval and handoff validation, and `post-healer` after trace
+validation. The later boundaries reject changed pre-existing dirty paths,
+unreported Author or Healer writes, changed `HEAD`, and unrelated fingerprint
+drift. Its schema is
+`${CLAUDE_PLUGIN_ROOT}/schemas/change-manifest.v1.schema.json`. Retain it through
+verification, then remove it with run scratch under `cleanup-contract.md`.
 
 ## Verification
 
@@ -156,10 +187,37 @@ part of the trusted adapter definition.
 - `verification-error` — the baseline, runner, patch, isolation, attribution,
   timeout, or cleanup was invalid.
 
-An unrelated red mutant is `verification-error`, never `killed`. These are
-mechanism results. Main records them separately from assertion sensitivity in
-the `vacuity-report.v1` contract defined by `artifact-contract.md`;
-`verification-error` becomes the report's bounded behavior `error`. The report
-and its disposition remain owned by Main. If no separate assertion-sensitivity
-check ran, record its complete result as `not-run`; unavailable behavior then
-becomes `mutation-not-verified`.
+An unrelated red mutant is `verification-error`, never `killed`.
+
+## Vacuity report
+
+Main alone writes `.playwright-cli/testgen/<run_id>/vacuity-report.json` after a
+validated `fixed` trace. Read
+`${CLAUDE_PLUGIN_ROOT}/schemas/vacuity-report.v1.schema.json` when writing it.
+It binds the approved spec to separate product-mutation and assertion-sensitivity
+results. Author and Healer never mutate it.
+
+Map checker `killed`, `survived`, and `unavailable` to the same behavior status;
+map `verification-error` to behavior `error`. `unavailable` is limited to
+`adapter-absent` and `criterion-unmapped`; operational failures are errors. If
+no separate assertion-sensitivity check ran, record its complete status as
+`not-run`. The resulting dispositions are:
+
+- behavior `killed`: `verified-non-vacuous`;
+- behavior or assertion `survived`: `rejected-vacuous`;
+- unavailable behavior plus assertion `killed`: `assertion-sensitive-only`;
+- unavailable behavior plus assertion `not-run`: `mutation-not-verified`;
+- behavior error, or unavailable behavior plus assertion error:
+  `verification-error`.
+
+Validate the complete report from the repository root:
+
+```sh
+node "$PLAYWRIGHT_TESTGEN_ROOT/scripts/validate-testgen-artifact.cjs" --repo . --type vacuity --run-id <run_id> .playwright-cli/testgen/<run_id>/vacuity-report.json
+```
+
+Use only the validator's deterministic `summary` fields when reporting routine
+results. Present `Execution` separately from `mutation verification`; for
+example: “Execution: passed after one repair. Mutation verification:
+unavailable — no prepared adapter.” Keep the machine disposition unchanged.
+The summary never adds mutation identifiers when no adapter ran.

@@ -11,6 +11,13 @@ win.
   explains intended behavior; the running app proves rendered mechanics.
 - Map every criterion to a concrete observable assertion or an explicit
   blocker. Visibility alone is not evidence for a business outcome.
+- A criterion is covered only when removing its required behavior would make
+  its assertion fail. An action completing, or a container merely existing,
+  is not evidence unless that is the required outcome. Assert an intentionally
+  empty outcome directly; never rely on an empty-to-empty comparison.
+- Before assertions inside a loop, prove the same collection driving the loop
+  is non-empty. Before any comparison, prove both sides are non-empty, then
+  compare their concrete values; this includes equality, subsets, and pairs.
 - When criteria and observed behavior disagree, assert the criterion as
   written and report the disagreement. Never silently rewrite the expectation
   to match the current product.
@@ -42,8 +49,6 @@ win.
   comments to the generated spec.
 - Keep the behavior under test and its meaningful assertions visible in the
   spec; helpers may prepare or navigate but must not hide the scenario.
-- Apply `vacuity-policy.md` to every planned assertion. A criterion is not
-  covered unless its assertion can fail when the required behavior is absent.
 - Author uses the repository's existing package manager and lint convention,
   scoped to touched files when supported. If only its normal repository-wide
   lint exists, invoke that existing script and let the hook request approval;

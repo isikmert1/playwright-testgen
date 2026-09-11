@@ -195,6 +195,16 @@ test('workflow guidance removes avoidable pre-Author ambiguity', () => {
     ),
     'utf8',
   );
+  const testPolicy = readFileSync(
+    path.join(
+      repositoryRoot,
+      'skills',
+      'playwright-testgen',
+      'references',
+      'test-policy.md',
+    ),
+    'utf8',
+  );
 
   assert.match(skill, /scripts\/runtime-preflight\.cjs.*--repo \./iu);
   assert.match(skill, /Node(?:\.js)? 22\.13/iu);
@@ -215,6 +225,11 @@ test('workflow guidance removes avoidable pre-Author ambiguity', () => {
     /literal `--repo \.`.*repository-relative adapter path/isu,
   );
   assert.match(author, /never enumerate the repository\s+with `\*\*\/\*`/iu);
+  assert.doesNotMatch(
+    author,
+    /references\/(?:artifact-contract|vacuity-policy)\.md/iu,
+  );
+  assert.match(author, /schemas\/author-handoff\.v1\.schema\.json/iu);
   assert.match(author, /native `Grep` tool.*do not use Bash/isu);
   assert.match(
     author,
@@ -232,6 +247,8 @@ test('workflow guidance removes avoidable pre-Author ambiguity', () => {
     /rm -rf -- \.playwright-cli\/testgen\/<run_id>\/\.playwright-cli/iu,
   );
   assert.match(healer, /do not repeat the runtime\s+preflight/iu);
+  assert.doesNotMatch(healer, /references\/artifact-contract\.md/iu);
+  assert.match(healer, /schemas\/healer-trace\.v1\.schema\.json/iu);
   assert.match(healer, /stop and return the missing prerequisite to\s+Main/iu);
   assert.match(healer, /hook rejection.*does not consume an\s+attempt/isu);
   assert.match(
@@ -280,4 +297,29 @@ test('workflow guidance removes avoidable pre-Author ambiguity', () => {
     /up to four.*count-only.*one exact attribute spelling/isu,
   );
   assert.match(locatorPolicy, /literal.*Git Bash/isu);
+  assert.match(testPolicy, /loop.*same collection.*non-empty/isu);
+  assert.match(testPolicy, /comparison.*both sides.*non-empty/isu);
+  assert.doesNotMatch(skill, /references\/vacuity-policy\.md/iu);
+  assert.match(
+    mutationCheck,
+    /change-manifest\.json.*pre-author.*checkpoint.*post-healer/isu,
+  );
+  assert.match(
+    mutationCheck,
+    /vacuity-report\.json.*Execution.*mutation verification/isu,
+  );
+  assert.match(mutationCheck, /no prepared adapter.*do not ask.*digest/isu);
+  assert.match(
+    readFileSync(
+      path.join(
+        repositoryRoot,
+        'skills',
+        'playwright-testgen',
+        'references',
+        'healing-protocol.md',
+      ),
+      'utf8',
+    ),
+    /startup fails.*reservation.*consumed.*refuse.*reuse/isu,
+  );
 });

@@ -16,9 +16,7 @@ review. Never execute the spec.
 When Main reports `runtime preflight: passed`, read only these contracts:
 
 - `${CLAUDE_PLUGIN_ROOT}/skills/playwright-testgen/references/test-policy.md`
-- `${CLAUDE_PLUGIN_ROOT}/skills/playwright-testgen/references/vacuity-policy.md`
 - `${CLAUDE_PLUGIN_ROOT}/skills/playwright-testgen/references/locator-policy.md`
-- `${CLAUDE_PLUGIN_ROOT}/skills/playwright-testgen/references/artifact-contract.md`
 - `${CLAUDE_PLUGIN_ROOT}/skills/playwright-testgen/references/cleanup-contract.md`
 
 If Main did not report a passed preflight, stop and return the missing
@@ -90,7 +88,7 @@ Before writing, confirm:
 - every criterion has a meaningful assertion inside one concise, unique,
   descriptive `test.step()`;
 - each locator passed the live count-one and visibility gate;
-- assertions pass `vacuity-policy.md`'s evidence and comparison checks;
+- assertions pass `test-policy.md`'s evidence and comparison checks;
 - waits target observable state, with no hard sleep, `networkidle`, broad retry,
   or unexplained timeout;
 - the spec follows established project conventions and owns its data safely;
@@ -119,14 +117,17 @@ spec. Repository commands already start at the repository root: do not prefix
 them with `cd`, combine commands, or append shell operators. Use `Read`, `Glob`,
 or `Grep` for discovery. Run the collection command bare in its own Bash call.
 
-Build the complete scrubbed `author-handoff.v1` described by
-`artifact-contract.md`. Raw selectors belong only in `locators[].locator`; prose
-fields paraphrase them. If exact schema shape is needed, use `Read` on
+Before writing the handoff, use `Read` on
 `${CLAUDE_PLUGIN_ROOT}/schemas/author-handoff.v1.schema.json`; never use Bash,
-`cat`, or an environment-variable probe. Read the final spec once and record
-each assertion line inside its named `test.step()`, not the step's opening line.
-Write the handoff once at `.playwright-cli/testgen/<run_id>/handoff.json`, then
-run exactly:
+`cat`, or an environment-variable probe. Build one complete artifact with the
+run/scenario/spec identity; criterion step titles, assertion locations and
+outcomes; grounded locator decisions; test-id convention and additions; lint;
+test data; touched paths; assumptions; and open questions. Raw selectors belong
+only in `locators[].locator`; all other prose is a concise behavior summary,
+never a command, environment value, code, raw output, snapshot, body, or secret.
+Read the final spec once and record each assertion line inside its named
+`test.step()`, not the step's opening line. Write the handoff once at
+`.playwright-cli/testgen/<run_id>/handoff.json`, then run exactly:
 
 ```sh
 node "$PLAYWRIGHT_TESTGEN_ROOT/scripts/validate-testgen-artifact.cjs" --repo . --type handoff --run-id <run_id> .playwright-cli/testgen/<run_id>/handoff.json

@@ -59,7 +59,8 @@ evaluation metadata, not an operational profile, and must not be sent to Author.
       spec presence, browser readiness, and the selected validation path;
    2. create the run ID, write the run policy, and obtain its exact approved
       spec filter;
-   3. ask whether to run the matching mutation check;
+   3. when a prepared matching mutation entry exists, ask whether to run it;
+      otherwise record no-adapter mode without presenting mutation details;
    4. capture the `pre-author` boundary when that check is approved; and
    5. delegate Author with the concrete values and readiness facts, including
       `runtime preflight: passed`.
@@ -136,9 +137,11 @@ evaluation metadata, not an operational profile, and must not be sent to Author.
 
    Before enabling mutation verification, Main identifies one exact
    criterion-linked adapter entry and digest under `mutation-check.md` and uses
-   its exact user-first approval question. If several entries could apply, ask now; never
-   choose one implicitly. When that approval exists, Main captures the
-   `pre-author` boundary with the exact command in `artifact-contract.md`. Do
+   its exact user-first approval question. If several entries could apply, ask
+   now; never choose one implicitly. If no prepared adapter exists, do not ask
+   for mutation approval or expose patch/digest setup instructions. When approval
+   exists, Main captures the `pre-author` boundary with the exact command in
+   `mutation-check.md`. Do
    this after the policy exists and before delegating Author. If an approved
    adapter has no entry for the required criterion, retain its path for the
    later `criterion-unmapped` coverage check but continue without a change
@@ -236,7 +239,8 @@ evaluation metadata, not an operational profile, and must not be sent to Author.
      Unless a separate assertion-sensitivity check actually ran, record its
      complete status as `not-run`; do not infer evidence from the spec.
    - Main writes and validates `vacuity-report.json` with the exact command in
-     `artifact-contract.md`, then reports only its derived disposition. A
+     `mutation-check.md`, then reports the validator's separate execution and
+     mutation-verification summary plus its derived disposition. A
      surviving product mutation is `rejected-vacuous`; include its mutation ID
      as evidence. It never automatically returns to Author. The human may start
      a new approved Author run using that evidence.

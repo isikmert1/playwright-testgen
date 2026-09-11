@@ -5,13 +5,13 @@ const path = require('node:path');
 const { loadPolicy } = require('../hooks/run-policy.cjs');
 const {
   RUN_ID,
-  containsProhibited,
   isFile,
   isInside,
   isObject,
   loadSchema,
   parseArgs,
   portable,
+  prohibitedReasons,
   report,
   samePath,
 } = require('./artifact-validation-common.cjs');
@@ -26,6 +26,35 @@ const ARTIFACT_FILENAMES = {
   trace: 'healer-trace.json',
   vacuity: 'vacuity-report.json',
 };
+
+function executionSummary(trace) {
+  const outcome = trace.attempts.at(-1).outcome;
+  return {
+    status: outcome === 'pass' ? 'passed' : outcome,
+    attempts: trace.attempts.length,
+    repairs: trace.repairs.length,
+  };
+}
+
+function artifactSummary(type, artifact, trace) {
+  if (type === 'trace') {
+    return {
+      execution: executionSummary(artifact),
+      classification: artifact.final_classification,
+      disposition: artifact.disposition,
+    };
+  }
+  if (type !== 'vacuity') return null;
+  return {
+    execution: executionSummary(trace),
+    mutation_verification: {
+      status: artifact.behavior.status,
+      reason: artifact.behavior.reason,
+    },
+    assertion_sensitivity: { status: artifact.assertion_sensitivity.status },
+    disposition: artifact.disposition,
+  };
+}
 
 function main() {
   let options;
@@ -105,12 +134,13 @@ function main() {
     report(false, options.type, ['artifact-not-object']);
     return;
   }
-  const prohibitedErrors = Object.entries(artifact).flatMap(([key, value]) => {
-    if (!containsProhibited(value, key)) return [];
-    return Object.hasOwn(schema.properties, key)
-      ? [`${options.type}-${key.replaceAll('_', '-')}-prohibited-content`]
-      : ['prohibited-content'];
-  });
+  const prohibitedErrors = Object.entries(artifact).flatMap(([key, value]) =>
+    prohibitedReasons(value, key).map((reason) =>
+      Object.hasOwn(schema.properties, key)
+        ? `${options.type}-${key.replaceAll('_', '-')}-prohibited-${reason}`
+        : `prohibited-${reason}`,
+    ),
+  );
   if (prohibitedErrors.length > 0) {
     report(false, options.type, prohibitedErrors);
     return;
@@ -127,6 +157,7 @@ function main() {
     )
   )
     errors.push('policy-spec-mismatch');
+  let trace = null;
   if (options.type === 'handoff') {
     validateHandoff(artifact, repository, errors);
   } else {
@@ -144,7 +175,6 @@ function main() {
     if (options.type === 'trace')
       validateTrace(artifact, repository, handoffCriteria, errors);
     else {
-      let trace = null;
       try {
         trace = require('./change-manifest.cjs').validateArtifact(
           repository,
@@ -169,6 +199,9 @@ function main() {
   report(true, options.type, [], {
     run_id: options.runId,
     artifact_path: portable(path.relative(repository, realArtifact)),
+    ...(options.type === 'handoff'
+      ? {}
+      : { summary: artifactSummary(options.type, artifact, trace) }),
   });
 }
 

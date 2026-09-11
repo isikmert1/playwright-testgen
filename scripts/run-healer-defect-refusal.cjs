@@ -201,7 +201,6 @@ function buildClaudeArguments(definition, prompt) {
 
 const MAX_TOOL_RESULT_BYTES = 256 * 1024;
 const HEALER_BOOTSTRAP_REFERENCES = new Set([
-  'artifact-contract.md',
   'cleanup-contract.md',
   'healing-protocol.md',
 ]);

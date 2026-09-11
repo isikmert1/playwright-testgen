@@ -283,7 +283,11 @@ test('accepts a valid fixed Healer trace in its run-owned location', () => {
     const result = validate(repository, 'trace', runId, artifact);
 
     assert.equal(result.status, 0, result.stderr);
-    assert.equal(JSON.parse(result.stdout).valid, true);
+    assert.deepEqual(JSON.parse(result.stdout).summary, {
+      execution: { status: 'passed', attempts: 1, repairs: 0 },
+      classification: null,
+      disposition: 'fixed',
+    });
   });
 });
 
@@ -340,6 +344,12 @@ test('accepts a behavior-killed vacuity report for the approved spec', () => {
       type: 'vacuity',
       run_id: runId,
       artifact_path: artifact,
+      summary: {
+        execution: { status: 'passed', attempts: 1, repairs: 0 },
+        mutation_verification: { status: 'killed', reason: null },
+        assertion_sensitivity: { status: 'not-run' },
+        disposition: 'verified-non-vacuous',
+      },
     });
   });
 });
@@ -425,6 +435,15 @@ test('reports absent product mutation coverage without overstating verification'
     const result = validate(repository, 'vacuity', runId, artifact);
 
     assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout).summary, {
+      execution: { status: 'passed', attempts: 1, repairs: 0 },
+      mutation_verification: {
+        status: 'unavailable',
+        reason: 'adapter-absent',
+      },
+      assertion_sensitivity: { status: 'not-run' },
+      disposition: 'mutation-not-verified',
+    });
   });
 });
 
@@ -856,7 +875,39 @@ test('rejects secret-bearing artifacts without echoing the value', () => {
 
     assert.equal(result.status, 1);
     assert.doesNotMatch(result.stderr, /do-not-repeat-this-value/iu);
-    assert.match(result.stderr, /handoff-assumptions-prohibited-content/iu);
+    assert.match(result.stderr, /handoff-assumptions-prohibited-secret/iu);
+  });
+});
+
+test('accepts benign equals syntax in bounded artifact prose', () => {
+  withRepository((repository) => {
+    const authorArtifact = handoff();
+    authorArtifact.assumptions = [
+      'the runner used retries=0',
+      'the control text=Submit remained unique',
+    ];
+    const authorPath = writeArtifact(
+      repository,
+      runId,
+      'handoff.json',
+      authorArtifact,
+    );
+    const authorResult = validate(repository, 'handoff', runId, authorPath);
+
+    assert.equal(authorResult.status, 0, authorResult.stderr);
+
+    const healerArtifact = trace();
+    healerArtifact.attempts[0].evidence_summary =
+      'the runner kept retries=0 and the control text=Submit';
+    const healerPath = writeArtifact(
+      repository,
+      runId,
+      'healer-trace.json',
+      healerArtifact,
+    );
+    const healerResult = validate(repository, 'trace', runId, healerPath);
+
+    assert.equal(healerResult.status, 0, healerResult.stderr);
   });
 });
 
@@ -888,7 +939,30 @@ test('rejects environment assignments and raw snapshots', () => {
       const result = validate(repository, 'handoff', runId, artifactPath);
 
       assert.equal(result.status, 1);
-      assert.match(result.stderr, /handoff-assumptions-prohibited-content/iu);
+      assert.match(
+        result.stderr,
+        /handoff-assumptions-prohibited-(?:environment-value|raw-content|secret)/iu,
+      );
+    }
+  });
+});
+
+test('leaves unknown-field rejection to artifact shape validation', () => {
+  withRepository((repository) => {
+    for (const field of ['domain', 'dialog']) {
+      const artifact = handoff();
+      artifact[field] = 'not an allowed field';
+      const artifactPath = writeArtifact(
+        repository,
+        runId,
+        'handoff.json',
+        artifact,
+      );
+      const result = validate(repository, 'handoff', runId, artifactPath);
+
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /handoff-unknown-field/iu);
+      assert.doesNotMatch(result.stderr, /prohibited/iu);
     }
   });
 });
@@ -907,7 +981,7 @@ test('identifies the safe trace section containing prohibited content', () => {
     const result = validate(repository, 'trace', runId, artifactPath);
 
     assert.equal(result.status, 1);
-    assert.match(result.stderr, /trace-attempts-prohibited-content/iu);
+    assert.match(result.stderr, /trace-attempts-prohibited-raw-content/iu);
     assert.doesNotMatch(result.stderr, /raw page state/iu);
   });
 });

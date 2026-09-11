@@ -76,8 +76,9 @@ diagnostic attempt:
    `--repeat-each=1` ensure one runner invocation is one attempt. Run the attach
    command and every attached CLI command from the validated run directory so
    their generated output remains inside owned scratch. The hook atomically
-   reserves the attempt before the process starts; if startup fails, keep that
-   reservation and advance to the next unused attempt. Keep
+   reserves the attempt when it allows the command. If startup fails, that
+   reservation remains consumed: advance to the next unused attempt and refuse
+   any reuse of the reserved path. Keep
    `PWTEST_CLI_GLOBAL_CONFIG=.` on every CLI command and never create a CLI
    config there; this suppresses automatic home/repository config-file loading.
    The hook also rejects inherited `PLAYWRIGHT_MCP_*` configuration and
@@ -179,9 +180,10 @@ otherwise source changes route to Author or the product owner.
 ## Reporting and cleanup
 
 Report the attempt count, last signature, evidence summary, classification,
-repairs, final disposition, and required next owner using
-`artifact-contract.md`. `fixed` requires a passing non-debug run in the approved
-scope after the last edit and sets `next_owner` to `main` for the vacuity gate.
+repairs, final disposition, and required next owner using the trace schema and
+the Healer role contract. `fixed` requires a passing non-debug run in the
+approved scope after the last edit and sets `next_owner` to `main` for the
+vacuity gate.
 
 Assemble the complete scrubbed trace before replacing Main's declared draft.
 Make one whole-file `Write`, validate once, and use validation error codes to
