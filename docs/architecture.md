@@ -1,0 +1,76 @@
+# Architecture
+
+Playwright Testgen is a Claude Code plugin that turns one written scenario into
+one grounded Playwright test. It separates writing, execution, and repair so a
+passing-looking test cannot silently replace the requested behavior.
+
+## Ownership
+
+- **Main** owns preflight, run policy, the human checkpoint, artifact
+  validation, optional mutation verification, final reporting, and cleanup.
+- **Author** reads the scenario, relevant project source, and live application;
+  writes one candidate spec; validates that it loads; and stops before running
+  it.
+- **Healer** runs only the approved spec, diagnoses failures from current
+  evidence, makes bounded test repairs, and refuses to edit around product
+  defects.
+- **The human** chooses `run`, `adjust`, or `skip`, approves mutation adapters,
+  and decides whether a sanitized product finding becomes durable.
+
+Main does not perform Author or Healer work. Author and Healer do not change
+Main-owned policy or result artifacts.
+
+## Runtime boundary
+
+The project being tested owns its local `playwright` and `@playwright/test`,
+configuration, package manager, fixtures, test layout, browser choice, and CI.
+Preflight accepts those packages only when they resolve inside that project's
+canonical repository root. The official `playwright-cli` is deliberately a
+separate global installation.
+
+Testgen does not install project dependencies or rewrite existing Playwright
+configuration and CI rules. A missing capability stops with a bounded reason.
+
+## Workflow and evidence
+
+One run has one ID, one approved spec, and one human checkpoint. Run policy
+binds browser navigation, file writes, runner arguments, output directories,
+and artifact validation to that run. Hook decisions constrain delegated
+agents, but they are guardrails rather than an operating-system sandbox.
+
+Validated Author handoffs and Healer traces connect criteria to assertions and
+execution evidence without retaining raw pages, logs, credentials, or agent
+reasoning. A fixed test can enter the optional vacuity gate, which applies only
+an explicitly approved criterion-linked mutation in a disposable Git worktree.
+The active checkout must remain unchanged.
+
+## Artifacts and cleanup
+
+`.playwright-cli/testgen/<run-id>/` is transient. It contains policy, bounded
+handoff and trace data, runner evidence, and optional mutation state. Main
+removes only that exact directory after the result is accepted.
+
+For an accepted `product-behavior-wrong` result, the human may approve one
+sanitized entry in `.playwright-cli/testgen/findings.md`. That sibling file is
+durable and contains only the run ID, classification, criterion ID, spec path,
+and bounded observed behavior. Declining creates nothing; cleanup preserves an
+existing findings file.
+
+## Non-goals
+
+Testgen is not a generic test framework, CI replacement, package installer,
+credential manager, process sandbox, or license to repair application code.
+Evaluation runners measure Testgen separately and never run automatically
+during normal generation.
+
+## Versioning and releases
+
+Plugin, marketplace, package, and lockfile metadata share one semantic version.
+Git commit SHAs remain exact provenance between releases.
+
+For a release:
+
+1. Bump all four version locations together.
+2. Run `npm run check` and review the release diff and notes.
+3. Create the tag and publish deliberately; neither action is automated by a
+   normal commit.
