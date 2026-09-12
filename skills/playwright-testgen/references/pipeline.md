@@ -6,6 +6,7 @@ dispositions. The workflow handles exactly one written scenario at a time.
 ## Contents
 
 - [Ownership](#ownership)
+- [Scenario discovery](#scenario-discovery)
 - [Ordered flow](#ordered-flow)
 - [Final dispositions](#final-dispositions)
 - [Handoff boundary](#handoff-boundary)
@@ -16,6 +17,8 @@ dispositions. The workflow handles exactly one written scenario at a time.
 | ----------------------------------------------------------------- | -------------------------- |
 | Coordinate the run and present decisions                          | Main session               |
 | Validate project runtime prerequisites before generation          | Main session               |
+| Survey coverage and propose evidence-backed scenarios             | Explorer                   |
+| Select, edit, or reject a proposed scenario                       | Human                      |
 | Ground the scenario and explore the live app                      | Author                     |
 | Write and lint the candidate spec                                 | Author                     |
 | Approve, skip, or redirect the candidate                          | Human                      |
@@ -31,11 +34,67 @@ policy/artifacts, and reports; it does not explore, write product or test files,
 or debug.
 
 Main's repository discovery is limited to package metadata, the selected
-Playwright config, existing Playwright spec paths and naming (not their bodies),
-an actual `/setup` profile when present, and runtime readiness. Feature source,
-nearby test bodies, and rendered behavior belong to Author. A target descriptor
-may guide evaluation setup, but its expected outcomes and locator convention are
-evaluation metadata, not an operational profile, and must not be sent to Author.
+Playwright config, existing test paths and naming (not their bodies), an actual
+`/setup` profile when present, and runtime readiness. Broad test-body coverage
+mapping, bounded recent history, and proposal-only live observation belong to
+Explorer. Grounding the selected scenario in feature source, nearby tests, and
+rendered behavior belongs to Author. A target descriptor may guide evaluation
+setup, but its expected outcomes and locator convention are evaluation metadata,
+not an operational profile, and must not be sent to Explorer or Author.
+
+## Scenario discovery
+
+When no written scenario is supplied or the human explicitly requests
+proposals, Main completes runtime and application/browser readiness checks,
+creates a discovery ID with the normal run-ID script, and writes
+`.playwright-cli/testgen/<discovery_id>/command-policy.json` with only:
+
+```json
+{
+  "allowed_browser_actions": [],
+  "allowed_origins": ["https://app.example.test"],
+  "allowed_state_paths": [],
+  "discovery_id": "tg-<24hex>",
+  "format_version": 1,
+  "policy_kind": "discovery"
+}
+```
+
+The origin is illustrative, never a default. `allowed_state_paths` follows the
+same exact existing-file and opacity rules as generation. Keep
+`allowed_browser_actions` empty unless the human approved a concrete exploration
+scope and reset or cleanup method. It may then contain only the action names
+`check`, `click`, `dblclick`, `fill`, `keydown`, `keyup`, `press`, `select`,
+`type`, or `uncheck` that the approved scope needs. This policy contains no
+`approved_spec`, runner options, write paths, trace options, or generation
+`run_id`; it grants no test or repository-write authority.
+
+Main delegates `playwright-testgen:playwright-test-explorer` with the passed
+preflight fact, discovery ID, repository root, approved origin, application and
+exploration-browser readiness, auth/data facts, exact approved state paths, and
+optional human scope. For an approved state-changing action, also pass the
+action names, semantic scope, and reset or cleanup method. Never pass evaluation
+answers, seeded bugs, mutation metadata, or expected classifications.
+
+Explorer reads at most ten source/test files or works for 90 seconds, reads no
+more than the latest twenty commits, and returns at most five proposals plus its
+inspected scope and limits. Main rejects output that exceeds those bounds or
+omits a proposal's local ID, route, user goal, observable criteria, source/test
+references, labeled expected-behavior evidence, coverage status, priority
+reason, or auth/data prerequisites and unresolved questions. Coverage status is
+exactly `apparently-covered`, `candidate-gap`, or `unknown`. Live observation
+alone is not intended-behavior evidence. `no supported proposal` is valid when
+the evidence cannot support a gap or recent meaningful UI change.
+
+The time and cumulative-Read limits are agent-enforced in this phase. Hooks
+bound individual operations but do not count elapsed time or total reads.
+
+The result is transient untrusted proposal text, not a persisted artifact or an
+Author assignment. The human may select, edit, reject, or narrow it. Main closes
+Explorer's scope, removes the exact discovery directory under
+`cleanup-contract.md`, and creates a fresh generation run only after one
+scenario's intent is approved. Selection never approves a spec path, execution,
+or mutation.
 
 ## Ordered flow
 

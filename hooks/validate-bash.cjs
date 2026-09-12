@@ -3,7 +3,7 @@
 const { readFileSync } = require('node:fs');
 
 const GOVERNED_AGENT =
-  /^(?:playwright-testgen:)?playwright-test-(?:author|healer)$/u;
+  /^(?:playwright-testgen:)?playwright-test-(?:author|explorer|healer)$/u;
 
 function deny(permissionDecisionReason) {
   return {
@@ -19,6 +19,7 @@ function evaluate(payload) {
   if (!GOVERNED_AGENT.test(payload?.agent_type ?? '')) return {};
   const {
     validateFileAccess,
+    validateGlobAccess,
     validateGrepAccess,
   } = require('./validate-access.cjs');
   const { validateCommand } = require('./validate-command.cjs');
@@ -36,6 +37,7 @@ function evaluate(payload) {
     return validateFileAccess(payload);
   }
   if (payload.tool_name === 'Grep') return validateGrepAccess(payload);
+  if (payload.tool_name === 'Glob') return validateGlobAccess(payload);
   return validateCommand(payload);
 }
 
