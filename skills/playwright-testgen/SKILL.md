@@ -1,6 +1,6 @@
 ---
 name: playwright-testgen
-description: Use when turning one written scenario into a grounded Playwright end-to-end spec, or running and repairing a spec produced by that workflow.
+description: Use when discovering Playwright scenarios, turning one written scenario into a grounded end-to-end spec, or running and repairing a spec produced by that workflow.
 license: Apache-2.0
 ---
 
@@ -71,7 +71,15 @@ and wins when the workflows differ.
 
 ## Core flow
 
-Keep writes single-threaded. After preflight, Main delegates the Author stage to
+Keep writes single-threaded. When scenario discovery is requested, Main creates
+a read-only discovery policy and delegates
+`playwright-testgen:playwright-test-explorer`. Explorer returns up to five
+evidence-backed proposals without writing or running tests. Main validates the
+bounded proposal fields, presents them for human selection, then closes
+discovery and creates a fresh generation run. Never pass evaluation answers,
+mutation expectations, or unselected proposal content downstream.
+
+After one scenario is written or selected, Main delegates the Author stage to
 `playwright-testgen:playwright-test-author`; Main never performs Author work.
 Author grounds the scenario, explores the running application, writes and
 validates the spec, emits its handoff, and stops without running the test. A human then

@@ -437,6 +437,516 @@ function withTargetRepository(callback) {
   }
 }
 
+function writeDiscoveryPolicy(runDirectory, values = {}) {
+  writeFileSync(
+    path.join(runDirectory, 'command-policy.json'),
+    JSON.stringify({
+      allowed_browser_actions: [],
+      allowed_origins: ['http://127.0.0.1:3000'],
+      allowed_state_paths: [],
+      discovery_id: runId,
+      format_version: 1,
+      policy_kind: 'discovery',
+      ...values,
+    }),
+  );
+}
+
+function withDiscoveryRepository(callback) {
+  const target = createTargetRepository();
+  try {
+    mkdirSync(path.join(target.targetRepository, 'src'));
+    writeFileSync(
+      path.join(target.targetRepository, 'src', 'orders.ts'),
+      'export const route = "/orders";\n',
+    );
+    writeDiscoveryPolicy(target.runDirectory);
+    callback(target);
+  } finally {
+    rmSync(target.targetRepository, { force: true, recursive: true });
+  }
+}
+
+test('governs Explorer reads and bounded searches with a discovery policy', () => {
+  withDiscoveryRepository(({ targetRepository }) => {
+    for (const agentType of [
+      'playwright-test-explorer',
+      'playwright-testgen:playwright-test-explorer',
+    ]) {
+      assert.equal(
+        runToolHook(
+          targetRepository,
+          'Read',
+          { file_path: path.join(targetRepository, 'src', 'orders.ts') },
+          agentType,
+        ).permissionDecision,
+        'allow',
+      );
+      assert.equal(
+        runToolHook(
+          targetRepository,
+          'Grep',
+          {
+            glob: '*.ts',
+            head_limit: 20,
+            output_mode: 'content',
+            path: path.join(targetRepository, 'src'),
+            pattern: 'route',
+          },
+          agentType,
+        ).permissionDecision,
+        'allow',
+      );
+      assert.equal(
+        runToolHook(
+          targetRepository,
+          'Glob',
+          { path: path.join(targetRepository, 'src'), pattern: '**/*.ts' },
+          agentType,
+        ).permissionDecision,
+        'allow',
+      );
+    }
+  });
+});
+
+test('keeps bounded generation Glob calls available', () => {
+  withTargetRepository(({ targetRepository }) => {
+    for (const agentType of [
+      'playwright-test-author',
+      'playwright-test-healer',
+    ]) {
+      assert.equal(
+        runToolHook(
+          targetRepository,
+          'Glob',
+          { path: path.join(targetRepository, 'tests'), pattern: '**/*.ts' },
+          agentType,
+        ).permissionDecision,
+        'allow',
+      );
+      assert.equal(
+        runToolHook(
+          targetRepository,
+          'Glob',
+          { pattern: 'tests/**/*.ts' },
+          agentType,
+        ).permissionDecision,
+        'allow',
+      );
+    }
+  });
+});
+
+test('requires a valid discovery policy for Explorer', () => {
+  withTargetRepository(({ targetRepository }) => {
+    const result = runToolHook(
+      targetRepository,
+      'Read',
+      { file_path: path.join(targetRepository, 'tests', 'account.spec.ts') },
+      'playwright-test-explorer',
+    );
+    assert.equal(result.permissionDecision, 'deny');
+    assert.equal(
+      runHook(
+        targetRepository,
+        'git --no-pager log --max-count=20 --name-only --pretty=format:%H%x09%s --no-ext-diff --no-textconv -- .',
+        'playwright-test-explorer',
+      ).permissionDecision,
+      'deny',
+    );
+  });
+
+  for (const values of [
+    { discovery_id: undefined },
+    { approved_spec: 'tests/account.spec.ts' },
+    { allowed_write_paths: [] },
+    { allowed_runner_options: [] },
+    { expected_classification: 'product-behavior-wrong' },
+  ]) {
+    withDiscoveryRepository(({ runDirectory, targetRepository }) => {
+      writeDiscoveryPolicy(runDirectory, values);
+      const result = runToolHook(
+        targetRepository,
+        'Read',
+        { file_path: path.join(targetRepository, 'src', 'orders.ts') },
+        'playwright-test-explorer',
+      );
+      assert.equal(result.permissionDecision, 'deny');
+    });
+  }
+});
+
+test('discovery policy grants no Author or Healer authority', () => {
+  withDiscoveryRepository(({ runDirectory, targetRepository }) => {
+    const handoff = path.join(runDirectory, 'handoff.json');
+    const trace = path.join(runDirectory, 'healer-trace.json');
+    writeFileSync(trace, '{}');
+
+    assert.equal(
+      runToolHook(
+        targetRepository,
+        'Write',
+        { content: '{}', file_path: handoff },
+        'playwright-test-author',
+      ).permissionDecision,
+      'deny',
+    );
+    assert.equal(
+      runToolHook(
+        targetRepository,
+        'Read',
+        { file_path: path.join(targetRepository, 'src', 'orders.ts') },
+        'playwright-test-author',
+      ).permissionDecision,
+      'deny',
+    );
+    assert.equal(
+      runToolHook(
+        targetRepository,
+        'Grep',
+        {
+          head_limit: 20,
+          output_mode: 'content',
+          path: path.join(targetRepository, 'src'),
+          pattern: 'route',
+        },
+        'playwright-test-healer',
+      ).permissionDecision,
+      'deny',
+    );
+    assert.equal(
+      runToolHook(
+        targetRepository,
+        'Write',
+        { content: '{}', file_path: trace },
+        'playwright-test-healer',
+      ).permissionDecision,
+      'deny',
+    );
+    assert.equal(
+      runCliHook(
+        targetRepository,
+        `-s=${runId} snapshot`,
+        'playwright-test-author',
+      ).permissionDecision,
+      'deny',
+    );
+  });
+});
+
+test('keeps Explorer unable to write or execute repository workflows', () => {
+  withDiscoveryRepository(({ targetRepository }) => {
+    for (const toolName of ['Edit', 'Write']) {
+      const result = runToolHook(
+        targetRepository,
+        toolName,
+        {
+          content: 'changed',
+          file_path: path.join(targetRepository, 'src', 'orders.ts'),
+          new_string: 'changed',
+          old_string: 'route',
+        },
+        'playwright-test-explorer',
+      );
+      assert.equal(result.permissionDecision, 'deny');
+    }
+
+    for (const command of [
+      `npx --no playwright test tests/account.spec.ts --list`,
+      'npm run lint',
+      'node -e "console.log(1)"',
+      'git status',
+      'git show HEAD',
+      'git commit -m discovery',
+      'git --no-pager log --max-count=21 --name-only --pretty=format:%H%x09%s --no-ext-diff --no-textconv -- .',
+    ]) {
+      assert.equal(
+        runHook(targetRepository, command, 'playwright-test-explorer')
+          .permissionDecision,
+        'deny',
+        command,
+      );
+    }
+  });
+});
+
+test('allows only bounded Explorer history and read-only browser inspection', () => {
+  withDiscoveryRepository(({ runDirectory, targetRepository }) => {
+    const history =
+      'git --no-pager log --max-count=20 --name-only --pretty=format:%H%x09%s --no-ext-diff --no-textconv -- .';
+    assert.equal(
+      runHook(targetRepository, history, 'playwright-test-explorer')
+        .permissionDecision,
+      'allow',
+    );
+
+    for (const command of [
+      `-s=${runId} open http://127.0.0.1:3000/orders`,
+      `-s=${runId} snapshot`,
+      `-s=${runId} find Orders`,
+      `-s=${runId} close`,
+    ]) {
+      assert.equal(
+        runCliHook(targetRepository, command, 'playwright-test-explorer')
+          .permissionDecision,
+        'allow',
+        command,
+      );
+    }
+
+    assert.equal(
+      runCliHook(
+        targetRepository,
+        `-s=${runId} click e1`,
+        'playwright-test-explorer',
+      ).permissionDecision,
+      'deny',
+    );
+    updatePolicy(runDirectory, { allowed_browser_actions: ['click'] });
+    assert.equal(
+      runCliHook(
+        targetRepository,
+        `-s=${runId} click e1`,
+        'playwright-test-explorer',
+      ).permissionDecision,
+      'allow',
+    );
+    assert.equal(
+      runCliHook(
+        targetRepository,
+        `-s=${runId} goto https://example.com`,
+        'playwright-test-explorer',
+      ).permissionDecision,
+      'deny',
+    );
+  });
+});
+
+test('bounds Explorer search output and protects state files', () => {
+  withDiscoveryRepository(({ runDirectory, targetRepository }) => {
+    const stateDirectory = path.join(targetRepository, 'auth');
+    const statePath = path.join(stateDirectory, 'state.json');
+    mkdirSync(stateDirectory);
+    writeFileSync(statePath, '{}');
+    const mutationDirectory = path.join(targetRepository, '.testgen');
+    const mutationPath = path.join(mutationDirectory, 'mutation-adapter.json');
+    mkdirSync(mutationDirectory);
+    writeFileSync(mutationPath, '{}');
+    updatePolicy(runDirectory, {
+      allowed_state_paths: [path.relative(runDirectory, statePath)],
+    });
+
+    for (const toolInput of [
+      { path: targetRepository, pattern: 'route' },
+      {
+        head_limit: 20,
+        output_mode: 'content',
+        path: targetRepository,
+        pattern: 'route',
+      },
+      {
+        head_limit: 101,
+        output_mode: 'content',
+        path: path.join(targetRepository, 'src'),
+        pattern: 'route',
+      },
+    ]) {
+      assert.equal(
+        runToolHook(
+          targetRepository,
+          'Grep',
+          toolInput,
+          'playwright-test-explorer',
+        ).permissionDecision,
+        'deny',
+      );
+    }
+    assert.equal(
+      runToolHook(
+        targetRepository,
+        'Glob',
+        { path: targetRepository, pattern: '**/*' },
+        'playwright-test-explorer',
+      ).permissionDecision,
+      'deny',
+    );
+    assert.equal(
+      runToolHook(
+        targetRepository,
+        'Glob',
+        { path: targetRepository, pattern: '**/*.ts' },
+        'playwright-test-explorer',
+      ).permissionDecision,
+      'deny',
+    );
+    assert.equal(
+      runToolHook(
+        targetRepository,
+        'Read',
+        { file_path: statePath },
+        'playwright-test-explorer',
+      ).permissionDecision,
+      'deny',
+    );
+    assert.equal(
+      runToolHook(
+        targetRepository,
+        'Read',
+        { file_path: mutationPath },
+        'playwright-test-explorer',
+      ).permissionDecision,
+      'deny',
+    );
+
+    const excludedAlias = path.join(targetRepository, 'src', 'run-scratch');
+    symlinkSync(runDirectory, excludedAlias, 'junction');
+    for (const [toolName, toolInput] of [
+      ['Read', { file_path: path.join(excludedAlias, 'command-policy.json') }],
+      [
+        'Grep',
+        {
+          head_limit: 20,
+          output_mode: 'content',
+          path: excludedAlias,
+          pattern: 'discovery',
+        },
+      ],
+      ['Glob', { path: excludedAlias, pattern: '*.json' }],
+    ]) {
+      assert.equal(
+        runToolHook(
+          targetRepository,
+          toolName,
+          toolInput,
+          'playwright-test-explorer',
+        ).permissionDecision,
+        'deny',
+        toolName,
+      );
+    }
+
+    const linkedState = path.join(targetRepository, 'src', 'state-link.json');
+    linkSync(statePath, linkedState);
+    assert.equal(
+      runToolHook(
+        targetRepository,
+        'Glob',
+        { path: path.join(targetRepository, 'src'), pattern: '**/*.json' },
+        'playwright-test-explorer',
+      ).permissionDecision,
+      'deny',
+    );
+  });
+});
+
+test('keeps Explorer away from credentials and evaluation answers', () => {
+  withDiscoveryRepository(({ targetRepository }) => {
+    const sensitivePaths = [
+      path.join(targetRepository, '.env'),
+      path.join(targetRepository, '.npmrc'),
+      path.join(targetRepository, 'client.key'),
+      path.join(targetRepository, 'evals', 'case.json'),
+      path.join(targetRepository, 'mutations', 'answer.patch'),
+    ];
+    for (const sensitivePath of sensitivePaths) {
+      mkdirSync(path.dirname(sensitivePath), { recursive: true });
+      writeFileSync(sensitivePath, 'secret');
+      assert.equal(
+        runToolHook(
+          targetRepository,
+          'Read',
+          { file_path: sensitivePath },
+          'playwright-test-explorer',
+        ).permissionDecision,
+        'deny',
+        sensitivePath,
+      );
+    }
+  });
+});
+
+test('rejects Explorer searches that can traverse excluded descendants', () => {
+  withDiscoveryRepository(({ targetRepository }) => {
+    const generatedDirectory = path.join(targetRepository, 'src', 'dist');
+    mkdirSync(generatedDirectory);
+    writeFileSync(path.join(generatedDirectory, 'answer.ts'), 'secret');
+
+    for (const [toolName, toolInput] of [
+      [
+        'Grep',
+        {
+          head_limit: 20,
+          output_mode: 'content',
+          path: path.join(targetRepository, 'src'),
+          pattern: 'secret',
+        },
+      ],
+      [
+        'Glob',
+        { path: path.join(targetRepository, 'src'), pattern: '**/*.ts' },
+      ],
+    ]) {
+      assert.equal(
+        runToolHook(
+          targetRepository,
+          toolName,
+          toolInput,
+          'playwright-test-explorer',
+        ).permissionDecision,
+        'deny',
+        toolName,
+      );
+    }
+  });
+});
+
+test('rejects Explorer search roots beyond the entry bound', () => {
+  withDiscoveryRepository(({ targetRepository }) => {
+    const largeDirectory = path.join(targetRepository, 'src', 'large');
+    mkdirSync(largeDirectory);
+    for (let index = 0; index <= 2000; index += 1) {
+      writeFileSync(path.join(largeDirectory, `${index}.ts`), 'source');
+    }
+
+    assert.equal(
+      runToolHook(
+        targetRepository,
+        'Grep',
+        {
+          head_limit: 20,
+          output_mode: 'content',
+          path: largeDirectory,
+          pattern: 'source',
+        },
+        'playwright-test-explorer',
+      ).permissionDecision,
+      'deny',
+    );
+  });
+});
+
+test('limits Explorer cleanup to its browser scratch', () => {
+  withDiscoveryRepository(({ targetRepository }) => {
+    assert.equal(
+      runHook(
+        targetRepository,
+        `rm -rf -- .playwright-cli/testgen/${runId}/.playwright-cli`,
+        'playwright-test-explorer',
+      ).permissionDecision,
+      'allow',
+    );
+    assert.equal(
+      runHook(
+        targetRepository,
+        `rm -rf -- .playwright-cli/testgen/${runId}/attempt-1`,
+        'playwright-test-explorer',
+      ).permissionDecision,
+      'deny',
+    );
+  });
+});
+
 test('allows a quoted CSS selector containing href$=', () => {
   withTargetRepository(({ targetRepository }) => {
     for (const selector of [
@@ -2136,6 +2646,30 @@ test('allows only canonical installed-plugin reads required by governed agents',
       );
       assert.equal(escaped.permissionDecision, 'deny');
       assert.match(escaped.permissionDecisionReason, /escapes/iu);
+    } finally {
+      rmSync(pluginRoot, { force: true, recursive: true });
+    }
+  });
+});
+
+test('does not exempt Explorer reads of installed plugin internals', () => {
+  withDiscoveryRepository(({ targetRepository }) => {
+    const pluginRoot = mkdtempSync(path.join(tmpdir(), 'testgen-plugin-'));
+    try {
+      const scriptPath = path.join(pluginRoot, 'scripts', 'eval-answer.cjs');
+      mkdirSync(path.dirname(scriptPath));
+      writeFileSync(scriptPath, 'module.exports = "expected";');
+
+      assert.equal(
+        runToolHook(
+          targetRepository,
+          'Read',
+          { file_path: scriptPath },
+          'playwright-test-explorer',
+          { CLAUDE_PLUGIN_ROOT: pluginRoot },
+        ).permissionDecision,
+        'deny',
+      );
     } finally {
       rmSync(pluginRoot, { force: true, recursive: true });
     }

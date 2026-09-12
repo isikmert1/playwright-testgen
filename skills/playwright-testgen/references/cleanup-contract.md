@@ -7,6 +7,8 @@ resource when it is created so each exit can release only run-owned resources.
 
 - Use a named Playwright CLI session derived from the supplied `run_id` when
   the workflow opens the session: the Author session is exactly `-s=<run_id>`.
+  Explorer similarly owns exactly `-s=<discovery_id>` and closes it before
+  Main removes the discovery directory.
   For `--debug=cli`, attach only to the exact runner-emitted session and
   associate that session with the `run_id`; never derive or rename its
   identifier.
@@ -93,6 +95,10 @@ Remove them after the final disposition has been reported and accepted.
 
 ## Exit behavior
 
+- **Explorer returns, blocks, errors, or exhausts its budget** — Close the exact
+  Explorer session, remove only its generated `.playwright-cli` child, and let
+  Main remove the exact discovery directory. No Explorer proposal artifact is
+  retained.
 - **Author reaches checkpoint** — Close Author's CLI session, remove raw
   exploration evidence, and retain the validated handoff.
 - **`adjust`** — Close the Author session and remove only superseded raw

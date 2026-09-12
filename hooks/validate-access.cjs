@@ -1,4 +1,10 @@
-const { existsSync, readdirSync, realpathSync, statSync } = require('node:fs');
+const {
+  existsSync,
+  opendirSync,
+  readdirSync,
+  realpathSync,
+  statSync,
+} = require('node:fs');
 const path = require('node:path');
 const { decision, deny } = require('./hook-result.cjs');
 const {
@@ -95,6 +101,11 @@ function validatePluginRead(payload, absolute, canonical) {
         'The requested installed-plugin read escapes its approved canonical directory.',
       );
     }
+    if (isExplorer(payload)) {
+      return deny(
+        'Explorer cannot read installed Testgen internals; use only its dispatched instructions and project evidence.',
+      );
+    }
     return decision(
       'allow',
       'Read is confined to an approved installed Testgen directory.',
@@ -102,6 +113,120 @@ function validatePluginRead(payload, absolute, canonical) {
   }
 
   return null;
+}
+
+function isExplorer(payload) {
+  return payload.agent_type.endsWith('playwright-test-explorer');
+}
+
+function explorerPolicy(policies, absolute, canonical) {
+  const matches = policies.filter(
+    (policy) =>
+      policy.kind === 'discovery' &&
+      isContained(policy.repositoryRoot, absolute, true) &&
+      isContained(policy.canonicalRepositoryRoot, canonical, true),
+  );
+  return matches.length === 1 ? matches[0] : null;
+}
+
+const EXCLUDED_DISCOVERY_PARTS = new Set([
+  '.agents',
+  '.claude',
+  '.codex',
+  '.git',
+  '.next',
+  '.playwright-cli',
+  '.testgen',
+  'blob-report',
+  'build',
+  'coverage',
+  'dist',
+  'evals',
+  'evaluations',
+  'mutations',
+  'node_modules',
+  'out',
+  'playwright-report',
+  'test-results',
+  'variants',
+]);
+
+function isExcludedDiscoveryPath(policy, ...paths) {
+  return paths.some((absolute) => {
+    const relative = normalizePath(
+      path.relative(policy.repositoryRoot, absolute),
+    ).toLowerCase();
+    const parts = relative.split('/');
+    const basename = parts.at(-1);
+    return (
+      parts.some((part) => EXCLUDED_DISCOVERY_PARTS.has(part)) ||
+      basename === '.env' ||
+      basename.startsWith('.env.') ||
+      basename.endsWith('.env') ||
+      ['.netrc', '.npmrc', '.yarnrc', '.yarnrc.yml'].includes(basename) ||
+      ['credentials.json', 'secret.json', 'secrets.json'].includes(basename) ||
+      ['id_dsa', 'id_ecdsa', 'id_ed25519', 'id_rsa'].includes(basename) ||
+      ['.jks', '.key', '.keystore', '.p12', '.pem', '.pfx'].some((suffix) =>
+        basename.endsWith(suffix),
+      )
+    );
+  });
+}
+
+function searchMayReachExcludedDiscoveryPath(policy, root) {
+  const pending = [root];
+  const visited = new Set();
+  let entriesVisited = 0;
+
+  while (pending.length > 0) {
+    const directory = pending.pop();
+    let canonicalDirectory;
+    try {
+      canonicalDirectory = realpathSync(directory);
+    } catch {
+      return true;
+    }
+    const canonicalKey = comparablePath(canonicalDirectory);
+    if (visited.has(canonicalKey)) continue;
+    visited.add(canonicalKey);
+
+    let handle;
+    try {
+      handle = opendirSync(directory);
+      while (true) {
+        const entry = handle.readSync();
+        if (entry == null) break;
+        entriesVisited += 1;
+        if (entriesVisited > 2000) return true;
+
+        const child = path.join(directory, entry.name);
+        let canonicalChild = path.join(canonicalDirectory, entry.name);
+        if (entry.isSymbolicLink()) canonicalChild = realpathSync(child);
+        if (
+          !isContained(policy.canonicalRepositoryRoot, canonicalChild, true) ||
+          isExcludedDiscoveryPath(policy, child, canonicalChild)
+        ) {
+          return true;
+        }
+        if (
+          entry.isDirectory() ||
+          (entry.isSymbolicLink() && statSync(child).isDirectory())
+        ) {
+          pending.push(child);
+        }
+      }
+    } catch {
+      return true;
+    } finally {
+      try {
+        handle?.closeSync();
+      } catch {
+        // readSync may already have closed an exhausted directory.
+      }
+    }
+  }
+
+  return false;
 }
 
 function validateFileAccess(payload) {
@@ -158,7 +283,41 @@ function validateFileAccess(payload) {
     )
   ) {
     return deny(
-      'Approved storage state is opaque to Author and Healer. Pass only its exact policy-approved path to playwright-cli state-load; never read or modify the file.',
+      'Approved storage state is opaque to governed agents. Pass only its exact policy-approved path to playwright-cli state-load; never read or modify the file.',
+    );
+  }
+
+  if (isExplorer(payload)) {
+    if (payload.tool_name !== 'Read') {
+      return deny(
+        'Explorer is read-only. It cannot create or modify repository or run files.',
+      );
+    }
+    const policy = explorerPolicy(nearbyPolicies, absolute, canonical);
+    if (
+      policy == null ||
+      isExcludedDiscoveryPath(policy, absolute, canonical)
+    ) {
+      return deny(
+        'Explorer reads require one valid discovery policy and one contained source, test, or project-metadata file.',
+      );
+    }
+    try {
+      if (!statSync(absolute).isFile()) throw new Error('not a file');
+    } catch {
+      return deny(
+        'Explorer may read only an existing regular repository file.',
+      );
+    }
+    return decision('allow', 'Read is bound to the Explorer discovery policy.');
+  }
+
+  const generationPolicies = nearbyPolicies.filter(
+    (policy) => policy.kind === 'generation',
+  );
+  if (generationPolicies.length === 0) {
+    return deny(
+      'Author and Healer access requires one valid generation policy. A discovery policy grants authority only to Explorer.',
     );
   }
 
@@ -166,7 +325,7 @@ function validateFileAccess(payload) {
     payload.tool_name === 'Read' &&
     payload.agent_type.endsWith('playwright-test-healer')
   ) {
-    for (const policy of nearbyPolicies) {
+    for (const policy of generationPolicies) {
       if (
         samePath(absolute, policy.approvedSpec) &&
         samePath(canonical, policy.canonicalApprovedSpec)
@@ -196,7 +355,7 @@ function validateFileAccess(payload) {
 
   if (payload.tool_name === 'Read') return {};
 
-  for (const policy of nearbyPolicies) {
+  for (const policy of generationPolicies) {
     for (const [filename, owner] of [
       ['handoff.json', 'playwright-test-author'],
       ['healer-trace.json', 'playwright-test-healer'],
@@ -285,7 +444,7 @@ function validateFileAccess(payload) {
   }
 
   for (const filename of mainOwnedFiles) {
-    const aliasesMainOwned = nearbyPolicies.some((policy) => {
+    const aliasesMainOwned = generationPolicies.some((policy) => {
       const expected = path.join(policy.runDirectory, filename);
       const canonicalExpected = path.join(
         policy.canonicalRunDirectory,
@@ -305,7 +464,7 @@ function validateFileAccess(payload) {
     }
   }
 
-  const approved = nearbyPolicies.some((policy) => {
+  const approved = generationPolicies.some((policy) => {
     const candidates = [
       {
         absolute: policy.approvedSpec,
@@ -355,6 +514,7 @@ function validateGrepAccess(payload) {
   }
   const policies = discovered.policies.filter(
     (policy) =>
+      (isExplorer(payload) || policy.kind === 'generation') &&
       isContained(policy.repositoryRoot, absolute, true) &&
       isContained(policy.canonicalRepositoryRoot, canonical, true),
   );
@@ -392,11 +552,119 @@ function validateGrepAccess(payload) {
   );
   if (includesStorageState || linkedStateCouldBeInSearch) {
     return deny(
-      'Approved storage state is opaque to Author and Healer. Scope Grep to a source or test path that cannot include the policy-approved state file.',
+      'Approved storage state is opaque to governed agents. Scope Grep to a source or test path that cannot include the policy-approved state file.',
+    );
+  }
+
+  if (isExplorer(payload)) {
+    const policy = explorerPolicy(policies, absolute, canonical);
+    const {
+      head_limit: headLimit,
+      output_mode: outputMode,
+      pattern,
+    } = payload.tool_input;
+    if (
+      policy == null ||
+      payload.tool_input.path == null ||
+      samePath(absolute, policy.repositoryRoot) ||
+      isExcludedDiscoveryPath(policy, absolute, canonical) ||
+      (searchesDirectory &&
+        searchMayReachExcludedDiscoveryPath(policy, absolute)) ||
+      typeof pattern !== 'string' ||
+      pattern.length === 0 ||
+      pattern.length > 500 ||
+      !Number.isInteger(headLimit) ||
+      headLimit < 1 ||
+      headLimit > 100 ||
+      !['content', 'count', 'files_with_matches'].includes(outputMode)
+    ) {
+      return deny(
+        'Explorer Grep requires one contained explicit path, a bounded pattern, an output mode, and head_limit from 1 to 100.',
+      );
+    }
+    return decision(
+      'allow',
+      'Grep is bounded by the Explorer discovery policy.',
     );
   }
 
   return {};
 }
 
-module.exports = { validateFileAccess, validateGrepAccess };
+function validateGlobAccess(payload) {
+  const requestedPath = payload?.tool_input?.path;
+  const pattern = payload?.tool_input?.pattern;
+  const explorer = isExplorer(payload);
+  if (
+    (explorer &&
+      (typeof requestedPath !== 'string' || requestedPath.length === 0)) ||
+    (requestedPath != null && typeof requestedPath !== 'string') ||
+    typeof pattern !== 'string' ||
+    pattern.length === 0 ||
+    pattern.length > 200 ||
+    pattern === '**/*'
+  ) {
+    return deny(
+      'Explorer Glob requires one contained explicit path and a bounded file pattern; an all-files scan is not allowed.',
+    );
+  }
+
+  const absolute = path.resolve(payload.cwd, requestedPath ?? payload.cwd);
+  let canonical;
+  try {
+    canonical = realpathSync(absolute);
+  } catch {
+    return deny('Glob requires an existing repository directory.');
+  }
+  const discovered = policiesNear(payload.cwd, absolute, canonical);
+  if (discovered.invalid) {
+    return deny(
+      'A discovered Testgen run policy is invalid. Return to Main to repair or remove the invalid command-policy.json before governed access continues.',
+    );
+  }
+  const matches = discovered.policies.filter(
+    (policy) =>
+      policy.kind === (explorer ? 'discovery' : 'generation') &&
+      isContained(policy.repositoryRoot, absolute, true) &&
+      isContained(policy.canonicalRepositoryRoot, canonical, true),
+  );
+  const policy = matches.length === 1 ? matches[0] : null;
+  const linkedStateCouldBeInSearch = discovered.policies.some((candidate) =>
+    candidate.allowedStatePaths.some((state) => {
+      try {
+        return statSync(state.absolute, { bigint: true }).nlink > 1n;
+      } catch {
+        return false;
+      }
+    }),
+  );
+  if (
+    policy == null ||
+    (explorer && samePath(absolute, policy.repositoryRoot)) ||
+    (explorer && isExcludedDiscoveryPath(policy, absolute, canonical)) ||
+    !statSync(absolute).isDirectory() ||
+    (explorer && searchMayReachExcludedDiscoveryPath(policy, absolute)) ||
+    linkedStateCouldBeInSearch ||
+    policy.allowedStatePaths.some(
+      (state) =>
+        isContained(absolute, state.absolute, true) ||
+        isContained(canonical, state.canonical, true),
+    )
+  ) {
+    return deny(
+      'Glob must stay inside one approved repository directory that excludes storage state.',
+    );
+  }
+  return decision(
+    'allow',
+    explorer
+      ? 'Glob is bounded by the Explorer discovery policy.'
+      : 'Glob is bounded by the active Testgen run policy.',
+  );
+}
+
+module.exports = {
+  validateFileAccess,
+  validateGlobAccess,
+  validateGrepAccess,
+};

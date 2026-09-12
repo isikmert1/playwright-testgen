@@ -337,3 +337,49 @@ test('workflow guidance removes avoidable pre-Author ambiguity', () => {
     /startup fails.*reservation.*consumed.*refuse.*reuse/isu,
   );
 });
+
+test('ships bounded Explorer discovery as a transient human decision', () => {
+  const explorer = readFileSync(
+    path.join(repositoryRoot, 'agents', 'playwright-test-explorer.md'),
+    'utf8',
+  );
+  const pipeline = readFileSync(
+    path.join(
+      repositoryRoot,
+      'skills',
+      'playwright-testgen',
+      'references',
+      'pipeline.md',
+    ),
+    'utf8',
+  );
+  const artifactContract = readFileSync(
+    path.join(
+      repositoryRoot,
+      'skills',
+      'playwright-testgen',
+      'references',
+      'artifact-contract.md',
+    ),
+    'utf8',
+  );
+
+  assert.match(explorer, /tools: Bash, Glob, Grep, Read/iu);
+  assert.match(explorer, /90 seconds.*ten source\/test `Read` calls/isu);
+  assert.match(explorer, /agent-enforced.*hooks.*do not count/isu);
+  assert.match(explorer, /at most five.*Do not fill a\s+quota/isu);
+  assert.match(explorer, /A title-only list is invalid/iu);
+  assert.match(explorer, /Discovery summary.*Reads: <count>\/10/isu);
+  assert.match(
+    explorer,
+    /Live output proves what rendered, not what the product intended/iu,
+  );
+  assert.match(explorer, /`no supported proposal`/iu);
+  assert.match(pipeline, /policy_kind.*discovery/isu);
+  assert.match(pipeline, /agent-enforced.*hooks.*do not count/isu);
+  assert.match(
+    pipeline,
+    /Selection never approves a spec path, execution,\s+or mutation/iu,
+  );
+  assert.match(artifactContract, /transient, untrusted discovery output/iu);
+});

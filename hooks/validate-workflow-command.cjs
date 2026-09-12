@@ -60,6 +60,18 @@ const ALLOWED_CLI_COMMANDS = new Set([
   'tab-close',
   'tab-select',
 ]);
+const EXPLORER_INSPECTION_COMMANDS = new Set([
+  ...NAVIGATION_COMMANDS,
+  'close',
+  'console',
+  'find',
+  'go-back',
+  'go-forward',
+  'reload',
+  'snapshot',
+  'state-load',
+  'tab-list',
+]);
 const BLOCKED_OPTIONS =
   /^(?:--cdp|--config|--extension|--filename|--path|--persistent|--profile|--raw|--storage-state|--submit|--user-data-dir)(?:=|$)/u;
 const APPROVED_RUNNER_REASON =
@@ -67,9 +79,9 @@ const APPROVED_RUNNER_REASON =
 const APPROVED_DEBUG_RUNNER_REASON =
   'Debug runner is scoped to one approved spec and one run-owned attempt directory.';
 
-function requirePolicy(cwd, runId) {
+function requirePolicy(cwd, runId, kind = 'generation') {
   const policy = loadPolicy(cwd, runId);
-  if (policy != null) return { policy };
+  if (policy?.kind === kind) return { policy };
   return {
     result: deny(
       'Run policy is missing or invalid. Return to Main so it can create the run-owned command-policy.json with the supplied target origin.',
@@ -152,7 +164,13 @@ function validateNavigation(subcommand, args, policy) {
 }
 
 function validateCli(cwd, assignments, args, agentType) {
+  const explorer = agentType.endsWith('playwright-test-explorer');
   if (args.length === 1 && (args[0] === '--help' || args[0] === '--version')) {
+    if (explorer) {
+      return deny(
+        "Explorer uses Main's passed runtime-preflight result and does not repeat CLI checks.",
+      );
+    }
     if (assignments.length !== 0) {
       return deny(
         `The read-only playwright-cli ${args[0].slice(2)} check does not accept environment assignments. Run playwright-cli ${args[0]}.`,
@@ -175,7 +193,9 @@ function validateCli(cwd, assignments, args, agentType) {
   const subcommand = args.shift();
   if (!ALLOWED_CLI_COMMANDS.has(subcommand)) {
     return deny(
-      `playwright-cli subcommand "${subcommand ?? ''}" is not allowed. Use snapshot, find, or generate-locator for inspection and a listed interaction command for the verified action.`,
+      explorer
+        ? `playwright-cli subcommand "${subcommand ?? ''}" is not allowed for Explorer. Use navigation, snapshot, find, or console for read-only inspection.`
+        : `playwright-cli subcommand "${subcommand ?? ''}" is not allowed. Use snapshot, find, or generate-locator for inspection and a listed interaction command for the verified action.`,
     );
   }
   if (rawCount > 1 || (rawCount === 1 && subcommand !== 'generate-locator')) {
@@ -190,7 +210,11 @@ function validateCli(cwd, assignments, args, agentType) {
       "The command is not bound to a Testgen run. Use -s=<run_id>, or run debug attach and inspection from that run's owned directory.",
     );
   }
-  const loaded = requirePolicy(cwd, runId);
+  const loaded = requirePolicy(
+    cwd,
+    runId,
+    explorer ? 'discovery' : 'generation',
+  );
   if (loaded.result != null) return loaded.result;
   if (!samePath(cwd, loaded.policy.runDirectory)) {
     return deny(
@@ -246,6 +270,15 @@ function validateCli(cwd, assignments, args, agentType) {
   if (args.some((value) => BLOCKED_OPTIONS.test(value))) {
     return deny(
       'Profiles, custom config/output paths, uploads, and implicit submission are not allowed. Use run-owned default output and explicit allowlisted browser actions.',
+    );
+  }
+  if (
+    explorer &&
+    !EXPLORER_INSPECTION_COMMANDS.has(subcommand) &&
+    !loaded.policy.allowedBrowserActions.includes(subcommand)
+  ) {
+    return deny(
+      'Explorer browser actions default to navigation and inspection. This state-changing command requires Main to record the human-approved action in allowed_browser_actions.',
     );
   }
 
@@ -598,7 +631,7 @@ function validateRealpath(cwd, args) {
   );
 }
 
-function validateCleanup(cwd, args) {
+function validateCleanup(cwd, args, agentType = '') {
   const values =
     args.length === 3 && ['-rf', '-fr'].includes(args[0]) && args[1] === '--'
       ? args.slice(2)
@@ -609,7 +642,12 @@ function validateCleanup(cwd, args) {
       'Cleanup must name a generated child of the exact run directory for the current Testgen run. From the repository root use rm -rf -- .playwright-cli/testgen/<run_id>/.playwright-cli; from the exact run root use rm -rf -- .playwright-cli.',
     );
   }
-  const loaded = requirePolicy(cwd, runId);
+  const explorer = agentType.endsWith('playwright-test-explorer');
+  const loaded = requirePolicy(
+    cwd,
+    runId,
+    explorer ? 'discovery' : 'generation',
+  );
   if (loaded.result != null) return loaded.result;
   const target =
     values.length === 1
@@ -622,6 +660,11 @@ function validateCleanup(cwd, args) {
   if (relative === '') {
     return deny(
       'The full run directory is Main-owned. Remove only the generated exploration or attempt child; Main removes the full run directory after the result is accepted.',
+    );
+  }
+  if (explorer && relative !== '.playwright-cli') {
+    return deny(
+      'Explorer cleanup may remove only its generated .playwright-cli browser scratch. Main owns the discovery run directory.',
     );
   }
   if (

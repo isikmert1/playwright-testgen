@@ -8,6 +8,8 @@ passing-looking test cannot silently replace the requested behavior.
 
 - **Main** owns preflight, run policy, the human checkpoint, artifact
   validation, optional mutation verification, final reporting, and cleanup.
+- **Explorer** performs bounded, read-only scenario discovery and returns
+  evidence-backed proposals without choosing a spec path or executing tests.
 - **Author** reads the scenario, relevant project source, and live application;
   writes one candidate spec; validates that it loads; and stops before running
   it.
@@ -17,8 +19,8 @@ passing-looking test cannot silently replace the requested behavior.
 - **The human** chooses `run`, `adjust`, or `skip`, approves mutation adapters,
   and decides whether a sanitized product finding becomes durable.
 
-Main does not perform Author or Healer work. Author and Healer do not change
-Main-owned policy or result artifacts.
+Main does not perform Explorer, Author, or Healer work. Governed agents do not
+change Main-owned policy or result artifacts.
 
 ## Runtime boundary
 
@@ -33,10 +35,13 @@ configuration and CI rules. A missing capability stops with a bounded reason.
 
 ## Workflow and evidence
 
-One run has one ID, one approved spec, and one human checkpoint. Run policy
-binds browser navigation, file writes, runner arguments, output directories,
-and artifact validation to that run. Hook decisions constrain delegated
-agents, but they are guardrails rather than an operating-system sandbox.
+Discovery has its own read-only policy and ID. A proposal is not an assignment:
+human selection approves intent only, and Main then closes discovery and starts
+a fresh generation run. That run has one ID, one approved spec, and one human
+checkpoint. Its policy binds browser navigation, file writes, runner arguments,
+output directories, and artifact validation. Hook decisions constrain
+delegated agents, but they are guardrails rather than an operating-system
+sandbox.
 
 Validated Author handoffs and Healer traces connect criteria to assertions and
 execution evidence without retaining raw pages, logs, credentials, or agent

@@ -4,10 +4,10 @@
 
 Playwright Testgen is a Claude Code plugin that uses the
 [official Playwright CLI](https://github.com/microsoft/playwright-cli) to
-turn one written scenario into a grounded, reviewable Playwright end-to-end
-test. It explores the running application before choosing locators, executes
-only after human approval, and repairs test problems without hiding product
-failures.
+discover useful scenarios or turn one written scenario into a grounded,
+reviewable Playwright end-to-end test. It explores the running application
+before choosing locators, executes only after human approval, and repairs test
+problems without hiding product failures.
 
 ## Why Testgen
 
@@ -19,15 +19,18 @@ written intent, and meaningful assertions connected throughout the run.
 ## How it works
 
 1. Main checks the project's existing Playwright runtime and running app.
-2. Author grounds one scenario in source and the live UI, writes one candidate
+2. When no scenario was supplied, Explorer performs bounded, read-only source,
+   test, history, and live-page discovery and offers up to five evidence-backed
+   proposals for human selection.
+3. Author grounds one selected or supplied scenario in source and the live UI, writes one candidate
    spec, runs the project's lint or collection validation, and stops without
    executing it.
-3. At a human checkpoint, the reviewer chooses whether to run, revise, or keep
+4. At a human checkpoint, the reviewer chooses whether to run, revise, or keep
    the spec unverified.
-4. Healer runs only the approved spec, makes bounded evidence-backed test
+5. Healer runs only the approved spec, makes bounded evidence-backed test
    repairs, preserves the approved criteria and assertions, and refuses to
    rewrite them around product defects.
-5. When an approved adapter exists, the vacuity gate applies its approved
+6. When an approved adapter exists, the vacuity gate applies its approved
    criterion-linked mutation in a disposable Git worktree and checks that the
    test catches it. Missing coverage is reported as unverified, never silently
    counted as success.
@@ -35,8 +38,8 @@ written intent, and meaningful assertions connected throughout the run.
 Testgen follows the project's package manager, Playwright configuration,
 fixtures, test layout, and locator conventions. It does not replace or rewrite
 the project's Playwright configuration or CI. Its hooks constrain the delegated
-Author and Healer workflows; they are guardrails, not an operating-system
-sandbox.
+Explorer, Author, and Healer workflows; they are guardrails, not an
+operating-system sandbox.
 
 See [Architecture](docs/architecture.md) for component ownership, runtime and
 artifact boundaries, and release rules.

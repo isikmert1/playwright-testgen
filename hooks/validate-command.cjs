@@ -38,7 +38,8 @@ function repositoryPolicies(cwd) {
 function hasPolicyAtRepositoryRoot(cwd) {
   return repositoryPolicies(cwd).some(
     (policy) =>
-      policy != null && samePath(path.resolve(cwd), policy.repositoryRoot),
+      policy?.kind === 'generation' &&
+      samePath(path.resolve(cwd), policy.repositoryRoot),
   );
 }
 
@@ -58,7 +59,7 @@ function validateAuthorCollection(cwd, assignments, args, toolInput) {
 
   const candidate = policies[0];
   const expected =
-    candidate == null
+    candidate?.kind !== 'generation'
       ? []
       : [
           'test',
@@ -75,7 +76,7 @@ function validateAuthorCollection(cwd, assignments, args, toolInput) {
     }
   }
   const policy =
-    candidate != null &&
+    candidate?.kind === 'generation' &&
     samePath(path.resolve(cwd), candidate.repositoryRoot) &&
     args.length === expected.length &&
     args.every((value, index) => value === expected[index]) &&
@@ -295,6 +296,51 @@ function validateCommand(payload) {
   if (split.result != null) return split.result;
 
   const [executable, ...args] = split.remaining;
+  if (payload.agent_type.endsWith('playwright-test-explorer')) {
+    if (executable === 'playwright-cli') {
+      return validateCli(
+        parsed.cwd,
+        split.assignments,
+        args,
+        payload.agent_type,
+      );
+    }
+    if (executable === 'rm' && split.assignments.length === 0) {
+      return validateCleanup(parsed.cwd, args, payload.agent_type);
+    }
+    const exactHistory =
+      split.assignments.length === 0 &&
+      [
+        'git',
+        '--no-pager',
+        'log',
+        '--max-count=20',
+        '--name-only',
+        '--pretty=format:%H%x09%s',
+        '--no-ext-diff',
+        '--no-textconv',
+        '--',
+        '.',
+      ].every((value, index) => split.remaining[index] === value) &&
+      split.remaining.length === 10;
+    if (exactHistory) {
+      const policies = repositoryPolicies(parsed.cwd);
+      if (
+        policies.length === 1 &&
+        policies[0]?.kind === 'discovery' &&
+        samePath(path.resolve(parsed.cwd), policies[0].repositoryRoot)
+      ) {
+        return decision(
+          'allow',
+          'Git history is read-only, bounded to twenty commits, and disables external diff and text conversion.',
+        );
+      }
+    }
+    return deny(
+      'Explorer commands are limited to bounded Git history, run-owned Playwright CLI inspection, and browser-scratch cleanup.',
+    );
+  }
+
   if (
     executable === 'node' &&
     split.assignments.length === 0 &&
