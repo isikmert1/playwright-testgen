@@ -1,5 +1,11 @@
 const assert = require('node:assert/strict');
-const { mkdirSync, mkdtempSync, rmSync, writeFileSync } = require('node:fs');
+const {
+  mkdirSync,
+  mkdtempSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} = require('node:fs');
 const { tmpdir } = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
@@ -21,10 +27,15 @@ function writeJson(filename, value) {
 function createRepository({
   cliVersion = '0.1.19',
   commit = true,
+  nested = false,
   playwrightVersion = '1.62.1',
   runnerTraceOption = playwrightVersion === '1.62.1' ? '--name' : '--phase',
 } = {}) {
-  const repository = mkdtempSync(path.join(tmpdir(), 'testgen-preflight-'));
+  const fixtureRoot = mkdtempSync(path.join(tmpdir(), 'testgen-preflight-'));
+  const repository = nested
+    ? path.join(fixtureRoot, 'repository')
+    : fixtureRoot;
+  if (nested) mkdirSync(repository);
   writeJson(path.join(repository, 'package.json'), { private: true });
   for (const packageName of ['playwright', '@playwright/test']) {
     writeJson(
@@ -98,7 +109,7 @@ function createRepository({
       "else console.log('attach find generate-locator requests');",
     ].join('\n'),
   );
-  return { cli, repository };
+  return { cli, fixtureRoot, repository };
 }
 
 function runPreflight(repository, cli) {
@@ -118,8 +129,33 @@ function withRepository(options, callback) {
   try {
     callback(fixture);
   } finally {
-    rmSync(fixture.repository, { force: true, recursive: true });
+    rmSync(fixture.fixtureRoot, { force: true, recursive: true });
   }
+}
+
+for (const [packageName, error] of [
+  ['playwright', 'playwright-unavailable'],
+  ['@playwright/test', 'playwright-test-unavailable'],
+]) {
+  test(`rejects ${packageName} resolved outside the repository`, () => {
+    withRepository({ nested: true }, ({ cli, repository }) => {
+      const externalPackage = path.join(
+        path.dirname(repository),
+        'node_modules',
+        packageName,
+      );
+      mkdirSync(path.dirname(externalPackage), { recursive: true });
+      renameSync(
+        path.join(repository, 'node_modules', packageName),
+        externalPackage,
+      );
+
+      const { report, status } = runPreflight(repository, cli);
+
+      assert.equal(status, 1);
+      assert.deepEqual(report, { ok: false, error });
+    });
+  });
 }
 
 for (const [version, option] of [

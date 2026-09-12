@@ -1,6 +1,6 @@
 {
   "name": "playwright-testgen",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "description": "Claude Code plugin for grounded Playwright test generation and repair using the official Playwright CLI.",
   "license": "Apache-2.0",

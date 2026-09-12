@@ -38,6 +38,9 @@ the project's Playwright configuration or CI. Its hooks constrain the delegated
 Author and Healer workflows; they are guardrails, not an operating-system
 sandbox.
 
+See [Architecture](docs/architecture.md) for component ownership, runtime and
+artifact boundaries, and release rules.
+
 ## Current status
 
 The implemented workflow has been exercised through clean marketplace

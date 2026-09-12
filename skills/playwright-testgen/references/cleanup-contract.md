@@ -73,9 +73,10 @@ Resolve the exact run directory and verify it is a child of
 never delete `.playwright-cli/`, the repository, generated specs, or other
 durable files. From the repository, the bounded command is
 `rm -rf -- .playwright-cli/testgen/<run-id>`; do not omit the run ID or replace
-the path with a glob. Full run-directory removal belongs to Main after the
-result is accepted. Governed agents may remove only the generated children
-described below.
+the path with a glob. `.playwright-cli/testgen/findings.md` is a durable sibling
+of run directories and cleanup preserves it on every path. Full run-directory
+removal belongs to Main after the result is accepted. Governed agents may remove
+only the generated children described below.
 
 When an active run must retain its handoff or policy, remove raw browser output
 only through exact run children: `.playwright-cli` for Author exploration, or

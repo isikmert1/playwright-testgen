@@ -9,6 +9,7 @@
   "plugins": [
     {
       "name": "playwright-testgen",
+      "version": "0.1.0",
       "description": "Claude Code plugin for grounded Playwright test generation and repair using the official Playwright CLI.",
       "source": "./"
     }

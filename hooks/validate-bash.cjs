@@ -52,15 +52,9 @@ function main() {
 
   try {
     const { auditDecision } = require('./hook-audit.cjs');
-    const {
-      APPROVED_RUNNER_REASON,
-    } = require('./validate-workflow-command.cjs');
+    const { operationOf } = require('./hook-result.cjs');
     let result = evaluate(payload);
-    const operation =
-      result?.hookSpecificOutput?.permissionDecisionReason ===
-      APPROVED_RUNNER_REASON
-        ? 'approved-spec-run'
-        : 'other';
+    const operation = operationOf(result);
     if (!auditDecision(payload, result, __filename, operation)) {
       result = deny(
         'Hook governance evidence could not be recorded. Stop this evaluation and report hook-governance-unverified.',

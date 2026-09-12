@@ -13,6 +13,7 @@ const {
 const { createRequire } = require('node:module');
 const { tmpdir } = require('node:os');
 const path = require('node:path');
+const { isInside } = require('./artifact-validation-common.cjs');
 
 const REQUIRED_CLI_COMMANDS = [
   'attach',
@@ -196,11 +197,14 @@ function runtimePreflight(options) {
     'playwright',
     'playwright-unavailable',
   );
+  if (!isInside(repository, playwright.path)) fail('playwright-unavailable');
   const playwrightTest = readPackage(
     requireFromRepository,
     '@playwright/test',
     'playwright-test-unavailable',
   );
+  if (!isInside(repository, playwrightTest.path))
+    fail('playwright-test-unavailable');
   if (playwright.version !== playwrightTest.version)
     fail('playwright-version-mismatch');
 

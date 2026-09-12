@@ -17,6 +17,10 @@ const { parse } = require('shell-quote');
 const {
   exactPlaywrightFilter: policySpecFilter,
 } = require('../hooks/run-policy.cjs');
+const { operationOf } = require('../hooks/hook-result.cjs');
+const {
+  validatePlaywright,
+} = require('../hooks/validate-workflow-command.cjs');
 
 const repositoryRoot = path.resolve(__dirname, '..');
 const hookPath = path.join(repositoryRoot, 'hooks', 'validate-bash.cjs');
@@ -71,6 +75,7 @@ function runToolHook(
   toolInput,
   agentType = 'playwright-test-author',
   environment = {},
+  toolUseId,
 ) {
   const result = spawnSync(process.execPath, [hookPath], {
     encoding: 'utf8',
@@ -81,6 +86,7 @@ function runToolHook(
       hook_event_name: 'PreToolUse',
       tool_input: toolInput,
       tool_name: toolName,
+      tool_use_id: toolUseId,
     }),
   });
 
@@ -804,6 +810,116 @@ test('allows one scoped Playwright debug attempt', () => {
 
     assert.equal(result.permissionDecision, 'allow');
   });
+});
+
+test('audits approved foreground spec runs through private operation metadata', () => {
+  withTargetRepository(({ targetRepository }) => {
+    const auditRoot = mkdtempSync(path.join(tmpdir(), 'testgen-hook-audit-'));
+    const auditPath = path.join(auditRoot, 'hook-audit.jsonl');
+    const output = `.playwright-cli/testgen/${runId}/attempt-2/test-results`;
+    const command = runnerCommand(targetRepository, output);
+
+    try {
+      const result = runToolHook(
+        targetRepository,
+        'Bash',
+        { command },
+        'playwright-test-healer',
+        { PLAYWRIGHT_TESTGEN_HOOK_AUDIT_PATH: auditPath },
+        'tool-approved-spec-run',
+      );
+
+      assert.equal(result.permissionDecision, 'allow');
+      assert.equal(JSON.stringify(result).includes('approved-spec-run'), false);
+      assert.equal(
+        JSON.parse(readFileSync(auditPath, 'utf8')).operation,
+        'approved-spec-run',
+      );
+
+      const privateResult = validatePlaywright(
+        targetRepository,
+        ['PLAYWRIGHT_HTML_OPEN=never'],
+        [
+          'test',
+          exactSpecFilter(targetRepository),
+          '--retries=0',
+          '--repeat-each=1',
+          `--output=.playwright-cli/testgen/${runId}/attempt-3/test-results`,
+        ],
+        {},
+      );
+      assert.equal(operationOf(privateResult), 'approved-spec-run');
+      assert.equal(
+        JSON.stringify(privateResult).includes('approved-spec-run'),
+        false,
+      );
+
+      const debugResult = validatePlaywright(
+        targetRepository,
+        ['PLAYWRIGHT_HTML_OPEN=never'],
+        [
+          'test',
+          exactSpecFilter(targetRepository),
+          '--debug=cli',
+          '--retries=0',
+          '--repeat-each=1',
+          `--output=.playwright-cli/testgen/${runId}/attempt-4/test-results`,
+        ],
+        { run_in_background: true },
+      );
+      assert.equal(operationOf(debugResult), 'other');
+    } finally {
+      rmSync(auditRoot, { force: true, recursive: true });
+    }
+  });
+});
+
+test('audits private approved-run metadata despite a revised reason', () => {
+  const temporaryRoot = mkdtempSync(
+    path.join(tmpdir(), 'testgen-hook-reason-'),
+  );
+  const temporaryHooks = path.join(temporaryRoot, 'hooks');
+  const temporaryHook = path.join(temporaryHooks, 'validate-bash.cjs');
+  const auditPath = path.join(temporaryRoot, 'hook-audit.jsonl');
+  const reason = 'Approved runner wording changed for an operator.';
+
+  try {
+    cpSync(path.join(repositoryRoot, 'hooks'), temporaryHooks, {
+      recursive: true,
+    });
+    writeFileSync(
+      path.join(temporaryHooks, 'validate-command.cjs'),
+      `const { decision } = require('./hook-result.cjs');\nmodule.exports = { validateCommand: () => decision('allow', '${reason}', 'approved-spec-run') };\n`,
+    );
+    const result = spawnSync(process.execPath, [temporaryHook], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        PLAYWRIGHT_TESTGEN_HOOK_AUDIT_PATH: auditPath,
+      },
+      input: JSON.stringify({
+        agent_type: 'playwright-test-healer',
+        cwd: temporaryRoot,
+        hook_event_name: 'PreToolUse',
+        tool_input: { command: 'approved runner' },
+        tool_name: 'Bash',
+        tool_use_id: 'tool-revised-reason',
+      }),
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    const output = JSON.parse(result.stdout).hookSpecificOutput;
+    assert.equal(output.permissionDecision, 'allow');
+    assert.equal(output.permissionDecisionReason, reason);
+    assert.equal(Object.hasOwn(output, 'operation'), false);
+    assert.equal(JSON.stringify(output).includes('approved-spec-run'), false);
+    assert.equal(
+      JSON.parse(readFileSync(auditPath, 'utf8')).operation,
+      'approved-spec-run',
+    );
+  } finally {
+    rmSync(temporaryRoot, { force: true, recursive: true });
+  }
 });
 
 test('requires an anchored filter for the exact approved spec', () => {
