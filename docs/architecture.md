@@ -43,16 +43,18 @@ output directories, and artifact validation. Hook decisions constrain
 delegated agents, but they are guardrails rather than an operating-system
 sandbox.
 
-Validated Author handoffs and Healer traces connect criteria to assertions and
-execution evidence without retaining raw pages, logs, credentials, or agent
-reasoning. A fixed test can enter the optional vacuity gate, which applies only
+Main normalizes either a validated Author handoff or explicit standalone intent
+into one read-only Healer input. Its starting digest records the approved spec
+bytes while still permitting declared repairs. Healer traces connect those
+criteria to execution evidence without retaining raw pages, logs, credentials,
+or agent reasoning. A fixed pipeline test can enter the optional vacuity gate, which applies only
 an explicitly approved criterion-linked mutation in a disposable Git worktree.
 The active checkout must remain unchanged.
 
 ## Artifacts and cleanup
 
 `.playwright-cli/testgen/<run-id>/` is transient. It contains policy, bounded
-handoff and trace data, runner evidence, and optional mutation state. Main
+handoff, Healer input, trace data, runner evidence, and optional mutation state. Main
 removes only that exact directory after the result is accepted.
 
 For an accepted `product-behavior-wrong` result, the human may approve one

@@ -152,10 +152,14 @@ test('keeps mutation and grading answers out of the Healer prompt', () => {
   assert.match(prompt, /trace snapshot option: --name/iu);
   assert.match(
     prompt,
+    /validated Healer input: \.playwright-cli\/testgen\/tg-0123456789abcdef01234567\/healer-input\.json/u,
+  );
+  assert.match(
+    prompt,
     /trace draft: \.playwright-cli\/testgen\/tg-0123456789abcdef01234567\/healer-trace\.json \(exact current contents: \{\}\)/u,
   );
   assert.match(prompt, /Read that exact trace draft once/u);
-  assert.match(prompt, /order-appears-in-table/u);
+  assert.doesNotMatch(prompt, /order-appears-in-table/u);
   assert.doesNotMatch(prompt, /product-defect-refusal/iu);
   assert.doesNotMatch(prompt, /product-behavior-wrong/iu);
   assert.doesNotMatch(prompt, new RegExp(seededBug.mutation_id, 'u'));

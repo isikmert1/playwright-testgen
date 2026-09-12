@@ -59,7 +59,7 @@ overwriting concurrent changes.
 
 Owned target runners must execute the exact approved spec filter and attribute
 a mutant failure to the exact descriptive `step_title` supplied from the
-validated handoff. A failing process without that evidence is an execution
+validated Healer input. A failing process without that evidence is an execution
 error, not a killed mutation. Runners must stop every server they start and must
 not detach child processes; the outer verifier owns timeout and cancellation
 teardown.

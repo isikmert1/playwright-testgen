@@ -1,5 +1,7 @@
 const assert = require('node:assert/strict');
+const { createHash } = require('node:crypto');
 const {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -20,45 +22,34 @@ const recorder = path.join(
 );
 const runId = 'tg-0123456789abcdef01234567';
 
-function handoff() {
+function healerInput() {
   return {
-    schema_version: 'author-handoff.v1',
+    schema_version: 'healer-input.v1',
     run_id: runId,
-    scenario_ref: 'profile-save',
+    mode: 'standalone',
     spec_path: 'tests/account.spec.ts',
+    starting_spec_sha256: createHash('sha256').update('').digest('hex'),
     criteria: [
       {
         id: 'criterion-1',
-        step_title: 'save profile',
-        assertion_location: 'tests/account.spec.ts:18',
         outcome: 'saved profile is visible',
+        assertion_locations: ['tests/account.spec.ts:18'],
+        step_title: null,
       },
     ],
-    locators: [
-      {
-        purpose: 'save profile',
-        locator: "getByRole('button', { name: 'Save' })",
-        strategy: 'role',
-        live_count: 1,
-        visible: true,
-      },
-    ],
-    test_id_convention: 'none-found',
-    test_id_additions: [],
-    lint: { command: 'npm run lint', status: 'pass', diagnostics: [] },
-    test_data_strategy: 'existing-safe-fixture',
-    touched_paths: ['tests/account.spec.ts'],
-    assumptions: [],
-    open_questions: [],
+    source: {
+      kind: 'human-approved-existing-spec',
+      handoff_sha256: null,
+    },
   };
 }
 
 function trace() {
   return {
-    schema_version: 'healer-trace.v1',
+    schema_version: 'healer-trace.v2',
     run_id: runId,
     spec_path: 'tests/account.spec.ts',
-    handoff_read: true,
+    healer_input_read: true,
     attempts: [
       {
         number: 1,
@@ -118,7 +109,7 @@ function setup(repository) {
     format_version: 1,
     run_id: runId,
   });
-  write(repository, 'handoff.json', handoff());
+  write(repository, 'healer-input.json', healerInput());
   write(repository, 'healer-trace.json', trace());
 }
 
@@ -177,6 +168,64 @@ test('approved finding records only sanitized validated evidence and preserves d
     assert.equal(second.status, 0, second.stderr);
     assert.equal(JSON.parse(second.stdout).duplicate, true);
     assert.equal(readFileSync(destination, 'utf8'), finding);
+  });
+});
+
+test('approved finding survives an earlier declared spec repair', () => {
+  withRepository((repository) => {
+    writeFileSync(
+      path.join(repository, 'tests', 'account.spec.ts'),
+      "test('repaired test', async () => {});\n",
+    );
+    const value = trace();
+    value.attempts.unshift({
+      number: 1,
+      kind: 'verification-run',
+      hypothesis: 'the saved locator no longer matches the control',
+      failure_signature: 'save-button-not-found',
+      evidence_summary: 'one renamed Save changes control was visible',
+      classification: 'selector-drift',
+      action: 'updated the approved spec locator',
+      outcome: 'fail',
+    });
+    value.attempts[1].number = 2;
+    value.attempts[1].kind = 'confirmation-run';
+    value.repairs = [
+      {
+        attempt_number: 1,
+        paths: ['tests/account.spec.ts'],
+        reason: 'matched the renamed visible control',
+      },
+    ];
+    write(repository, 'healer-trace.json', value);
+
+    const result = run(repository, 'approved');
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(
+      readFileSync(
+        path.join(repository, '.playwright-cli', 'testgen', 'findings.md'),
+        'utf8',
+      ),
+      /product-behavior-wrong/,
+    );
+  });
+});
+
+test('standalone cleanup removes Healer input and preserves an approved finding', () => {
+  withRepository((repository) => {
+    const result = run(repository, 'approved');
+    assert.equal(result.status, 0, result.stderr);
+    const testgenDirectory = path.join(
+      repository,
+      '.playwright-cli',
+      'testgen',
+    );
+    const runDirectory = path.join(testgenDirectory, runId);
+    rmSync(runDirectory, { force: true, recursive: true });
+
+    assert.equal(existsSync(runDirectory), false);
+    assert.equal(existsSync(path.join(testgenDirectory, 'findings.md')), true);
   });
 });
 
@@ -266,7 +315,7 @@ test('rejects a fixed or non-product trace', () => {
     const value = trace();
     value.final_classification = null;
     value.disposition = 'fixed';
-    value.next_owner = 'main';
+    value.next_owner = 'human';
     value.escalation = null;
     value.attempts[0] = {
       number: 1,

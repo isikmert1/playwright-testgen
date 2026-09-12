@@ -301,7 +301,7 @@ function validateHandoff(artifact, repository, errors) {
   );
 }
 
-function loadHandoffCriteria(repository, runPolicy, runId) {
+function loadValidatedHandoff(repository, runPolicy, runId) {
   if (loadSchema('handoff') == null) return null;
   const handoffPath = path.join(runPolicy.runDirectory, 'handoff.json');
   try {
@@ -330,17 +330,23 @@ function loadHandoffCriteria(repository, runPolicy, runId) {
     validateHandoff(handoff, repository, errors);
     if (!['pass', 'fixed'].includes(handoff.lint?.status))
       errors.push('handoff-lint-not-passed');
-    return errors.length === 0
-      ? new Map(
-          handoff.criteria.map((criterion) => [
-            criterion.id,
-            criterion.outcome,
-          ]),
-        )
-      : null;
+    return errors.length === 0 ? handoff : null;
   } catch {
     return null;
   }
 }
 
-module.exports = { loadHandoffCriteria, validateHandoff };
+function loadHandoffCriteria(repository, runPolicy, runId) {
+  const handoff = loadValidatedHandoff(repository, runPolicy, runId);
+  return handoff == null
+    ? null
+    : new Map(
+        handoff.criteria.map((criterion) => [criterion.id, criterion.outcome]),
+      );
+}
+
+module.exports = {
+  loadHandoffCriteria,
+  loadValidatedHandoff,
+  validateHandoff,
+};

@@ -2487,8 +2487,10 @@ test('rejects plugin-root probes with the direct-use recovery', () => {
 test('binds artifact mutations to the role that owns each artifact', () => {
   withTargetRepository(({ runDirectory, targetRepository }) => {
     const handoffPath = path.join(runDirectory, 'handoff.json');
+    const inputPath = path.join(runDirectory, 'healer-input.json');
     const tracePath = path.join(runDirectory, 'healer-trace.json');
     writeFileSync(handoffPath, '{}');
+    writeFileSync(inputPath, '{}');
     writeFileSync(tracePath, '{}');
 
     for (const [agentType, filePath] of [
@@ -2505,6 +2507,24 @@ test('binds artifact mutations to the role that owns each artifact', () => {
       assert.equal(result.permissionDecision, 'deny');
       assert.match(result.permissionDecisionReason, /role-owned artifact/iu);
     }
+
+    assert.equal(
+      runToolHook(
+        targetRepository,
+        'Read',
+        { file_path: inputPath },
+        'playwright-test-healer',
+      ).permissionDecision,
+      'allow',
+    );
+    const inputWrite = runToolHook(
+      targetRepository,
+      'Write',
+      { file_path: inputPath, content: '{}' },
+      'playwright-test-healer',
+    );
+    assert.equal(inputWrite.permissionDecision, 'deny');
+    assert.match(inputWrite.permissionDecisionReason, /Main-owned/iu);
 
     assert.equal(
       runToolHook(
@@ -2530,7 +2550,7 @@ test('binds artifact mutations to the role that owns each artifact', () => {
         'Write',
         {
           file_path: tracePath,
-          content: '{"schema_version":"healer-trace.v1"}',
+          content: '{"schema_version":"healer-trace.v2"}',
         },
         'playwright-test-healer',
       ).permissionDecision,
@@ -2543,7 +2563,7 @@ test('binds artifact mutations to the role that owns each artifact', () => {
       {
         file_path: tracePath,
         old_string: '{}',
-        new_string: '{"schema_version":"healer-trace.v1"}',
+        new_string: '{"schema_version":"healer-trace.v2"}',
       },
       'playwright-test-healer',
     );
@@ -2570,7 +2590,7 @@ test('binds artifact mutations to the role that owns each artifact', () => {
         'Write',
         {
           file_path: tracePath,
-          content: '{"schema_version":"healer-trace.v1"}',
+          content: '{"schema_version":"healer-trace.v2"}',
         },
         'playwright-test-healer',
       ).permissionDecision,
@@ -2583,7 +2603,7 @@ test('binds artifact mutations to the role that owns each artifact', () => {
       'Write',
       {
         file_path: tracePath,
-        content: '{"schema_version":"healer-trace.v1"}',
+        content: '{"schema_version":"healer-trace.v2"}',
       },
       'playwright-test-healer',
     );
@@ -2605,7 +2625,7 @@ test('allows only canonical installed-plugin reads required by governed agents',
 
       const approvedPaths = [
         path.join(skillRoot, 'SKILL.md'),
-        path.join(schemaRoot, 'healer-trace.v1.schema.json'),
+        path.join(schemaRoot, 'healer-trace.v2.schema.json'),
         path.join(scriptRoot, 'validate-testgen-artifact.cjs'),
       ];
       for (const approvedPath of approvedPaths) {
@@ -2701,12 +2721,12 @@ test('derives the installed plugin root when Claude does not export it', () => {
 test('allows Healer to read only its exact run-bound inputs', () => {
   withTargetRepository(({ runDirectory, targetRepository }) => {
     const specPath = path.join(targetRepository, 'tests', 'account.spec.ts');
-    const handoffPath = path.join(runDirectory, 'handoff.json');
+    const inputPath = path.join(runDirectory, 'healer-input.json');
     const tracePath = path.join(runDirectory, 'healer-trace.json');
-    writeFileSync(handoffPath, '{}');
+    writeFileSync(inputPath, '{}');
     writeFileSync(tracePath, '{}');
 
-    for (const filePath of [specPath, handoffPath, tracePath]) {
+    for (const filePath of [specPath, inputPath, tracePath]) {
       assert.equal(
         runToolHook(
           targetRepository,
@@ -2736,7 +2756,7 @@ test('rejects non-regular and oversized trace drafts before reading', () => {
     const tracePath = path.join(runDirectory, 'healer-trace.json');
     const write = {
       file_path: tracePath,
-      content: '{"schema_version":"healer-trace.v1"}',
+      content: '{"schema_version":"healer-trace.v2"}',
     };
 
     writeFileSync(tracePath, 'x'.repeat(64 * 1024 + 1));

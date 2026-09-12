@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict');
+const { createHash } = require('node:crypto');
 const {
   copyFileSync,
   mkdirSync,
@@ -19,11 +20,17 @@ const generatorPath = path.join(
   'scripts',
   'create-testgen-run-id.cjs',
 );
+const healerInputGeneratorPath = path.join(
+  repositoryRoot,
+  'scripts',
+  'create-healer-input.cjs',
+);
 const validatorPath = path.join(
   repositoryRoot,
   'scripts',
   'validate-testgen-artifact.cjs',
 );
+const { normalizedCriteria } = require('../scripts/validate-healer-input.cjs');
 const runId = 'tg-0123456789abcdef01234567';
 
 function runScript(script, args, environment = {}) {
@@ -66,12 +73,45 @@ function handoff(run = runId) {
   };
 }
 
+function sha256(value) {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+function healerInput(
+  spec,
+  mode = 'standalone',
+  run = runId,
+  handoffDigest = 'a'.repeat(64),
+) {
+  return {
+    schema_version: 'healer-input.v1',
+    run_id: run,
+    mode,
+    spec_path: 'tests/account.spec.ts',
+    starting_spec_sha256: sha256(spec),
+    criteria: [
+      {
+        id: 'criterion-1',
+        outcome: 'saved profile is visible',
+        assertion_locations: ['tests/account.spec.ts:18'],
+        step_title:
+          mode === 'pipeline' ? 'verify the saved profile is visible' : null,
+      },
+    ],
+    source: {
+      kind:
+        mode === 'pipeline' ? 'author-handoff' : 'human-approved-existing-spec',
+      handoff_sha256: mode === 'pipeline' ? handoffDigest : null,
+    },
+  };
+}
+
 function trace(run = runId) {
   return {
-    schema_version: 'healer-trace.v1',
+    schema_version: 'healer-trace.v2',
     run_id: run,
     spec_path: 'tests/account.spec.ts',
-    handoff_read: true,
+    healer_input_read: true,
     attempts: [
       {
         number: 1,
@@ -184,11 +224,28 @@ function withRepository(callback) {
     writeFileSync(path.join(repository, 'tests', 'account.spec.ts'), '');
     writePolicy(repository, 'tests/account.spec.ts');
     writeArtifact(repository, runId, 'handoff.json', handoff());
+    writePipelineInput(repository, '');
     writeArtifact(repository, runId, 'healer-trace.json', trace());
     callback(repository);
   } finally {
     rmSync(repository, { force: true, recursive: true });
   }
+}
+
+function writePipelineInput(repository, spec) {
+  const handoffPath = path.join(
+    repository,
+    '.playwright-cli',
+    'testgen',
+    runId,
+    'handoff.json',
+  );
+  return writeArtifact(
+    repository,
+    runId,
+    'healer-input.json',
+    healerInput(spec, 'pipeline', runId, sha256(readFileSync(handoffPath))),
+  );
 }
 
 function writePolicy(repository, approvedSpec) {
@@ -270,6 +327,290 @@ test('accepts a valid Author handoff in its run-owned location', () => {
       artifact_path: artifact,
     });
   });
+});
+
+test('accepts standalone Healer input without an Author handoff', () => {
+  const repository = mkdtempSync(path.join(tmpdir(), 'testgen-input-'));
+  try {
+    const spec = "test('existing test', async () => {});\n";
+    mkdirSync(path.join(repository, 'tests'), { recursive: true });
+    writeFileSync(path.join(repository, 'tests', 'account.spec.ts'), spec);
+    writePolicy(repository, 'tests/account.spec.ts');
+    const artifact = writeArtifact(
+      repository,
+      runId,
+      'healer-input.json',
+      healerInput(spec),
+    );
+
+    const result = validate(repository, 'input', runId, artifact);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).mode, 'standalone');
+  } finally {
+    rmSync(repository, { force: true, recursive: true });
+  }
+});
+
+test('derives pipeline Healer input from the validated Author handoff', () => {
+  const repository = mkdtempSync(path.join(tmpdir(), 'testgen-input-'));
+  try {
+    const spec = "test('generated test', async () => {});\n";
+    mkdirSync(path.join(repository, 'tests'), { recursive: true });
+    writeFileSync(path.join(repository, 'tests', 'account.spec.ts'), spec);
+    writePolicy(repository, 'tests/account.spec.ts');
+    writeArtifact(repository, runId, 'handoff.json', handoff());
+
+    const result = runScript(healerInputGeneratorPath, [
+      '--repo',
+      repository,
+      '--run-id',
+      runId,
+    ]);
+
+    assert.equal(result.status, 0, result.stderr);
+    const relative = `.playwright-cli/testgen/${runId}/healer-input.json`;
+    const input = JSON.parse(readFileSync(path.join(repository, relative)));
+    assert.deepEqual(input.criteria, [
+      {
+        id: 'criterion-1',
+        outcome: 'saved profile is visible',
+        assertion_locations: ['tests/account.spec.ts:18'],
+        step_title: 'verify the saved profile is visible',
+      },
+    ]);
+    assert.equal(input.mode, 'pipeline');
+    assert.equal(input.starting_spec_sha256, sha256(spec));
+    assert.equal(validate(repository, 'input', runId, relative).status, 0);
+  } finally {
+    rmSync(repository, { force: true, recursive: true });
+  }
+});
+
+test('preserves pipeline assertion mappings to declared helper files', () => {
+  const repository = mkdtempSync(path.join(tmpdir(), 'testgen-input-'));
+  try {
+    const spec = "test('generated test', async () => {});\n";
+    mkdirSync(path.join(repository, 'tests', 'helpers'), { recursive: true });
+    writeFileSync(path.join(repository, 'tests', 'account.spec.ts'), spec);
+    writeFileSync(path.join(repository, 'tests', 'helpers', 'account.ts'), '');
+    writePolicy(repository, 'tests/account.spec.ts');
+    const authorHandoff = handoff();
+    authorHandoff.criteria[0].assertion_location =
+      'tests/helpers/account.ts:42';
+    authorHandoff.touched_paths.push('tests/helpers/account.ts');
+    writeArtifact(repository, runId, 'handoff.json', authorHandoff);
+
+    const result = runScript(healerInputGeneratorPath, [
+      '--repo',
+      repository,
+      '--run-id',
+      runId,
+    ]);
+    const relative = `.playwright-cli/testgen/${runId}/healer-input.json`;
+    const validation = validate(repository, 'input', runId, relative);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(validation.status, 0, validation.stderr);
+    assert.deepEqual(
+      JSON.parse(readFileSync(path.join(repository, relative))).criteria[0]
+        .assertion_locations,
+      ['tests/helpers/account.ts:42'],
+    );
+  } finally {
+    rmSync(repository, { force: true, recursive: true });
+  }
+});
+
+test('normalizes Windows assertion paths in pipeline Healer input', () => {
+  const authorHandoff = handoff();
+  authorHandoff.criteria[0].assertion_location = 'tests\\account.spec.ts:18';
+
+  assert.deepEqual(normalizedCriteria(authorHandoff)[0].assertion_locations, [
+    'tests/account.spec.ts:18',
+  ]);
+});
+
+test('accepts standalone assertion locations with a column', () => {
+  const repository = mkdtempSync(path.join(tmpdir(), 'testgen-input-'));
+  try {
+    const spec = "test('existing test', async () => {});\n";
+    mkdirSync(path.join(repository, 'tests'), { recursive: true });
+    writeFileSync(path.join(repository, 'tests', 'account.spec.ts'), spec);
+    writePolicy(repository, 'tests/account.spec.ts');
+    const value = healerInput(spec);
+    value.criteria[0].assertion_locations = ['tests/account.spec.ts:18:5'];
+    const relative = writeArtifact(
+      repository,
+      runId,
+      'healer-input.json',
+      value,
+    );
+
+    const result = validate(repository, 'input', runId, relative);
+
+    assert.equal(result.status, 0, result.stderr);
+  } finally {
+    rmSync(repository, { force: true, recursive: true });
+  }
+});
+
+test('rejects standalone assertion locations outside the repository', () => {
+  const repository = mkdtempSync(path.join(tmpdir(), 'testgen-input-'));
+  try {
+    const spec = "test('existing test', async () => {});\n";
+    mkdirSync(path.join(repository, 'tests'), { recursive: true });
+    writeFileSync(path.join(repository, 'tests', 'account.spec.ts'), spec);
+    writePolicy(repository, 'tests/account.spec.ts');
+    const value = healerInput(spec);
+    value.criteria[0].assertion_locations = ['../outside.ts:18'];
+
+    const result = validate(
+      repository,
+      'input',
+      runId,
+      writeArtifact(repository, runId, 'healer-input.json', value),
+    );
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /input-assertion-location-invalid-path/iu);
+  } finally {
+    rmSync(repository, { force: true, recursive: true });
+  }
+});
+
+test('rejects pipeline Healer input that changes approved criteria', () => {
+  const repository = mkdtempSync(path.join(tmpdir(), 'testgen-input-'));
+  try {
+    const spec = "test('generated test', async () => {});\n";
+    mkdirSync(path.join(repository, 'tests'), { recursive: true });
+    writeFileSync(path.join(repository, 'tests', 'account.spec.ts'), spec);
+    writePolicy(repository, 'tests/account.spec.ts');
+    writeArtifact(repository, runId, 'handoff.json', handoff());
+    const relative = writePipelineInput(repository, spec);
+    const value = JSON.parse(readFileSync(path.join(repository, relative)));
+    value.criteria[0].outcome = 'a different outcome';
+    writeArtifact(repository, runId, 'healer-input.json', value);
+
+    const result = validate(repository, 'input', runId, relative);
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /input-criteria-mismatch/iu);
+  } finally {
+    rmSync(repository, { force: true, recursive: true });
+  }
+});
+
+test('rejects stale standalone Healer input before execution', () => {
+  const repository = mkdtempSync(path.join(tmpdir(), 'testgen-input-'));
+  try {
+    mkdirSync(path.join(repository, 'tests'), { recursive: true });
+    writeFileSync(path.join(repository, 'tests', 'account.spec.ts'), 'changed');
+    writePolicy(repository, 'tests/account.spec.ts');
+    const value = healerInput('starting bytes');
+
+    assertRejected(
+      repository,
+      'input',
+      'healer-input.json',
+      value,
+      /input-spec-digest-mismatch/iu,
+    );
+  } finally {
+    rmSync(repository, { force: true, recursive: true });
+  }
+});
+
+test('rejects a non-string Healer input spec path without crashing', () => {
+  const repository = mkdtempSync(path.join(tmpdir(), 'testgen-input-'));
+  try {
+    const spec = "test('existing test', async () => {});\n";
+    mkdirSync(path.join(repository, 'tests'), { recursive: true });
+    writeFileSync(path.join(repository, 'tests', 'account.spec.ts'), spec);
+    writePolicy(repository, 'tests/account.spec.ts');
+    const value = healerInput(spec);
+    value.spec_path = null;
+
+    const result = validate(
+      repository,
+      'input',
+      runId,
+      writeArtifact(repository, runId, 'healer-input.json', value),
+    );
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /input-spec-invalid-path/iu);
+    assert.doesNotMatch(result.stderr, /TypeError|node:internal/iu);
+  } finally {
+    rmSync(repository, { force: true, recursive: true });
+  }
+});
+
+test('binds Healer input to the current run and approved spec', () => {
+  const repository = mkdtempSync(path.join(tmpdir(), 'testgen-input-'));
+  try {
+    const spec = "test('existing test', async () => {});\n";
+    mkdirSync(path.join(repository, 'tests'), { recursive: true });
+    writeFileSync(path.join(repository, 'tests', 'account.spec.ts'), spec);
+    writePolicy(repository, 'tests/account.spec.ts');
+
+    assertRejected(
+      repository,
+      'input',
+      'healer-input.json',
+      healerInput(spec, 'standalone', 'tg-fedcba9876543210fedcba98'),
+      /run-id-mismatch/iu,
+    );
+    const wrongSpec = healerInput(spec);
+    wrongSpec.spec_path = 'tests/other.spec.ts';
+    wrongSpec.criteria[0].assertion_locations = ['tests/other.spec.ts:18'];
+    assertRejected(
+      repository,
+      'input',
+      'healer-input.json',
+      wrongSpec,
+      /policy-spec-mismatch/iu,
+    );
+  } finally {
+    rmSync(repository, { force: true, recursive: true });
+  }
+});
+
+test('accepts a standalone trace after an approved spec repair', () => {
+  const repository = mkdtempSync(path.join(tmpdir(), 'testgen-input-'));
+  try {
+    const startingSpec = "test('existing test', async () => {});\n";
+    mkdirSync(path.join(repository, 'tests'), { recursive: true });
+    writeFileSync(
+      path.join(repository, 'tests', 'account.spec.ts'),
+      startingSpec,
+    );
+    writePolicy(repository, 'tests/account.spec.ts');
+    writeArtifact(
+      repository,
+      runId,
+      'healer-input.json',
+      healerInput(startingSpec),
+    );
+    writeFileSync(
+      path.join(repository, 'tests', 'account.spec.ts'),
+      "test('repaired test', async () => {});\n",
+    );
+    const value = repairedTrace(['tests/account.spec.ts']);
+    value.next_owner = 'human';
+    const artifact = writeArtifact(
+      repository,
+      runId,
+      'healer-trace.json',
+      value,
+    );
+
+    const result = validate(repository, 'trace', runId, artifact);
+
+    assert.equal(result.status, 0, result.stderr);
+  } finally {
+    rmSync(repository, { force: true, recursive: true });
+  }
 });
 
 test('accepts a valid fixed Healer trace in its run-owned location', () => {
@@ -895,6 +1236,7 @@ test('accepts benign equals syntax in bounded artifact prose', () => {
     const authorResult = validate(repository, 'handoff', runId, authorPath);
 
     assert.equal(authorResult.status, 0, authorResult.stderr);
+    writePipelineInput(repository, '');
 
     const healerArtifact = trace();
     healerArtifact.attempts[0].evidence_summary =
@@ -1007,12 +1349,20 @@ test('rejects a schema that no longer matches the bundled contract', () => {
           'scripts/validate-healer-trace.cjs',
         ],
         [
+          'scripts/validate-healer-input.cjs',
+          'scripts/validate-healer-input.cjs',
+        ],
+        [
           'scripts/validate-testgen-artifact.cjs',
           'scripts/validate-testgen-artifact.cjs',
         ],
         [
-          'schemas/healer-trace.v1.schema.json',
-          'schemas/healer-trace.v1.schema.json',
+          'schemas/healer-trace.v2.schema.json',
+          'schemas/healer-trace.v2.schema.json',
+        ],
+        [
+          'schemas/healer-input.v1.schema.json',
+          'schemas/healer-input.v1.schema.json',
         ],
       ])
         copyFileSync(
@@ -1221,6 +1571,77 @@ test('accepts a terminal product-behavior trace with structured evidence', () =>
   });
 });
 
+test('accepts a product finding discovered after an approved spec repair', () => {
+  const repository = mkdtempSync(path.join(tmpdir(), 'testgen-input-'));
+  try {
+    const startingSpec = "test('existing test', async () => {});\n";
+    mkdirSync(path.join(repository, 'tests'), { recursive: true });
+    writeFileSync(
+      path.join(repository, 'tests', 'account.spec.ts'),
+      startingSpec,
+    );
+    writePolicy(repository, 'tests/account.spec.ts');
+    writeArtifact(
+      repository,
+      runId,
+      'healer-input.json',
+      healerInput(startingSpec),
+    );
+    writeFileSync(
+      path.join(repository, 'tests', 'account.spec.ts'),
+      "test('repaired test', async () => {});\n",
+    );
+    const artifact = repairedTrace(['tests/account.spec.ts']);
+    const productAttempt = productFindingAttempt();
+    productAttempt.number = 2;
+    productAttempt.kind = 'confirmation-run';
+    artifact.attempts[1] = productAttempt;
+    artifact.final_classification = 'product-behavior-wrong';
+    artifact.disposition = 'product-behavior-wrong';
+    artifact.next_owner = 'product-owner';
+    artifact.escalation =
+      'the repaired selector exposed conflicting product behavior';
+    const relative = writeArtifact(
+      repository,
+      runId,
+      'healer-trace.json',
+      artifact,
+    );
+
+    const result = validate(repository, 'trace', runId, relative);
+
+    assert.equal(result.status, 0, result.stderr);
+  } finally {
+    rmSync(repository, { force: true, recursive: true });
+  }
+});
+
+test('rejects a product-behavior trace after the approved spec changes', () => {
+  withRepository((repository) => {
+    writeFileSync(
+      path.join(repository, 'tests', 'account.spec.ts'),
+      "test('changed test', async () => {});\n",
+    );
+    const artifact = trace();
+    artifact.attempts = [productFindingAttempt()];
+    artifact.final_classification = 'product-behavior-wrong';
+    artifact.disposition = 'product-behavior-wrong';
+    artifact.next_owner = 'product-owner';
+    artifact.escalation = 'the criterion and current product behavior conflict';
+    const artifactPath = writeArtifact(
+      repository,
+      runId,
+      'healer-trace.json',
+      artifact,
+    );
+
+    const result = validate(repository, 'trace', runId, artifactPath);
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /trace-unreported-spec-change/iu);
+  });
+});
+
 test('rejects repairs assigned to an owner-terminal failure', () => {
   withRepository((repository) => {
     const artifact = trace();
@@ -1249,7 +1670,7 @@ test('rejects repairs assigned to an owner-terminal failure', () => {
   });
 });
 
-test('rejects product evidence for a criterion absent from the handoff', () => {
+test('rejects product evidence for a criterion absent from the Healer input', () => {
   withRepository((repository) => {
     const artifact = trace();
     const attempt = productFindingAttempt();
@@ -1296,7 +1717,7 @@ test('rejects product evidence that changes the retained criterion outcome', () 
   });
 });
 
-test('rejects a trace when the retained handoff did not pass lint', () => {
+test('rejects a trace when its pipeline input no longer has a valid handoff', () => {
   withRepository((repository) => {
     const retainedHandoff = handoff();
     retainedHandoff.lint = {
@@ -1314,7 +1735,7 @@ test('rejects a trace when the retained handoff did not pass lint', () => {
     const result = validate(repository, 'trace', runId, artifactPath);
 
     assert.equal(result.status, 1);
-    assert.match(result.stderr, /trace-handoff-unavailable/iu);
+    assert.match(result.stderr, /healer-input-unavailable/iu);
   });
 });
 

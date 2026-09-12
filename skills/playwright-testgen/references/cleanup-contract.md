@@ -89,8 +89,8 @@ Raw snapshots, screenshots, videos, trace archives, DOM dumps, downloads, and
 runner logs controlled by this workflow are transient and belong in the run
 directory. When the project runner creates configured output elsewhere, report
 its repository-relative path and leave it repository-owned rather than deleting
-outside the validated boundary. The validated handoff, trace, and vacuity
-report may remain only while the run is active or paused for a human decision.
+outside the validated boundary. The validated handoff, Healer input, trace, and
+vacuity report may remain only while the run is active or paused for a human decision.
 Remove them after the final disposition has been reported and accepted.
 
 ## Exit behavior
@@ -107,9 +107,11 @@ Remove them after the final disposition has been reported and accepted.
 - **`skip`** — Close any accidentally live session, remove run scratch, and
   retain the generated spec as explicitly unverified.
 - **Healer reports `fixed`** — Stop the owned runner, close or detach the
-  session, retain the sanitized run artifacts through any approved mutation
-  check, write and validate the vacuity report, report its disposition, then
-  remove run scratch after acceptance.
+  session. For pipeline mode, retain the sanitized run artifacts through any
+  approved mutation check, write and validate the vacuity report, report its
+  disposition, then remove run scratch after acceptance. For standalone mode,
+  report the validated trace and remove run scratch after acceptance; never
+  start a mutation stage.
 - **Healer reports a final nonfixed result** — Stop the owned runner, close or
   detach the session, report Healer's final disposition, then remove run scratch
   after acceptance.

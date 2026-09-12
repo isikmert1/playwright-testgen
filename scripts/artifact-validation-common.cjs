@@ -10,10 +10,15 @@ const SCHEMAS = {
     version: 'author-handoff.v1',
     hash: '5be739fd42dad453d8b5dac428d8f8673a9108372e51a8b8646f8b597e9953c0',
   },
+  input: {
+    filename: 'healer-input.v1.schema.json',
+    version: 'healer-input.v1',
+    hash: '4817ee73bbe082b3da52b1bb682e7671987d8058e0ddb312e9f454e2fde6584a',
+  },
   trace: {
-    filename: 'healer-trace.v1.schema.json',
-    version: 'healer-trace.v1',
-    hash: '548ac97695d06f09ccd56d51728bb5665a2d4128afad4ac533a388927c15da0b',
+    filename: 'healer-trace.v2.schema.json',
+    version: 'healer-trace.v2',
+    hash: '5bdef9a0b0917e91b3a2df63827ad99ff2e29d7d4ebaf6cd6a2ac0560ca56968',
   },
   vacuity: {
     filename: 'vacuity-report.v1.schema.json',

@@ -1,5 +1,11 @@
 const assert = require('node:assert/strict');
-const { mkdtempSync, readFileSync, readdirSync, rmSync } = require('node:fs');
+const {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+} = require('node:fs');
 const { tmpdir } = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
@@ -102,7 +108,7 @@ test('README explains the project, workflow, and safety boundary', () => {
 test('plugin commands use portable root substitution', () => {
   let executableReferences = 0;
 
-  for (const directory of ['agents', 'skills']) {
+  for (const directory of ['agents', 'commands', 'skills']) {
     for (const file of markdownFiles(path.join(repositoryRoot, directory))) {
       const content = readFileSync(file, 'utf8');
       assert.doesNotMatch(
@@ -262,7 +268,7 @@ test('workflow guidance removes avoidable pre-Author ambiguity', () => {
   );
   assert.match(healer, /do not repeat the runtime\s+preflight/iu);
   assert.doesNotMatch(healer, /references\/artifact-contract\.md/iu);
-  assert.match(healer, /schemas\/healer-trace\.v1\.schema\.json/iu);
+  assert.match(healer, /schemas\/healer-trace\.v2\.schema\.json/iu);
   assert.match(healer, /stop and return the missing prerequisite to\s+Main/iu);
   assert.match(healer, /hook rejection.*does not consume an\s+attempt/isu);
   assert.match(
@@ -382,4 +388,50 @@ test('ships bounded Explorer discovery as a transient human decision', () => {
     /Selection never approves a spec path, execution,\s+or mutation/iu,
   );
   assert.match(artifactContract, /transient, untrusted discovery output/iu);
+});
+
+test('ships one command with explicit and discovery entry paths', () => {
+  const commandPath = path.join(repositoryRoot, 'commands', 'testgen.md');
+  const skill = readFileSync(
+    path.join(repositoryRoot, 'skills', 'playwright-testgen', 'SKILL.md'),
+    'utf8',
+  );
+  const pipeline = readFileSync(
+    path.join(
+      repositoryRoot,
+      'skills',
+      'playwright-testgen',
+      'references',
+      'pipeline.md',
+    ),
+    'utf8',
+  );
+
+  assert.equal(existsSync(commandPath), true);
+  assert.equal(
+    existsSync(path.join(repositoryRoot, 'commands', '.gitkeep')),
+    false,
+  );
+
+  const command = readFileSync(commandPath, 'utf8');
+  for (const content of [command, skill, pipeline]) {
+    assert.match(content, /blank|whitespace/iu);
+    assert.match(content, /Explorer/iu);
+    assert.match(content, /original\s+acceptance\s+criteria/iu);
+    assert.match(content, /run.*adjust.*skip/isu);
+    assert.match(content, /only.*explicit.*`run`.*Healer/isu);
+    assert.match(content, /mutation-not-verified/iu);
+    assert.match(content, /product.*environment.*stopping/isu);
+  }
+
+  assert.match(command, /\$ARGUMENTS/u);
+  assert.match(command, /(?:missing facts.*clarif|clarif.*missing facts)/isu);
+  assert.match(pipeline, /scenario selection.*candidate checkpoint/isu);
+  assert.match(pipeline, /selection never authorizes.*execution.*mutation/isu);
+  assert.match(pipeline, /standalone Explorer.*proposals only/isu);
+  assert.match(pipeline, /standalone Author.*unexecuted spec/isu);
+  assert.match(pipeline, /standalone Healer.*existing failing spec/isu);
+  assert.match(pipeline, /minimal coordinator.*policy.*artifacts/isu);
+  assert.match(pipeline, /never require.*passing spec.*refusal/isu);
+  assert.match(skill, /standalone.*full pipeline/isu);
 });

@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict');
+const { createHash } = require('node:crypto');
 const {
   existsSync,
   mkdirSync,
@@ -124,10 +125,10 @@ function handoff() {
 
 function trace() {
   return {
-    schema_version: 'healer-trace.v1',
+    schema_version: 'healer-trace.v2',
     run_id: runId,
     spec_path: 'tests/account.spec.ts',
-    handoff_read: true,
+    healer_input_read: true,
     attempts: [
       {
         number: 1,
@@ -167,6 +168,36 @@ function trace() {
       scratch: 'retained-pending-acceptance',
     },
   };
+}
+
+function digest(value) {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+function writePipelineInput(repository, runDirectory) {
+  const authorHandoff = handoff();
+  const handoffBytes = Buffer.from(JSON.stringify(authorHandoff));
+  const specPath = path.join(repository, 'tests', 'account.spec.ts');
+  writeFileSync(
+    path.join(runDirectory, 'healer-input.json'),
+    JSON.stringify({
+      schema_version: 'healer-input.v1',
+      run_id: runId,
+      mode: 'pipeline',
+      spec_path: 'tests/account.spec.ts',
+      starting_spec_sha256: digest(readFileSync(specPath)),
+      criteria: authorHandoff.criteria.map((criterion) => ({
+        id: criterion.id,
+        outcome: criterion.outcome,
+        assertion_locations: [criterion.assertion_location],
+        step_title: criterion.step_title,
+      })),
+      source: {
+        kind: 'author-handoff',
+        handoff_sha256: digest(handoffBytes),
+      },
+    }),
+  );
 }
 
 function writeAdapter(repository, options = {}) {
@@ -262,6 +293,7 @@ function writeApprovedCandidate(repository, runDirectory) {
     path.join(runDirectory, 'handoff.json'),
     JSON.stringify(handoff()),
   );
+  writePipelineInput(repository, runDirectory);
 }
 
 function commitAdapter(repository, adapterPath) {
@@ -378,6 +410,7 @@ test('attributes approved Author and Healer changes at each boundary', () => {
       path.join(runDirectory, 'handoff.json'),
       JSON.stringify(handoff()),
     );
+    writePipelineInput(repository, runDirectory);
     const checkpoint = capture(repository, 'checkpoint');
     assert.equal(checkpoint.status, 0, checkpoint.stderr);
 
@@ -876,6 +909,49 @@ test('returns unavailable when the repository has no mutation adapter', () => {
   });
 });
 
+test('does not enter mutation verification for a standalone Healer run', () => {
+  withRepository(({ repository, runDirectory }) => {
+    mkdirSync(path.join(repository, 'tests'), { recursive: true });
+    const spec = 'test("saves", async () => expect("saved").toBe("saved"));\n';
+    writeFileSync(path.join(repository, 'tests', 'account.spec.ts'), spec);
+    writeFileSync(
+      path.join(runDirectory, 'healer-input.json'),
+      JSON.stringify({
+        schema_version: 'healer-input.v1',
+        run_id: runId,
+        mode: 'standalone',
+        spec_path: 'tests/account.spec.ts',
+        starting_spec_sha256: digest(spec),
+        criteria: [
+          {
+            id: 'criterion-1',
+            outcome: 'saved profile is visible',
+            assertion_locations: ['tests/account.spec.ts:1'],
+            step_title: null,
+          },
+        ],
+        source: {
+          kind: 'human-approved-existing-spec',
+          handoff_sha256: null,
+        },
+      }),
+    );
+
+    const result = run(repository, [
+      'verify',
+      '--repo',
+      '.',
+      '--run-id',
+      runId,
+      '--criterion-id',
+      'criterion-1',
+    ]);
+
+    assert.equal(result.status, 1);
+    assert.equal(JSON.parse(result.stdout).error, 'healer-input-not-pipeline');
+  });
+});
+
 test('requires a fixed Healer result before reporting adapter absence', () => {
   withRepository(({ repository, runDirectory }) => {
     writeApprovedCandidate(repository, runDirectory);
@@ -1028,6 +1104,7 @@ test('rejects Healer changes missing from the validated repair trace', () => {
       path.join(runDirectory, 'handoff.json'),
       JSON.stringify(handoff()),
     );
+    writePipelineInput(repository, runDirectory);
     assert.equal(capture(repository, 'checkpoint').status, 0);
     writeFileSync(
       path.join(repository, 'tests', 'account.spec.ts'),

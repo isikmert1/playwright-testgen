@@ -333,7 +333,7 @@ function validateFileAccess(payload) {
         return decision('allow', 'Read is bound to the approved spec.');
       }
 
-      for (const filename of ['handoff.json', 'healer-trace.json']) {
+      for (const filename of ['healer-input.json', 'healer-trace.json']) {
         const expected = path.join(policy.runDirectory, filename);
         if (!samePath(absolute, expected)) continue;
         const canonicalExpected = path.join(
@@ -427,6 +427,7 @@ function validateFileAccess(payload) {
   const mainOwnedFiles = [
     'command-policy.json',
     'change-manifest.json',
+    'healer-input.json',
     'mutation-recovery.json',
     'vacuity-report.json',
   ];

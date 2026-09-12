@@ -7,12 +7,14 @@ const {
   realpathSync,
 } = require('node:fs');
 const path = require('node:path');
+const { loadPolicy } = require('../hooks/run-policy.cjs');
 const {
   RUN_ID,
   isInside,
   portable,
 } = require('./artifact-validation-common.cjs');
 const { validateArtifact } = require('./change-manifest.cjs');
+const { loadHealerInput } = require('./validate-healer-input.cjs');
 
 const MAX_FINDINGS_SIZE = 64 * 1024;
 
@@ -60,7 +62,7 @@ function destination(repository) {
   return path.join(directory, 'findings.md');
 }
 
-function finding(trace, handoff) {
+function finding(trace, input) {
   if (
     trace.disposition !== 'product-behavior-wrong' ||
     trace.final_classification !== 'product-behavior-wrong'
@@ -72,7 +74,7 @@ function finding(trace, handoff) {
     `## ${trace.run_id}`,
     '- classification: product-behavior-wrong',
     `- criterion_id: ${evidence.criterion_id}`,
-    `- spec_path: ${portable(handoff.spec_path)}`,
+    `- spec_path: ${portable(input.spec_path)}`,
     `- observed_behavior: ${evidence.observed_behavior}`,
     '',
   ].join('\n');
@@ -101,9 +103,14 @@ function main() {
   }
   let content;
   try {
-    const handoff = validateArtifact(repository, options.runId, 'handoff');
+    const policy = loadPolicy(repository, options.runId);
+    const input =
+      policy == null
+        ? null
+        : loadHealerInput(repository, policy, options.runId);
+    if (input == null) throw new Error('healer-input-unavailable');
     const trace = validateArtifact(repository, options.runId, 'trace');
-    content = finding(trace, handoff);
+    content = finding(trace, input);
   } catch (error) {
     fail(error.message ?? 'finding-unavailable');
     return;

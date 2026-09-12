@@ -1,8 +1,9 @@
 # Healing protocol
 
 Healer runs only after the human chooses `run`. It starts from clean context and
-reads the approved spec, original criteria, and validated Author handoff—not
-Author's reasoning transcript.
+reads the approved spec and validated Main-owned `healer-input.json`, not an
+Author reasoning transcript. The same normalized input supports pipeline and
+standalone runs.
 
 ## Contents
 
@@ -16,7 +17,9 @@ Author's reasoning transcript.
 - Confirm the repository already resolves local `playwright` and
   `@playwright/test`, and that the official global `playwright-cli` command is
   available. Never install them from this plugin.
-- Confirm the exact approved spec path and handoff. Unknown project, auth, or
+- Confirm the exact approved spec path and Healer input. Its starting digest
+  must have been validated before dispatch; later approved repairs do not erase
+  that provenance. Unknown project, auth, or
   environment choices remain unknown and route to the human.
 - When Main reports `runtime preflight: passed`, do not repeat it. Use supplied
   runner and application facts until current failure evidence contradicts one;
@@ -182,8 +185,8 @@ otherwise source changes route to Author or the product owner.
 Report the attempt count, last signature, evidence summary, classification,
 repairs, final disposition, and required next owner using the trace schema and
 the Healer role contract. `fixed` requires a passing non-debug run in the
-approved scope after the last edit and sets `next_owner` to `main` for the
-vacuity gate.
+approved scope after the last edit. It sets `next_owner` to `main` for a
+pipeline vacuity gate and `human` for a standalone run, which stops there.
 
 Assemble the complete scrubbed trace before replacing Main's declared draft.
 Make one whole-file `Write`, validate once, and use validation error codes to
