@@ -32,7 +32,9 @@ function createRepository({
   runnerTraceOption = playwrightVersion === '1.62.1' ? '--name' : '--phase',
 } = {}) {
   const fixtureRoot = mkdtempSync(path.join(tmpdir(), 'testgen-preflight-'));
-  const repository = nested ? path.join(fixtureRoot, 'repository') : fixtureRoot;
+  const repository = nested
+    ? path.join(fixtureRoot, 'repository')
+    : fixtureRoot;
   if (nested) mkdirSync(repository);
   writeJson(path.join(repository, 'package.json'), { private: true });
   for (const packageName of ['playwright', '@playwright/test']) {

@@ -18,7 +18,9 @@ const {
   exactPlaywrightFilter: policySpecFilter,
 } = require('../hooks/run-policy.cjs');
 const { operationOf } = require('../hooks/hook-result.cjs');
-const { validatePlaywright } = require('../hooks/validate-workflow-command.cjs');
+const {
+  validatePlaywright,
+} = require('../hooks/validate-workflow-command.cjs');
 
 const repositoryRoot = path.resolve(__dirname, '..');
 const hookPath = path.join(repositoryRoot, 'hooks', 'validate-bash.cjs');
@@ -873,7 +875,9 @@ test('audits approved foreground spec runs through private operation metadata', 
 });
 
 test('audits private approved-run metadata despite a revised reason', () => {
-  const temporaryRoot = mkdtempSync(path.join(tmpdir(), 'testgen-hook-reason-'));
+  const temporaryRoot = mkdtempSync(
+    path.join(tmpdir(), 'testgen-hook-reason-'),
+  );
   const temporaryHooks = path.join(temporaryRoot, 'hooks');
   const temporaryHook = path.join(temporaryHooks, 'validate-bash.cjs');
   const auditPath = path.join(temporaryRoot, 'hook-audit.jsonl');
