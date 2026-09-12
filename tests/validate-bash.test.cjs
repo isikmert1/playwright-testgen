@@ -872,6 +872,52 @@ test('audits approved foreground spec runs through private operation metadata', 
   });
 });
 
+test('audits private approved-run metadata despite a revised reason', () => {
+  const temporaryRoot = mkdtempSync(path.join(tmpdir(), 'testgen-hook-reason-'));
+  const temporaryHooks = path.join(temporaryRoot, 'hooks');
+  const temporaryHook = path.join(temporaryHooks, 'validate-bash.cjs');
+  const auditPath = path.join(temporaryRoot, 'hook-audit.jsonl');
+  const reason = 'Approved runner wording changed for an operator.';
+
+  try {
+    cpSync(path.join(repositoryRoot, 'hooks'), temporaryHooks, {
+      recursive: true,
+    });
+    writeFileSync(
+      path.join(temporaryHooks, 'validate-command.cjs'),
+      `const { decision } = require('./hook-result.cjs');\nmodule.exports = { validateCommand: () => decision('allow', '${reason}', 'approved-spec-run') };\n`,
+    );
+    const result = spawnSync(process.execPath, [temporaryHook], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        PLAYWRIGHT_TESTGEN_HOOK_AUDIT_PATH: auditPath,
+      },
+      input: JSON.stringify({
+        agent_type: 'playwright-test-healer',
+        cwd: temporaryRoot,
+        hook_event_name: 'PreToolUse',
+        tool_input: { command: 'approved runner' },
+        tool_name: 'Bash',
+        tool_use_id: 'tool-revised-reason',
+      }),
+    });
+
+    assert.equal(result.status, 0, result.stderr);
+    const output = JSON.parse(result.stdout).hookSpecificOutput;
+    assert.equal(output.permissionDecision, 'allow');
+    assert.equal(output.permissionDecisionReason, reason);
+    assert.equal(Object.hasOwn(output, 'operation'), false);
+    assert.equal(JSON.stringify(output).includes('approved-spec-run'), false);
+    assert.equal(
+      JSON.parse(readFileSync(auditPath, 'utf8')).operation,
+      'approved-spec-run',
+    );
+  } finally {
+    rmSync(temporaryRoot, { force: true, recursive: true });
+  }
+});
+
 test('requires an anchored filter for the exact approved spec', () => {
   withTargetRepository(({ targetRepository }) => {
     const output = `.playwright-cli/testgen/${runId}/attempt-2/test-results`;
