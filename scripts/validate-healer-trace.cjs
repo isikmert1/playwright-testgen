@@ -1,3 +1,5 @@
+const { createHash } = require('node:crypto');
+const { readFileSync } = require('node:fs');
 const path = require('node:path');
 const {
   CLASSIFICATIONS,
@@ -16,7 +18,7 @@ const {
   validateStringArray,
 } = require('./artifact-validation-common.cjs');
 
-function validateProductEvidence(value, handoffCriteria, errors) {
+function validateProductEvidence(value, criteria, errors) {
   if (!isObject(value)) {
     errors.push('trace-missing-product-behavior-evidence');
     return;
@@ -33,7 +35,7 @@ function validateProductEvidence(value, handoffCriteria, errors) {
   if (!isIdentifier(value.criterion_id))
     errors.push('trace-invalid-product-criterion');
   else {
-    const retainedOutcome = handoffCriteria?.get(value.criterion_id);
+    const retainedOutcome = criteria?.get(value.criterion_id);
     if (retainedOutcome == null) errors.push('trace-unknown-product-criterion');
     else if (value.required_outcome !== retainedOutcome)
       errors.push('trace-product-outcome-mismatch');
@@ -44,12 +46,20 @@ function validateProductEvidence(value, handoffCriteria, errors) {
   }
 }
 
-function validateTrace(artifact, repository, handoffCriteria, errors) {
+function validateTrace(artifact, repository, healerInput, errors) {
+  const criteria = Array.isArray(healerInput?.criteria)
+    ? new Map(
+        healerInput.criteria.map((criterion) => [
+          criterion.id,
+          criterion.outcome,
+        ]),
+      )
+    : null;
   const required = [
     'schema_version',
     'run_id',
     'spec_path',
-    'handoff_read',
+    'healer_input_read',
     'attempts',
     'repairs',
     'final_classification',
@@ -60,7 +70,7 @@ function validateTrace(artifact, repository, handoffCriteria, errors) {
   ];
   requireFields(artifact, required, errors, 'trace');
   rejectUnknown(artifact, new Set(required), errors, 'trace');
-  if (artifact.schema_version !== 'healer-trace.v1')
+  if (artifact.schema_version !== 'healer-trace.v2')
     errors.push('trace-schema-version');
   validatePath(artifact.spec_path, repository, errors, 'trace-spec');
   if (
@@ -69,7 +79,8 @@ function validateTrace(artifact, repository, handoffCriteria, errors) {
   ) {
     errors.push('trace-spec-unavailable');
   }
-  if (artifact.handoff_read !== true) errors.push('trace-handoff-not-read');
+  if (artifact.healer_input_read !== true)
+    errors.push('trace-healer-input-not-read');
   if (
     !Array.isArray(artifact.attempts) ||
     artifact.attempts.length < 1 ||
@@ -143,7 +154,7 @@ function validateTrace(artifact, repository, handoffCriteria, errors) {
       if (attempt.classification === 'product-behavior-wrong') {
         validateProductEvidence(
           attempt.product_behavior_evidence,
-          handoffCriteria,
+          criteria,
           errors,
         );
       } else if (
@@ -218,6 +229,31 @@ function validateTrace(artifact, repository, handoffCriteria, errors) {
       }
       if (!isText(repair.reason, 200))
         errors.push('trace-invalid-repair-reason');
+    }
+  }
+  if (
+    artifact.disposition === 'product-behavior-wrong' &&
+    typeof healerInput?.spec_path === 'string'
+  ) {
+    try {
+      const currentDigest = createHash('sha256')
+        .update(readFileSync(path.resolve(repository, healerInput.spec_path)))
+        .digest('hex');
+      const specRepairDeclared = artifact.repairs?.some((repair) =>
+        repair?.paths?.some(
+          (item) =>
+            typeof item === 'string' &&
+            comparableRepoPath(item) ===
+              comparableRepoPath(healerInput.spec_path),
+        ),
+      );
+      if (
+        currentDigest !== healerInput.starting_spec_sha256 &&
+        !specRepairDeclared
+      )
+        errors.push('trace-unreported-spec-change');
+    } catch {
+      // Existing path validation reports the unavailable spec.
     }
   }
   if (
@@ -308,7 +344,9 @@ function validateTrace(artifact, repository, handoffCriteria, errors) {
     errors.push('fixed-requires-confirmation');
   if (
     artifact.disposition === 'fixed' &&
-    (artifact.next_owner !== 'main' || artifact.escalation !== null)
+    (artifact.next_owner !==
+      (healerInput?.mode === 'standalone' ? 'human' : 'main') ||
+      artifact.escalation !== null)
   )
     errors.push('trace-invalid-fixed-disposition');
   if (

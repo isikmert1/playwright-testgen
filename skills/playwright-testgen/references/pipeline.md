@@ -6,6 +6,7 @@ dispositions. The workflow handles exactly one written scenario at a time.
 ## Contents
 
 - [Ownership](#ownership)
+- [Entry routing and standalone roles](#entry-routing-and-standalone-roles)
 - [Scenario discovery](#scenario-discovery)
 - [Ordered flow](#ordered-flow)
 - [Final dispositions](#final-dispositions)
@@ -41,6 +42,56 @@ Explorer. Grounding the selected scenario in feature source, nearby tests, and
 rendered behavior belongs to Author. A target descriptor may guide evaluation
 setup, but its expected outcomes and locator convention are evaluation metadata,
 not an operational profile, and must not be sent to Explorer or Author.
+
+## Entry routing and standalone roles
+
+`/testgen` routes into this full pipeline in two ways:
+
+- Blank or whitespace input starts scenario discovery. Main presents Explorer's
+  proposals for human selection, then closes discovery and starts a fresh
+  generation run.
+- Explicit input skips Explorer. Main preserves the scenario's original
+  acceptance criteria and clarifies missing route, auth, data, environment, or
+  intent facts instead of inventing them.
+
+After scenario selection, Main passes only the selected, human-approved
+scenario and relevant evidence to Author. It assigns stable criterion IDs and
+one exact spec path in the fresh generation policy; Author still grounds the
+scenario and verifies locators independently. Both entry paths reach the same
+candidate checkpoint. Scenario selection and the candidate checkpoint are
+separate human decisions: selection never authorizes spec execution or a
+mutation. At the checkpoint, `skip` never executes a test, `adjust` preserves
+the exact human feedback for Author, and only an explicit `run` dispatches
+Healer. Mutation approval remains separate. Missing adapters still produce
+`mutation-not-verified`; legitimate product or environment failures remain
+valid stopping outcomes. Never require a passing spec when correct behavior is
+refusal.
+
+The same roles have bounded standalone entry flows through an explicit
+natural-language request; no extra slash commands are needed:
+
+- Standalone Explorer returns proposals only, then Main validates the bounded
+  result, cleans its discovery scope, and stops before scenario selection.
+- Standalone Author receives one human-approved written scenario and returns
+  one validated, unexecuted spec, then Main cleans the run and stops before the
+  candidate checkpoint.
+- Standalone Healer receives one exact existing failing spec, explicit original
+  criteria and intent, and human approval to run it. Main records that intent
+  and its truthful assertion mapping in a standalone `healer-input.json`,
+  validates the starting spec digest, and creates the trace draft. Healer
+  diagnoses and may make only bounded repairs, returns a validated trace, then
+  Main cleans the run and stops before the vacuity gate or any other stage.
+
+For every standalone flow, Main is a minimal coordinator. It performs runtime
+and readiness checks, collects missing facts, creates the role's normal policy
+and required artifacts, grants only exact paths/actions, validates the result,
+and applies the same cleanup contract. Main may inspect only the exact existing
+spec when preparing standalone Healer's criterion mapping; it does not debug or
+repair. If the original criteria or a truthful required artifact cannot be
+established, stop for human input. Agents never create their own authority,
+infer missing test intent, bypass another role's ownership, or silently enter
+the full pipeline. Standalone operation preserves the same approvals, write
+limits, validation, and cleanup rules as the corresponding pipeline role.
 
 ## Scenario discovery
 
@@ -231,7 +282,7 @@ or mutation.
    - `run`: available only after lint succeeds; freeze the reviewed candidate
      and delegate `playwright-testgen:playwright-test-healer` in fresh context
      with explicit approval, the run ID, repository root, exact approved spec
-     path, original criteria, validated handoff, `runtime preflight: passed`,
+     path, validated Healer input, `runtime preflight: passed`,
      the selected trace snapshot option or explicit `unavailable`, and known
      project, config, route, auth, environment, and test-data facts.
      Before delegation, Main confirms `approved_spec` still names the reviewed
@@ -254,6 +305,15 @@ or mutation.
      capture returns the repository-state conflict to the human and blocks the
      run.
      Never pass Author's reasoning transcript.
+     Main then derives and validates the normalized pipeline input:
+
+     ```sh
+     node "$PLAYWRIGHT_TESTGEN_ROOT/scripts/create-healer-input.cjs" --repo . --run-id <run_id>
+     node "$PLAYWRIGHT_TESTGEN_ROOT/scripts/validate-testgen-artifact.cjs" --repo . --type input --run-id <run_id> .playwright-cli/testgen/<run_id>/healer-input.json
+     ```
+
+     Stop if its run, spec, starting digest, handoff digest, or criteria binding
+     fails. Healer reads this input instead of the complete Author handoff.
      Before delegation, Main writes the exact two-byte draft `{}` at
      `.playwright-cli/testgen/<run_id>/healer-trace.json` and passes that path.
      This Main-owned placeholder gives Healer's whole-file `Write` mutation
@@ -265,8 +325,8 @@ or mutation.
      spec never executed."
    - `adjust`: return the original scenario, current spec, and exact human
      feedback to Author; repeat lint, handoff, and checkpoint.
-6. Healer verifies the delegated scope, reads the approved spec, original
-   criteria, and validated handoff, then executes only that spec. It classifies
+6. Healer verifies the delegated scope, reads the approved spec and validated
+   Healer input, then executes only that spec. It classifies
    each failure, performs only permitted repairs, replaces the declared trace
    draft with the complete artifact, validates
    `.playwright-cli/testgen/<run_id>/healer-trace.json`, and stops at the
@@ -286,8 +346,8 @@ or mutation.
 7. Only a validated `fixed` trace enters Main's vacuity gate. Main does not put
    this work in `Stop` or `SubagentStop`, redispatch Healer for bookkeeping, or
    report `fixed` as the final Testgen result.
-   A valid fixed trace names `main` as `next_owner`; it never routes directly to
-   the human before this gate.
+   A valid fixed pipeline trace names `main` as `next_owner`; a standalone
+   trace names `human` and never enters this gate.
    - When the run has a change manifest, Main captures `post-healer` before
      verification. If capture fails, do not invoke the adapter; record the
      bounded capture error as behavior `error` in the vacuity report.
@@ -342,7 +402,8 @@ Do not invent replacements for either vocabulary.
 
 ## Handoff boundary
 
-The handoff JSON contains only fields defined by `artifact-contract.md`. Pass
-the approved spec and original criteria separately. Never pass Author's
-reasoning transcript to Healer. Human feedback is explicit input to a new
-Author revision, not implicit permission for Healer to reinterpret intent.
+The Author handoff and normalized Healer input contain only fields defined by
+`artifact-contract.md`. Healer receives the approved spec and input, never the
+Author reasoning transcript or a second copy of criteria. Human feedback is
+explicit input to a new Author revision, not implicit permission for Healer to
+reinterpret intent.

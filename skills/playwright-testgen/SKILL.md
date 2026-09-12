@@ -71,6 +71,29 @@ and wins when the workflows differ.
 
 ## Core flow
 
+`/testgen` has two full-pipeline entry paths. Blank or whitespace input starts
+Explorer and waits for a human-selected scenario. Explicit input skips Explorer,
+preserves its original acceptance criteria, and clarifies missing facts instead
+of inventing them. Both paths create a fresh generation run and reach the same
+candidate checkpoint. Keep scenario selection separate from `run`, `adjust`,
+or `skip`: selecting a proposal authorizes neither execution nor mutation,
+`skip` never executes the spec, `adjust` preserves exact human feedback, and
+only an explicit `run` dispatches Healer. Missing adapters still produce
+`mutation-not-verified`; product or environment failures remain valid stopping
+outcomes, and correct refusal never requires a passing spec.
+
+Explorer, Author, and Healer also support explicit standalone requests without
+entering the full pipeline. Main remains the minimal coordinator: it collects
+the role's exact scope and intent, creates its required policy and artifacts,
+delegates only that role, validates its result, applies cleanup, and stops.
+Standalone Explorer returns proposals only; standalone Author returns one
+unexecuted candidate spec; standalone Healer runs and may repair one existing
+human-approved failing spec from a validated Main-owned Healer input, then
+stops without a vacuity stage. No role creates its own authority, infers missing
+test intent, bypasses another role's ownership, or silently starts an earlier
+or later stage. Use natural-language standalone requests; do not add parallel
+slash-command aliases.
+
 Keep writes single-threaded. When scenario discovery is requested, Main creates
 a read-only discovery policy and delegates
 `playwright-testgen:playwright-test-explorer`. Explorer returns up to five
@@ -86,8 +109,8 @@ validates the spec, emits its handoff, and stops without running the test. A hum
 chooses `run`, `skip`, or `adjust`; never auto-advance. `skip` ends with the spec
 unverified, `adjust` returns the scenario to Author, and only `run` lets Main
 delegate a fresh-context `playwright-testgen:playwright-test-healer` with the
-run ID, repository root, exact approved spec, original criteria, validated
-handoff, passed-preflight fact, approved spec-filter argument, and known runner,
+run ID, repository root, exact approved spec, validated Healer input,
+passed-preflight fact, approved spec-filter argument, and known runner,
 route, auth, environment, and data facts. Healer
 executes, diagnoses, makes bounded repairs, and reports its trace; Main never
 performs Healer work. A validated `fixed` trace enters Main's vacuity gate:
@@ -112,6 +135,6 @@ create a second routing layer.
 - [locator-policy.md](references/locator-policy.md) — Read this when choosing, verifying, or changing any locator.
 - [failure-taxonomy.md](references/failure-taxonomy.md) — Read this when a run fails, before assigning its cause, remedy, or next owner.
 - [healing-protocol.md](references/healing-protocol.md) — Read this when Healer is authorized to run or debug a spec, and before repairing a failure.
-- [artifact-contract.md](references/artifact-contract.md) — Main reads this before starting Author and when validating or consuming an Author handoff or Healer trace.
+- [artifact-contract.md](references/artifact-contract.md) — Main reads this before starting Author and when validating or consuming an Author handoff, Healer input, or Healer trace.
 - [mutation-check.md](references/mutation-check.md) — Read this before approving any mutation adapter, and after a fixed Healer result to run the approved mutation or record that verification is unavailable.
 - [cleanup-contract.md](references/cleanup-contract.md) — Read this when browser sessions or scratch artifacts may be created, and before any exit path.

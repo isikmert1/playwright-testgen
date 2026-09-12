@@ -44,6 +44,15 @@ operating-system sandbox.
 See [Architecture](docs/architecture.md) for component ownership, runtime and
 artifact boundaries, and release rules.
 
+## Use
+
+- `/testgen` discovers scenarios, waits for one selection, then enters the
+  one-scenario pipeline.
+- `/testgen "<scenario>"` skips discovery and starts from that written intent.
+- A natural-language request may run Explorer, Author, or Healer alone. A
+  standalone Healer can repair one existing human-approved failing spec and
+  stops without starting generation or mutation verification.
+
 ## Current status
 
 The implemented workflow has been exercised through clean marketplace

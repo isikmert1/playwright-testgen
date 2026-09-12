@@ -28,6 +28,7 @@ const {
   portable,
 } = require('./artifact-validation-common.cjs');
 const { MutationCheckError } = require('./mutation-check-error.cjs');
+const { loadHealerInput } = require('./validate-healer-input.cjs');
 const {
   captureSnapshot,
   currentHead,
@@ -391,6 +392,8 @@ async function verifyMutation(
   if (existsSync(recoveryRecordPath(policy)))
     fail('isolation-recovery-pending');
   if (!isIdentifier(criterionId)) fail('criterion-id-invalid');
+  const healerInput = loadHealerInput(repository, policy, runId);
+  if (healerInput?.mode !== 'pipeline') fail('healer-input-not-pipeline');
   const handoff = validateArtifact(repository, runId, 'handoff');
   const trace = validateArtifact(repository, runId, 'trace');
   if (trace.disposition !== 'fixed') fail('trace-not-fixed');

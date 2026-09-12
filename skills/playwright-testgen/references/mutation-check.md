@@ -127,8 +127,10 @@ verification, then remove it with run scratch under `cleanup-contract.md`.
 ## Verification
 
 After Healer stops, Main runs verification only for a schema-valid `fixed`
-trace and a criterion retained in the validated handoff. With an approved
-adapter, run this after all three change-manifest boundaries are valid:
+pipeline trace and a criterion retained in the validated Healer input. The
+validated Author handoff remains required for Author change attribution. With
+an approved adapter, run this after all three change-manifest boundaries are
+valid:
 
 ```sh
 node "$PLAYWRIGHT_TESTGEN_ROOT/scripts/mutation-check.cjs" verify --repo . --run-id <run_id> --adapter <manifest> --mutation-id <mutation_id> --criterion-id <criterion_id> --approval-digest <sha256>

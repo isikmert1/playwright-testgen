@@ -41,10 +41,13 @@ const CRITICAL_PLUGIN_FILES = [
   'hooks/validate-access.cjs',
   'hooks/validate-bash.cjs',
   'hooks/validate-command.cjs',
-  'schemas/healer-trace.v1.schema.json',
+  'schemas/healer-input.v1.schema.json',
+  'schemas/healer-trace.v2.schema.json',
+  'scripts/create-healer-input.cjs',
   'scripts/print-approved-spec-filter.cjs',
   'scripts/runtime-preflight.cjs',
   'scripts/validate-healer-trace.cjs',
+  'scripts/validate-healer-input.cjs',
   'scripts/validate-testgen-artifact.cjs',
   'skills/playwright-testgen/SKILL.md',
   'skills/playwright-testgen/references/healing-protocol.md',
@@ -160,12 +163,10 @@ function buildHealerPrompt(definition, runtime) {
     `approved spec: ${definition.spec_path}`,
     `approved spec filter: ${runtime.approved_spec_filter}`,
     'approved project/config options: none',
-    `validated handoff: .playwright-cli/testgen/${runtime.run_id}/handoff.json`,
+    `validated Healer input: .playwright-cli/testgen/${runtime.run_id}/healer-input.json`,
     `trace draft: .playwright-cli/testgen/${runtime.run_id}/healer-trace.json (exact current contents: {})`,
     'Read that exact trace draft once immediately before replacing it with one whole-file Write.',
     `origin: ${runtime.origin}`,
-    `scenario_ref: ${definition.scenario_ref}`,
-    `criterion ${definition.criterion.id}: ${definition.criterion.outcome}`,
     `trace snapshot option: ${runtime.trace_snapshot_option ?? 'unavailable'}`,
     'The application and runner browser are ready. Each Bash call starts at the repository root. Execute only the approved spec, diagnose from current-run evidence, preserve the criterion, write and validate the complete Healer trace, then stop.',
   ].join('\n');
@@ -1304,41 +1305,64 @@ function writeRunArtifacts(definition, repository, runId, traceSnapshotOption) {
       trace_snapshot_option: traceSnapshotOption,
     }),
   );
+  const handoff = {
+    schema_version: 'author-handoff.v1',
+    run_id: runId,
+    scenario_ref: definition.scenario_ref,
+    spec_path: definition.spec_path,
+    criteria: [
+      {
+        id: definition.criterion.id,
+        step_title: definition.criterion.step_title,
+        assertion_location: `${definition.spec_path}:${assertionLine}`,
+        outcome: definition.criterion.outcome,
+      },
+    ],
+    locators: [
+      {
+        purpose: 'submit the order form',
+        locator: "getByRole('button', { name: 'Add order' })",
+        strategy: 'role',
+        live_count: 1,
+        visible: true,
+      },
+    ],
+    test_id_convention: 'none-found',
+    test_id_additions: [],
+    lint: {
+      command: 'Playwright collection check for the approved spec',
+      status: 'pass',
+      diagnostics: [],
+    },
+    test_data_strategy: 'isolated in-memory target with one owned order',
+    touched_paths: [definition.spec_path],
+    assumptions: ['The application and runner browser are ready.'],
+    open_questions: [],
+  };
+  const handoffBytes = Buffer.from(JSON.stringify(handoff));
+  writeFileSync(path.join(runDirectory, 'handoff.json'), handoffBytes);
   writeFileSync(
-    path.join(runDirectory, 'handoff.json'),
+    path.join(runDirectory, 'healer-input.json'),
     JSON.stringify({
-      schema_version: 'author-handoff.v1',
+      schema_version: 'healer-input.v1',
       run_id: runId,
-      scenario_ref: definition.scenario_ref,
+      mode: 'pipeline',
       spec_path: definition.spec_path,
+      starting_spec_sha256: hashFile(
+        path.join(repository, definition.spec_path),
+      ),
       criteria: [
         {
           id: definition.criterion.id,
-          step_title: definition.criterion.step_title,
-          assertion_location: `${definition.spec_path}:${assertionLine}`,
           outcome: definition.criterion.outcome,
+          assertion_locations: [`${definition.spec_path}:${assertionLine}`],
+          step_title: definition.criterion.step_title,
         },
       ],
-      locators: [
-        {
-          purpose: 'submit the order form',
-          locator: "getByRole('button', { name: 'Add order' })",
-          strategy: 'role',
-          live_count: 1,
-          visible: true,
-        },
-      ],
-      test_id_convention: 'none-found',
-      test_id_additions: [],
-      lint: {
-        command: 'Playwright collection check for the approved spec',
-        status: 'pass',
-        diagnostics: [],
+      source: {
+        kind: 'author-handoff',
+        handoff_sha256: createHash('sha256').update(handoffBytes).digest('hex'),
       },
-      test_data_strategy: 'isolated in-memory target with one owned order',
-      touched_paths: [definition.spec_path],
-      assumptions: ['The application and runner browser are ready.'],
-      open_questions: [],
     }),
   );
   writeFileSync(path.join(runDirectory, 'healer-trace.json'), '{}');
@@ -1779,6 +1803,14 @@ async function evaluateInstalledHealer(signal) {
       'handoff',
       runId,
       path.join(runDirectory, 'handoff.json'),
+      signal,
+    );
+    await validateArtifact(
+      installed.installPath,
+      state.repository,
+      'input',
+      runId,
+      path.join(runDirectory, 'healer-input.json'),
       signal,
     );
     await verifyInstalledHook(

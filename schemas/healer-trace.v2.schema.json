@@ -1,14 +1,14 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "playwright-testgen/healer-trace.v1",
-  "title": "Healer trace v1",
+  "$id": "playwright-testgen/healer-trace.v2",
+  "title": "Healer trace v2",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "schema_version",
     "run_id",
     "spec_path",
-    "handoff_read",
+    "healer_input_read",
     "attempts",
     "repairs",
     "final_classification",
@@ -18,10 +18,10 @@
     "cleanup"
   ],
   "properties": {
-    "schema_version": { "const": "healer-trace.v1" },
+    "schema_version": { "const": "healer-trace.v2" },
     "run_id": { "type": "string", "pattern": "^tg-[a-f0-9]{24}$" },
     "spec_path": { "type": "string", "minLength": 1, "maxLength": 240 },
-    "handoff_read": { "const": true },
+    "healer_input_read": { "const": true },
     "attempts": {
       "type": "array",
       "minItems": 1,

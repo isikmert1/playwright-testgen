@@ -20,9 +20,14 @@ const {
   validateHandoff,
 } = require('./validate-author-handoff.cjs');
 const { validateTrace } = require('./validate-healer-trace.cjs');
+const {
+  loadHealerInput,
+  validateHealerInput,
+} = require('./validate-healer-input.cjs');
 
 const ARTIFACT_FILENAMES = {
   handoff: 'handoff.json',
+  input: 'healer-input.json',
   trace: 'healer-trace.json',
   vacuity: 'vacuity-report.json',
 };
@@ -160,21 +165,22 @@ function main() {
   let trace = null;
   if (options.type === 'handoff') {
     validateHandoff(artifact, repository, errors);
+  } else if (options.type === 'input') {
+    validateHealerInput(artifact, repository, runPolicy, errors);
   } else {
-    const handoffCriteria = loadHandoffCriteria(
-      repository,
-      runPolicy,
-      options.runId,
-    );
-    if (handoffCriteria == null)
-      errors.push(
-        options.type === 'trace'
-          ? 'trace-handoff-unavailable'
-          : 'report-handoff-unavailable',
-      );
+    const healerInput = loadHealerInput(repository, runPolicy, options.runId);
+    if (healerInput == null) errors.push('healer-input-unavailable');
     if (options.type === 'trace')
-      validateTrace(artifact, repository, handoffCriteria, errors);
+      validateTrace(artifact, repository, healerInput, errors);
     else {
+      const handoffCriteria = loadHandoffCriteria(
+        repository,
+        runPolicy,
+        options.runId,
+      );
+      if (healerInput?.mode !== 'pipeline')
+        errors.push('report-healer-input-not-pipeline');
+      if (handoffCriteria == null) errors.push('report-handoff-unavailable');
       try {
         trace = require('./change-manifest.cjs').validateArtifact(
           repository,
@@ -201,7 +207,9 @@ function main() {
     artifact_path: portable(path.relative(repository, realArtifact)),
     ...(options.type === 'handoff'
       ? {}
-      : { summary: artifactSummary(options.type, artifact, trace) }),
+      : options.type === 'input'
+        ? { mode: artifact.mode }
+        : { summary: artifactSummary(options.type, artifact, trace) }),
   });
 }
 
