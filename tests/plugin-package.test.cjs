@@ -38,6 +38,20 @@ test('marketplace entry points to this plugin', () => {
   assert.equal(entry.description, plugin.description);
 });
 
+test('keeps release version metadata synchronized', () => {
+  const version = '0.1.0';
+  const plugin = readJson('.claude-plugin/plugin.json');
+  const marketplace = readJson('.claude-plugin/marketplace.json');
+  const packageJson = readJson('package.json');
+  const packageLock = readJson('package-lock.json');
+
+  assert.equal(plugin.version, version);
+  assert.equal(marketplace.plugins[0].version, version);
+  assert.equal(packageJson.version, version);
+  assert.equal(packageLock.version, version);
+  assert.equal(packageLock.packages[''].version, version);
+});
+
 test('tooling package does not install Playwright', () => {
   const packageJson = readJson('package.json');
   const packageLock = readJson('package-lock.json');
