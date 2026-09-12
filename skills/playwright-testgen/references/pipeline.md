@@ -223,6 +223,7 @@ evaluation metadata, not an operational profile, and must not be sent to Author.
    Record a recorder failure separately, then remove only
    `.playwright-cli/testgen/<run_id>`. Other nonfixed outcomes never create a
    finding.
+
 7. Only a validated `fixed` trace enters Main's vacuity gate. Main does not put
    this work in `Stop` or `SubagentStop`, redispatch Healer for bookkeeping, or
    report `fixed` as the final Testgen result.
