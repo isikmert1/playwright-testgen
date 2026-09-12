@@ -218,6 +218,27 @@ test('does not append a finding past the ledger limit', () => {
   });
 });
 
+test('recognizes a duplicate in a full valid findings ledger', () => {
+  withRepository((repository) => {
+    const destination = path.join(
+      repository,
+      '.playwright-cli',
+      'testgen',
+      'findings.md',
+    );
+    assert.equal(run(repository, 'approved').status, 0);
+    const finding = readFileSync(destination, 'utf8');
+    const fullLedger = `${'x'.repeat(64 * 1024 - Buffer.byteLength(finding) - 1)}\n${finding}`;
+    writeFileSync(destination, fullLedger);
+
+    const result = run(repository, 'approved');
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).duplicate, true);
+    assert.equal(readFileSync(destination, 'utf8'), fullLedger);
+  });
+});
+
 test('does not treat an embedded run heading as a duplicate', () => {
   withRepository((repository) => {
     const destination = path.join(
