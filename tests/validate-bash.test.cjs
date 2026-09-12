@@ -17,6 +17,8 @@ const { parse } = require('shell-quote');
 const {
   exactPlaywrightFilter: policySpecFilter,
 } = require('../hooks/run-policy.cjs');
+const { operationOf } = require('../hooks/hook-result.cjs');
+const { validatePlaywright } = require('../hooks/validate-workflow-command.cjs');
 
 const repositoryRoot = path.resolve(__dirname, '..');
 const hookPath = path.join(repositoryRoot, 'hooks', 'validate-bash.cjs');
@@ -71,6 +73,7 @@ function runToolHook(
   toolInput,
   agentType = 'playwright-test-author',
   environment = {},
+  toolUseId,
 ) {
   const result = spawnSync(process.execPath, [hookPath], {
     encoding: 'utf8',
@@ -81,6 +84,7 @@ function runToolHook(
       hook_event_name: 'PreToolUse',
       tool_input: toolInput,
       tool_name: toolName,
+      tool_use_id: toolUseId,
     }),
   });
 
@@ -803,6 +807,68 @@ test('allows one scoped Playwright debug attempt', () => {
     );
 
     assert.equal(result.permissionDecision, 'allow');
+  });
+});
+
+test('audits approved foreground spec runs through private operation metadata', () => {
+  withTargetRepository(({ targetRepository }) => {
+    const auditRoot = mkdtempSync(path.join(tmpdir(), 'testgen-hook-audit-'));
+    const auditPath = path.join(auditRoot, 'hook-audit.jsonl');
+    const output = `.playwright-cli/testgen/${runId}/attempt-2/test-results`;
+    const command = runnerCommand(targetRepository, output);
+
+    try {
+      const result = runToolHook(
+        targetRepository,
+        'Bash',
+        { command },
+        'playwright-test-healer',
+        { PLAYWRIGHT_TESTGEN_HOOK_AUDIT_PATH: auditPath },
+        'tool-approved-spec-run',
+      );
+
+      assert.equal(result.permissionDecision, 'allow');
+      assert.equal(JSON.stringify(result).includes('approved-spec-run'), false);
+      assert.equal(
+        JSON.parse(readFileSync(auditPath, 'utf8')).operation,
+        'approved-spec-run',
+      );
+
+      const privateResult = validatePlaywright(
+        targetRepository,
+        ['PLAYWRIGHT_HTML_OPEN=never'],
+        [
+          'test',
+          exactSpecFilter(targetRepository),
+          '--retries=0',
+          '--repeat-each=1',
+          `--output=.playwright-cli/testgen/${runId}/attempt-3/test-results`,
+        ],
+        {},
+      );
+      assert.equal(operationOf(privateResult), 'approved-spec-run');
+      assert.equal(
+        JSON.stringify(privateResult).includes('approved-spec-run'),
+        false,
+      );
+
+      const debugResult = validatePlaywright(
+        targetRepository,
+        ['PLAYWRIGHT_HTML_OPEN=never'],
+        [
+          'test',
+          exactSpecFilter(targetRepository),
+          '--debug=cli',
+          '--retries=0',
+          '--repeat-each=1',
+          `--output=.playwright-cli/testgen/${runId}/attempt-4/test-results`,
+        ],
+        { run_in_background: true },
+      );
+      assert.equal(operationOf(debugResult), 'other');
+    } finally {
+      rmSync(auditRoot, { force: true, recursive: true });
+    }
   });
 });
 

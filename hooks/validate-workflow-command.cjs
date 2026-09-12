@@ -493,6 +493,7 @@ function validatePlaywright(cwd, assignments, args, toolInput) {
   return decision(
     'allow',
     debugging ? APPROVED_DEBUG_RUNNER_REASON : APPROVED_RUNNER_REASON,
+    debugging ? 'other' : 'approved-spec-run',
   );
 }
 
@@ -701,7 +702,6 @@ function validateArtifactValidator(cwd, args, agentType) {
 }
 
 module.exports = {
-  APPROVED_RUNNER_REASON,
   pluginValidatorPath,
   validateArtifactValidator,
   validateCleanup,
