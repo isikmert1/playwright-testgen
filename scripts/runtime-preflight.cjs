@@ -112,6 +112,16 @@ function readPackage(requireFromRepository, name, error) {
   return { manifest, path: realpathSync(filename), version: manifest.version };
 }
 
+function isWithin(root, target) {
+  const relative = path.relative(root, target);
+  return (
+    relative === '' ||
+    (!relative.startsWith(`..${path.sep}`) &&
+      relative !== '..' &&
+      !path.isAbsolute(relative))
+  );
+}
+
 function sameFileContents(left, right) {
   const digest = (filename) =>
     createHash('sha256').update(readFileSync(filename)).digest('hex');
@@ -196,11 +206,14 @@ function runtimePreflight(options) {
     'playwright',
     'playwright-unavailable',
   );
+  if (!isWithin(repository, playwright.path)) fail('playwright-unavailable');
   const playwrightTest = readPackage(
     requireFromRepository,
     '@playwright/test',
     'playwright-test-unavailable',
   );
+  if (!isWithin(repository, playwrightTest.path))
+    fail('playwright-test-unavailable');
   if (playwright.version !== playwrightTest.version)
     fail('playwright-version-mismatch');
 
