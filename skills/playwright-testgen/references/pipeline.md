@@ -212,7 +212,17 @@ evaluation metadata, not an operational profile, and must not be sent to Author.
    draft with the complete artifact, validates
    `.playwright-cli/testgen/<run_id>/healer-trace.json`, and stops at the
    healing limits. Main validates the retained trace. A nonfixed disposition
-   bypasses the vacuity gate and remains the run's final disposition.
+   bypasses the vacuity gate and remains the run's final disposition. After
+   reporting and human acceptance of `product-behavior-wrong`, Main asks once
+   whether to save the sanitized finding, then runs exactly:
+
+   ```sh
+   node "$PLAYWRIGHT_TESTGEN_ROOT/scripts/record-testgen-finding.cjs" --repo . --run-id <run_id> --decision <approved|declined>
+   ```
+
+   Record a recorder failure separately, then remove only
+   `.playwright-cli/testgen/<run_id>`. Other nonfixed outcomes never create a
+   finding.
 7. Only a validated `fixed` trace enters Main's vacuity gate. Main does not put
    this work in `Stop` or `SubagentStop`, redispatch Healer for bookkeeping, or
    report `fixed` as the final Testgen result.

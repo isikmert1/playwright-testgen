@@ -89,7 +89,10 @@ separate execution and mutation-verification summary plus its derived
 disposition. Without an adapter, record mutation verification as unavailable;
 unless a separate assertion-sensitivity check ran, its status is `not-run`.
 Skipped runs remain `generated-unverified`; nonfixed runs keep their Healer
-disposition. Both bypass this gate.
+disposition. Both bypass this gate. After reporting and human acceptance of a
+validated `product-behavior-wrong` result, Main asks once whether to save its
+sanitized finding, then runs `record-testgen-finding.cjs` with that exact
+`approved` or `declined` decision before removing only the run directory.
 
 ## Reference loading
 
