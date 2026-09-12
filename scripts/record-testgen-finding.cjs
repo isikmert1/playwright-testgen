@@ -125,7 +125,10 @@ function main() {
     if (metadata != null) {
       if (!metadata.isFile() || !isInside(repository, realpathSync(findings)))
         throw new Error('findings-unavailable');
-      if (metadata.size > MAX_FINDINGS_SIZE)
+      if (
+        metadata.size > MAX_FINDINGS_SIZE ||
+        metadata.size + Buffer.byteLength(content) > MAX_FINDINGS_SIZE
+      )
         throw new Error('findings-too-large');
       const headings = readFileSync(findings, 'utf8').split(/\r?\n/u);
       if (headings.includes(`## ${options.runId}`)) {

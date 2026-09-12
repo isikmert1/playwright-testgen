@@ -197,6 +197,27 @@ test('rejects an oversized existing findings ledger', () => {
   });
 });
 
+test('does not append a finding past the ledger limit', () => {
+  withRepository((repository) => {
+    const destination = path.join(
+      repository,
+      '.playwright-cli',
+      'testgen',
+      'findings.md',
+    );
+    const existing = 'x'.repeat(64 * 1024 - 1);
+    writeFileSync(destination, existing);
+
+    const first = run(repository, 'approved');
+    const second = run(repository, 'approved');
+
+    assert.equal(first.status, 1);
+    assert.match(first.stderr, /findings-too-large/);
+    assert.equal(second.status, 1);
+    assert.equal(readFileSync(destination, 'utf8'), existing);
+  });
+});
+
 test('does not treat an embedded run heading as a duplicate', () => {
   withRepository((repository) => {
     const destination = path.join(
