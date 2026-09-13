@@ -345,18 +345,15 @@ test('workflow guidance removes avoidable pre-Author ambiguity', () => {
 });
 
 test('ships bounded Explorer discovery as a transient human decision', () => {
+  const scenarioSourcingPath = path.join(
+    repositoryRoot,
+    'skills',
+    'playwright-testgen',
+    'references',
+    'scenario-sourcing.md',
+  );
   const explorer = readFileSync(
     path.join(repositoryRoot, 'agents', 'playwright-test-explorer.md'),
-    'utf8',
-  );
-  const pipeline = readFileSync(
-    path.join(
-      repositoryRoot,
-      'skills',
-      'playwright-testgen',
-      'references',
-      'pipeline.md',
-    ),
     'utf8',
   );
   const artifactContract = readFileSync(
@@ -370,6 +367,9 @@ test('ships bounded Explorer discovery as a transient human decision', () => {
     'utf8',
   );
 
+  assert.equal(existsSync(scenarioSourcingPath), true);
+  const scenarioSourcing = readFileSync(scenarioSourcingPath, 'utf8');
+
   assert.match(explorer, /tools: Bash, Glob, Grep, Read/iu);
   assert.match(explorer, /90 seconds.*ten source\/test `Read` calls/isu);
   assert.match(explorer, /agent-enforced.*hooks.*do not count/isu);
@@ -381,11 +381,15 @@ test('ships bounded Explorer discovery as a transient human decision', () => {
     /Live output proves what rendered, not what the product intended/iu,
   );
   assert.match(explorer, /`no supported proposal`/iu);
-  assert.match(pipeline, /policy_kind.*discovery/isu);
-  assert.match(pipeline, /agent-enforced.*hooks.*do not count/isu);
+  assert.match(scenarioSourcing, /policy_kind.*discovery/isu);
+  assert.match(scenarioSourcing, /agent-enforced.*hooks.*do not count/isu);
   assert.match(
-    pipeline,
-    /Selection never approves a spec path, execution,\s+or mutation/iu,
+    scenarioSourcing,
+    /Selection never approves a spec path,\s+execution,\s+or mutation/iu,
+  );
+  assert.match(
+    scenarioSourcing,
+    /Standalone Explorer.*stops before scenario selection/isu,
   );
   assert.match(artifactContract, /transient, untrusted discovery output/iu);
 });
@@ -414,24 +418,111 @@ test('ships one command with explicit and discovery entry paths', () => {
   );
 
   const command = readFileSync(commandPath, 'utf8');
-  for (const content of [command, skill, pipeline]) {
-    assert.match(content, /blank|whitespace/iu);
-    assert.match(content, /Explorer/iu);
-    assert.match(content, /original\s+acceptance\s+criteria/iu);
-    assert.match(content, /run.*adjust.*skip/isu);
-    assert.match(content, /only.*explicit.*`run`.*Healer/isu);
-    assert.match(content, /mutation-not-verified/iu);
-    assert.match(content, /product.*environment.*stopping/isu);
-  }
-
   assert.match(command, /\$ARGUMENTS/u);
+  assert.match(command, /blank|whitespace.*Explorer/isu);
+  assert.match(command, /original\s+acceptance\s+criteria/iu);
   assert.match(command, /(?:missing facts.*clarif|clarif.*missing facts)/isu);
+  assert.match(command, /run.*adjust.*skip/isu);
+
+  assert.match(skill, /pipeline\.md.*generation workflow/isu);
+  assert.match(
+    skill,
+    /scenario-sourcing\.md.*Explorer.*standalone.*multi-scenario/isu,
+  );
+  assert.match(
+    skill,
+    /Do not load it.*explicit single-scenario.*standalone Author or Healer/isu,
+  );
+  assert.match(skill, /standalone.*full pipeline/isu);
+
   assert.match(pipeline, /scenario selection.*candidate checkpoint/isu);
   assert.match(pipeline, /selection never authorizes.*execution.*mutation/isu);
-  assert.match(pipeline, /standalone Explorer.*proposals only/isu);
+  assert.match(pipeline, /only.*explicit.*`run`.*Healer/isu);
+  assert.match(pipeline, /mutation-not-verified/iu);
+  assert.match(pipeline, /product.*environment.*stopping/isu);
   assert.match(pipeline, /standalone Author.*unexecuted spec/isu);
   assert.match(pipeline, /standalone Healer.*existing failing spec/isu);
   assert.match(pipeline, /minimal coordinator.*policy.*artifacts/isu);
   assert.match(pipeline, /never require.*passing spec.*refusal/isu);
-  assert.match(skill, /standalone.*full pipeline/isu);
+});
+
+test('ships a sequential multi-scenario queue around the existing flow', () => {
+  const command = readFileSync(
+    path.join(repositoryRoot, 'commands', 'testgen.md'),
+    'utf8',
+  );
+  const skill = readFileSync(
+    path.join(repositoryRoot, 'skills', 'playwright-testgen', 'SKILL.md'),
+    'utf8',
+  );
+  const pipeline = readFileSync(
+    path.join(
+      repositoryRoot,
+      'skills',
+      'playwright-testgen',
+      'references',
+      'pipeline.md',
+    ),
+    'utf8',
+  );
+  const scenarioSourcingPath = path.join(
+    repositoryRoot,
+    'skills',
+    'playwright-testgen',
+    'references',
+    'scenario-sourcing.md',
+  );
+  const cleanup = readFileSync(
+    path.join(
+      repositoryRoot,
+      'skills',
+      'playwright-testgen',
+      'references',
+      'cleanup-contract.md',
+    ),
+    'utf8',
+  );
+
+  assert.equal(existsSync(scenarioSourcingPath), true);
+  const scenarioSourcing = readFileSync(scenarioSourcingPath, 'utf8');
+
+  assert.match(command, /select one or more/iu);
+  assert.match(command, /`skip`.*current scenario.*batch cancellation/isu);
+  assert.match(skill, /one active scenario.*no shared mutable run policy/isu);
+  assert.match(pipeline, /one active scenario.*ordered flow/isu);
+  assert.doesNotMatch(
+    pipeline,
+    /^## (?:Scenario discovery|Sequential scenario queue)$/gmu,
+  );
+  assert.doesNotMatch(pipeline, /"policy_kind": "discovery"/u);
+
+  assert.match(
+    scenarioSourcing,
+    /before Author writes.*duplicate scenarios.*path collisions/isu,
+  );
+  assert.match(
+    scenarioSourcing,
+    /fresh run ID.*criterion mapping.*policy.*handoff.*Healer input.*trace.*spec path/isu,
+  );
+  assert.match(
+    scenarioSourcing,
+    /then-current checkout.*earlier approved.*spec/isu,
+  );
+  assert.match(scenarioSourcing, /independent test data.*approved\s+reset/isu);
+  assert.match(scenarioSourcing, /`skip`.*current scenario.*`not-started`/isu);
+  assert.match(
+    scenarioSourcing,
+    /product.*environment.*authentication.*unresolved healing.*verification.*cleanup.*pause/isu,
+  );
+  assert.match(
+    scenarioSourcing,
+    /cleanup failure.*pause.*before activating the next scenario/isu,
+  );
+  assert.match(scenarioSourcing, /execution.*mutation approval.*never carr/isu);
+  assert.match(
+    scenarioSourcing,
+    /final summary.*disposition.*attempts.*mutation coverage.*unresolved owner/isu,
+  );
+  assert.match(cleanup, /before activating the next scenario/iu);
+  assert.match(cleanup, /preserve.*completed.*spec/isu);
 });

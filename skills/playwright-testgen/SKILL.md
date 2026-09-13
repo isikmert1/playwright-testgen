@@ -1,14 +1,14 @@
 ---
 name: playwright-testgen
-description: Use when discovering Playwright scenarios, turning one written scenario into a grounded end-to-end spec, or running and repairing a spec produced by that workflow.
+description: Use when discovering Playwright scenarios, turning human-approved scenarios into grounded end-to-end specs, or running and repairing a spec produced by that workflow.
 license: Apache-2.0
 ---
 
 # Playwright Testgen
 
-Produce one grounded Playwright spec from one written scenario, then verify it
-without weakening its intent. Source explains intended behavior; the running
-application proves what actually renders.
+Produce grounded Playwright specs from one or more human-approved scenarios,
+then verify each without weakening its intent. Source explains intended
+behavior; the running application proves what actually renders.
 
 ## Runtime boundary
 
@@ -71,59 +71,25 @@ and wins when the workflows differ.
 
 ## Core flow
 
-`/testgen` has two full-pipeline entry paths. Blank or whitespace input starts
-Explorer and waits for a human-selected scenario. Explicit input skips Explorer,
-preserves its original acceptance criteria, and clarifies missing facts instead
-of inventing them. Both paths create a fresh generation run and reach the same
-candidate checkpoint. Keep scenario selection separate from `run`, `adjust`,
-or `skip`: selecting a proposal authorizes neither execution nor mutation,
-`skip` never executes the spec, `adjust` preserves exact human feedback, and
-only an explicit `run` dispatches Healer. Missing adapters still produce
-`mutation-not-verified`; product or environment failures remain valid stopping
-outcomes, and correct refusal never requires a passing spec.
+Main coordinates; Explorer proposes, Author writes, Healer runs and repairs,
+and the human owns every selection and checkpoint. Keep writes single-threaded,
+one active scenario, and no shared mutable run policy. Never auto-advance:
+scenario selection authorizes neither execution nor mutation, and only an
+explicit `run` at the candidate checkpoint dispatches Healer.
+
+`/testgen` with an explicit scenario skips Explorer and preserves the original
+criteria. Blank input uses Explorer; multiple selections form a sequential
+queue whose approvals, artifacts, result, and cleanup remain scenario-scoped.
+The detailed generation workflow and stopping outcomes live in `pipeline.md`.
 
 Explorer, Author, and Healer also support explicit standalone requests without
-entering the full pipeline. Main remains the minimal coordinator: it collects
-the role's exact scope and intent, creates its required policy and artifacts,
-delegates only that role, validates its result, applies cleanup, and stops.
-Standalone Explorer returns proposals only; standalone Author returns one
-unexecuted candidate spec; standalone Healer runs and may repair one existing
-human-approved failing spec from a validated Main-owned Healer input, then
-stops without a vacuity stage. No role creates its own authority, infers missing
-test intent, bypasses another role's ownership, or silently starts an earlier
-or later stage. Use natural-language standalone requests; do not add parallel
-slash-command aliases.
-
-Keep writes single-threaded. When scenario discovery is requested, Main creates
-a read-only discovery policy and delegates
-`playwright-testgen:playwright-test-explorer`. Explorer returns up to five
-evidence-backed proposals without writing or running tests. Main validates the
-bounded proposal fields, presents them for human selection, then closes
-discovery and creates a fresh generation run. Never pass evaluation answers,
-mutation expectations, or unselected proposal content downstream.
-
-After one scenario is written or selected, Main delegates the Author stage to
-`playwright-testgen:playwright-test-author`; Main never performs Author work.
-Author grounds the scenario, explores the running application, writes and
-validates the spec, emits its handoff, and stops without running the test. A human then
-chooses `run`, `skip`, or `adjust`; never auto-advance. `skip` ends with the spec
-unverified, `adjust` returns the scenario to Author, and only `run` lets Main
-delegate a fresh-context `playwright-testgen:playwright-test-healer` with the
-run ID, repository root, exact approved spec, validated Healer input,
-passed-preflight fact, approved spec-filter argument, and known runner,
-route, auth, environment, and data facts. Healer
-executes, diagnoses, makes bounded repairs, and reports its trace; Main never
-performs Healer work. A validated `fixed` trace enters Main's vacuity gate:
-Main runs one approved criterion-linked product mutation when available,
-writes and validates `vacuity-report.json`, then reports the validator's
-separate execution and mutation-verification summary plus its derived
-disposition. Without an adapter, record mutation verification as unavailable;
-unless a separate assertion-sensitivity check ran, its status is `not-run`.
-Skipped runs remain `generated-unverified`; nonfixed runs keep their Healer
-disposition. Both bypass this gate. After reporting and human acceptance of a
-validated `product-behavior-wrong` result, Main asks once whether to save its
-sanitized finding, then runs `record-testgen-finding.cjs` with that exact
-`approved` or `declined` decision before removing only the run directory.
+entering the full pipeline. Main remains the minimal coordinator: it establishes
+intent and readiness, creates the role's policy and artifacts, validates the
+result, applies cleanup, and stops. Standalone Explorer returns proposals only;
+standalone Author returns one unexecuted candidate spec; standalone Healer may
+repair one human-approved existing failing spec and stops without a vacuity
+stage. No role creates its own authority, infers missing intent, or silently
+starts another stage.
 
 ## Reference loading
 
@@ -131,6 +97,7 @@ Load references only when their condition applies. Do not bulk-read them or
 create a second routing layer.
 
 - [pipeline.md](references/pipeline.md) — Read this when starting this skill's generation workflow or its post-checkpoint run or repair path, to establish ordering, ownership, checkpoints, and handoffs.
+- [scenario-sourcing.md](references/scenario-sourcing.md) — Read whenever Main coordinates Explorer in the full pipeline or standalone mode, including a supplied discovery scope, or manages a multi-scenario queue. Do not load it for explicit single-scenario generation or standalone Author or Healer work.
 - [test-policy.md](references/test-policy.md) — Read this when planning, writing, or revising a spec or helper.
 - [locator-policy.md](references/locator-policy.md) — Read this when choosing, verifying, or changing any locator.
 - [failure-taxonomy.md](references/failure-taxonomy.md) — Read this when a run fails, before assigning its cause, remedy, or next owner.

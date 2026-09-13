@@ -1710,14 +1710,14 @@ test('rejects a hook audit destination outside the OS temporary directory', () =
   }
 });
 
-test('pipeline describes the whole-file trace write contract', () => {
-  const pipeline = readFileSync(
+test('artifact contract describes the whole-file trace write contract', () => {
+  const artifactContract = readFileSync(
     path.join(
       repositoryRoot,
       'skills',
       'playwright-testgen',
       'references',
-      'pipeline.md',
+      'artifact-contract.md',
     ),
     'utf8',
   );
@@ -1725,9 +1725,9 @@ test('pipeline describes the whole-file trace write contract', () => {
     path.join(repositoryRoot, 'agents', 'playwright-test-healer.md'),
     'utf8',
   );
-  assert.doesNotMatch(pipeline, /Edit-only mutation boundary/u);
-  assert.match(pipeline, /whole-file `Write`/u);
-  assert.match(pipeline, /Healer reads this draft once/u);
+  assert.doesNotMatch(artifactContract, /Edit-only mutation boundary/u);
+  assert.match(artifactContract, /whole-file `Write`/u);
+  assert.match(artifactContract, /Healer reads it\s+once/iu);
   assert.match(healer, /Read Main's declared draft once/u);
   assert.match(healer, /verify its complete contents are exactly\s+`\{\}`/u);
 });
