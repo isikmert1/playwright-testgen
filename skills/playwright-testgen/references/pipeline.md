@@ -1,13 +1,13 @@
-# One-scenario pipeline
+# Scenario pipeline
 
 This file owns role boundaries, ordering, the human checkpoint, and final
-dispositions. The workflow handles exactly one written scenario at a time.
+dispositions. The workflow handles exactly one active written scenario at a
+time; multiple selected scenarios reuse it sequentially.
 
 ## Contents
 
 - [Ownership](#ownership)
 - [Entry routing and standalone roles](#entry-routing-and-standalone-roles)
-- [Scenario discovery](#scenario-discovery)
 - [Ordered flow](#ordered-flow)
 - [Final dispositions](#final-dispositions)
 - [Handoff boundary](#handoff-boundary)
@@ -47,31 +47,36 @@ not an operational profile, and must not be sent to Explorer or Author.
 
 `/testgen` routes into this full pipeline in two ways:
 
-- Blank or whitespace input starts scenario discovery. Main presents Explorer's
-  proposals for human selection, then closes discovery and starts a fresh
-  generation run.
+- Blank or whitespace input starts scenario discovery. Load
+  `scenario-sourcing.md`, which owns the bounded proposal contract, human
+  selection, discovery cleanup, and any sequential queue. Invalid proposals or
+  failed discovery cleanup stop before generation. Only one active scenario at
+  a time enters the ordered flow below.
 - Explicit input skips Explorer. Main preserves the scenario's original
   acceptance criteria and clarifies missing route, auth, data, environment, or
-  intent facts instead of inventing them.
+  intent facts instead of inventing them. Do not load `scenario-sourcing.md`
+  for an explicit single scenario.
 
-After scenario selection, Main passes only the selected, human-approved
-scenario and relevant evidence to Author. It assigns stable criterion IDs and
-one exact spec path in the fresh generation policy; Author still grounds the
+After scenario selection, Main passes only the active, human-approved scenario
+and relevant evidence to Author. It assigns stable criterion IDs and one exact
+spec path in that scenario's fresh generation policy; Author still grounds the
 scenario and verifies locators independently. Both entry paths reach the same
-candidate checkpoint. Scenario selection and the candidate checkpoint are
+candidate checkpoint. Scenario selection and every candidate checkpoint are
 separate human decisions: selection never authorizes spec execution or a
 mutation. At the checkpoint, `skip` never executes a test, `adjust` preserves
 the exact human feedback for Author, and only an explicit `run` dispatches
-Healer. Mutation approval remains separate. Missing adapters still produce
-`mutation-not-verified`; legitimate product or environment failures remain
-valid stopping outcomes. Never require a passing spec when correct behavior is
-refusal.
+Healer. Mutation approval remains separate for each scenario. Missing adapters
+still produce `mutation-not-verified`; legitimate product or environment
+failures remain valid stopping outcomes. Never require a passing spec when
+correct behavior is refusal.
 
 The same roles have bounded standalone entry flows through an explicit
 natural-language request; no extra slash commands are needed:
 
 - Standalone Explorer returns proposals only, then Main validates the bounded
-  result, cleans its discovery scope, and stops before scenario selection.
+  result under `scenario-sourcing.md`, cleans its discovery scope, and stops
+  before scenario selection. Load that reference even when the human supplied
+  Explorer's scope.
 - Standalone Author receives one human-approved written scenario and returns
   one validated, unexecuted spec, then Main cleans the run and stops before the
   candidate checkpoint.
@@ -92,60 +97,6 @@ established, stop for human input. Agents never create their own authority,
 infer missing test intent, bypass another role's ownership, or silently enter
 the full pipeline. Standalone operation preserves the same approvals, write
 limits, validation, and cleanup rules as the corresponding pipeline role.
-
-## Scenario discovery
-
-When no written scenario is supplied or the human explicitly requests
-proposals, Main completes runtime and application/browser readiness checks,
-creates a discovery ID with the normal run-ID script, and writes
-`.playwright-cli/testgen/<discovery_id>/command-policy.json` with only:
-
-```json
-{
-  "allowed_browser_actions": [],
-  "allowed_origins": ["https://app.example.test"],
-  "allowed_state_paths": [],
-  "discovery_id": "tg-<24hex>",
-  "format_version": 1,
-  "policy_kind": "discovery"
-}
-```
-
-The origin is illustrative, never a default. `allowed_state_paths` follows the
-same exact existing-file and opacity rules as generation. Keep
-`allowed_browser_actions` empty unless the human approved a concrete exploration
-scope and reset or cleanup method. It may then contain only the action names
-`check`, `click`, `dblclick`, `fill`, `keydown`, `keyup`, `press`, `select`,
-`type`, or `uncheck` that the approved scope needs. This policy contains no
-`approved_spec`, runner options, write paths, trace options, or generation
-`run_id`; it grants no test or repository-write authority.
-
-Main delegates `playwright-testgen:playwright-test-explorer` with the passed
-preflight fact, discovery ID, repository root, approved origin, application and
-exploration-browser readiness, auth/data facts, exact approved state paths, and
-optional human scope. For an approved state-changing action, also pass the
-action names, semantic scope, and reset or cleanup method. Never pass evaluation
-answers, seeded bugs, mutation metadata, or expected classifications.
-
-Explorer reads at most ten source/test files or works for 90 seconds, reads no
-more than the latest twenty commits, and returns at most five proposals plus its
-inspected scope and limits. Main rejects output that exceeds those bounds or
-omits a proposal's local ID, route, user goal, observable criteria, source/test
-references, labeled expected-behavior evidence, coverage status, priority
-reason, or auth/data prerequisites and unresolved questions. Coverage status is
-exactly `apparently-covered`, `candidate-gap`, or `unknown`. Live observation
-alone is not intended-behavior evidence. `no supported proposal` is valid when
-the evidence cannot support a gap or recent meaningful UI change.
-
-The time and cumulative-Read limits are agent-enforced in this phase. Hooks
-bound individual operations but do not count elapsed time or total reads.
-
-The result is transient untrusted proposal text, not a persisted artifact or an
-Author assignment. The human may select, edit, reject, or narrow it. Main closes
-Explorer's scope, removes the exact discovery directory under
-`cleanup-contract.md`, and creates a fresh generation run only after one
-scenario's intent is approved. Selection never approves a spec path, execution,
-or mutation.
 
 ## Ordered flow
 
@@ -305,21 +256,12 @@ or mutation.
      capture returns the repository-state conflict to the human and blocks the
      run.
      Never pass Author's reasoning transcript.
-     Main then derives and validates the normalized pipeline input:
-
-     ```sh
-     node "$PLAYWRIGHT_TESTGEN_ROOT/scripts/create-healer-input.cjs" --repo . --run-id <run_id>
-     node "$PLAYWRIGHT_TESTGEN_ROOT/scripts/validate-testgen-artifact.cjs" --repo . --type input --run-id <run_id> .playwright-cli/testgen/<run_id>/healer-input.json
-     ```
-
-     Stop if its run, spec, starting digest, handoff digest, or criteria binding
-     fails. Healer reads this input instead of the complete Author handoff.
-     Before delegation, Main writes the exact two-byte draft `{}` at
-     `.playwright-cli/testgen/<run_id>/healer-trace.json` and passes that path.
-     This Main-owned placeholder gives Healer's whole-file `Write` mutation
-     boundary a declared trace file. Healer reads this draft once immediately
-     before replacement and verifies it is exactly `{}`; no other consumer may
-     read or report it before replacement and validation succeed.
+     Main then creates and validates the normalized pipeline input with the
+     exact procedure in `artifact-contract.md`. Stop if its run, spec, starting
+     digest, handoff digest, or criteria binding fails. Healer reads this input
+     instead of the complete Author handoff. Before delegation, Main also
+     creates and passes the trace draft under that contract's whole-file `Write`
+     boundary. Failure to reserve the declared trace path stops delegation.
 
    - `skip`: end as `generated-unverified` and say exactly, "Explored live;
      spec never executed."
@@ -351,29 +293,17 @@ or mutation.
    - When the run has a change manifest, Main captures `post-healer` before
      verification. If capture fails, do not invoke the adapter; record the
      bounded capture error as behavior `error` in the vacuity report.
-   - When an adapter entry and its digest were explicitly approved before
-     Author, run exactly that mutation-and-criterion-linked entry with the
-     command in `mutation-check.md`. Never add, select, or switch an adapter
-     after Author; a later approval starts a new run with a new pre-Author
-     boundary.
-   - When an approved adapter had no entry for the required criterion, run the
-     coverage-only form from `mutation-check.md` without a mutation ID or
-     digest. It returns behavior `unavailable` with reason
-     `criterion-unmapped`; it can never execute a mutation.
-   - When no approved adapter exists, run the no-adapter form from
-     `mutation-check.md`, even if unapproved adapter files exist. It needs no
-     change manifest and returns behavior `unavailable` with reason
-     `adapter-absent`.
-   - Map `killed`, `survived`, and `unavailable` directly into the report's
-     behavior status. Map a checker `verification-error` to behavior `error`.
-     Unless a separate assertion-sensitivity check actually ran, record its
-     complete status as `not-run`; do not infer evidence from the spec.
-   - Main writes and validates `vacuity-report.json` with the exact command in
-     `mutation-check.md`, then reports the validator's separate execution and
-     mutation-verification summary plus its derived disposition. A
-     surviving product mutation is `rejected-vacuous`; include its mutation ID
-     as evidence. It never automatically returns to Author. The human may start
-     a new approved Author run using that evidence.
+   - Follow the applicable verification branch in `mutation-check.md`: run only
+     the exact entry approved before Author, use its non-mutating coverage form
+     for `criterion-unmapped`, or use its no-adapter form for `adapter-absent`.
+     Never add, select, or switch an adapter after Author; later approval starts
+     a new run with a new pre-Author boundary.
+   - Main writes and validates `vacuity-report.json` using that contract's
+     result mapping and exact command. Checker or report-validation failure is
+     reported as `verification-error`; otherwise report the validator's separate
+     execution and mutation-verification summary and derived disposition. A
+     rejected vacuous result never automatically returns to Author; the human
+     may start a new approved Author run using its evidence.
 8. Main applies `cleanup-contract.md` on every exit.
 
 Never auto-advance through the checkpoint. When lint fails, offer only `adjust`

@@ -80,6 +80,11 @@ of run directories and cleanup preserves it on every path. Full run-directory
 removal belongs to Main after the result is accepted. Governed agents may remove
 only the generated children described below.
 
+In a sequential queue, finish the active scenario's accepted result and scoped
+cleanup before activating the next scenario. Remove only that scenario's exact
+run directory. Preserve every completed generated spec, durable finding, and
+other queued item; unresolved owned cleanup keeps the queue paused.
+
 When an active run must retain its handoff or policy, remove raw browser output
 only through exact run children: `.playwright-cli` for Author exploration, or
 one named `attempt-1` through `attempt-5` directory. Never remove another child
