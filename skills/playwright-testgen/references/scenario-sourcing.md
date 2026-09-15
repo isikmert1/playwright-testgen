@@ -44,9 +44,11 @@ inspected scope and limits. Main rejects output that exceeds those bounds or
 omits a proposal's local ID, route, user goal, observable criteria, source/test
 references, labeled expected-behavior evidence, coverage status, priority
 reason, or auth/data prerequisites and unresolved questions. Coverage status is
-exactly `apparently-covered`, `candidate-gap`, or `unknown`. Live observation
-alone is not intended-behavior evidence. `no supported proposal` is valid when
-the evidence cannot support a gap or recent meaningful UI change.
+exactly `apparently-covered`, `candidate-gap`, or `unknown`. Bare implementation
+mechanics and live observation are current-behavior evidence, not
+intended-behavior evidence; source counts for intent only when it explicitly
+states a product rule or contract. `no supported proposal` is valid when the
+evidence cannot support a gap or recent meaningful UI change.
 
 The time and cumulative-Read limits are agent-enforced in this phase. Hooks
 bound individual operations but do not count elapsed time or total reads.

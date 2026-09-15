@@ -1,6 +1,6 @@
 ---
 name: playwright-testgen
-description: Use when discovering Playwright scenarios, turning human-approved scenarios into grounded end-to-end specs, or running and repairing a spec produced by that workflow.
+description: Use when discovering Playwright scenarios, turning human-approved scenarios into grounded end-to-end specs, running and repairing a spec produced by that workflow, or explicitly requesting Explorer, Author, or Healer standalone.
 license: Apache-2.0
 ---
 

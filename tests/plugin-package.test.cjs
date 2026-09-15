@@ -384,7 +384,11 @@ test('ships bounded Explorer discovery as a transient human decision', () => {
   assert.match(explorer, /Discovery summary.*Reads: <count>\/10/isu);
   assert.match(
     explorer,
-    /Live output proves what rendered, not what the product intended/iu,
+    /bare implementation mechanics prove current behavior, not what\s+the product intended/iu,
+  );
+  assert.match(
+    explorer,
+    /Source counts as intended-behavior evidence only when it\s+explicitly states a product rule or contract/iu,
   );
   assert.match(explorer, /`no supported proposal`/iu);
   assert.match(scenarioSourcing, /policy_kind.*discovery/isu);
@@ -392,6 +396,10 @@ test('ships bounded Explorer discovery as a transient human decision', () => {
   assert.match(
     scenarioSourcing,
     /Selection never approves a spec path,\s+execution,\s+or mutation/iu,
+  );
+  assert.match(
+    scenarioSourcing,
+    /Bare implementation\s+mechanics and live observation are current-behavior evidence, not\s+intended-behavior evidence/iu,
   );
   assert.match(
     scenarioSourcing,
