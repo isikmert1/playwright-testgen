@@ -1,6 +1,6 @@
 ---
 name: playwright-testgen
-description: Use when discovering Playwright scenarios, turning human-approved scenarios into grounded end-to-end specs, or running and repairing a spec produced by that workflow.
+description: Use when discovering Playwright scenarios, turning human-approved scenarios into grounded end-to-end specs, running and repairing a spec produced by that workflow, or explicitly requesting Explorer, Author, or Healer standalone.
 license: Apache-2.0
 ---
 
@@ -77,19 +77,21 @@ one active scenario, and no shared mutable run policy. Never auto-advance:
 scenario selection authorizes neither execution nor mutation, and only an
 explicit `run` at the candidate checkpoint dispatches Healer.
 
-`/testgen` with an explicit scenario skips Explorer and preserves the original
-criteria. Blank input uses Explorer; multiple selections form a sequential
-queue whose approvals, artifacts, result, and cleanup remain scenario-scoped.
-The detailed generation workflow and stopping outcomes live in `pipeline.md`.
+`/playwright-testgen:testgen` with an explicit scenario skips Explorer and
+preserves the original criteria. Blank input uses Explorer; multiple selections
+form a sequential queue whose approvals, artifacts, result, and cleanup remain
+scenario-scoped. The detailed generation workflow and stopping outcomes live in
+`pipeline.md`.
 
 Explorer, Author, and Healer also support explicit standalone requests without
 entering the full pipeline. Main remains the minimal coordinator: it establishes
 intent and readiness, creates the role's policy and artifacts, validates the
-result, applies cleanup, and stops. Standalone Explorer returns proposals only;
-standalone Author returns one unexecuted candidate spec; standalone Healer may
-repair one human-approved existing failing spec and stops without a vacuity
-stage. No role creates its own authority, infers missing intent, or silently
-starts another stage.
+result, delegates the named role, applies cleanup, and stops. Main never performs
+the delegated role's browser, authoring, execution, or repair work. Standalone
+Explorer returns proposals only; standalone Author returns one unexecuted
+candidate spec; standalone Healer may repair one human-approved existing failing
+spec and stops without a vacuity stage. No role creates its own authority,
+infers missing intent, or silently starts another stage.
 
 ## Reference loading
 

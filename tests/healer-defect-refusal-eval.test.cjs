@@ -200,6 +200,7 @@ test('prepares an exact-revision plugin source without evaluation answers', asyn
       prepared.plugin_id,
       `playwright-testgen@${prepared.marketplace_name}`,
     );
+    assert.equal(prepared.version, '0.1.0');
     assert.equal(
       JSON.parse(
         readFileSync(
@@ -238,7 +239,6 @@ test('rejects an installed plugin with a stale access policy', () => {
   const temporaryRoot = mkdtempSync(
     path.join(tmpdir(), 'testgen-plugin-integrity-'),
   );
-  const revision = 'a'.repeat(40);
   const source = path.join(temporaryRoot, 'plugin');
   const excluded = new Set([
     '.git',
@@ -263,22 +263,29 @@ test('rejects an installed plugin with a stale access policy', () => {
       recursive: true,
     });
     const pluginId = 'playwright-testgen@test-marketplace';
+    const pluginVersion = JSON.parse(
+      readFileSync(
+        path.join(repositoryRoot, '.claude-plugin', 'plugin.json'),
+        'utf8',
+      ),
+    ).version;
     const plugins = [
       {
         id: pluginId,
         scope: 'local',
         enabled: true,
-        version: revision.slice(0, 12),
+        version: pluginVersion,
         installPath: source,
       },
     ];
 
     assert.doesNotThrow(() =>
-      findInstalledPlugin(plugins, pluginId, repositoryRoot, revision),
+      findInstalledPlugin(plugins, pluginId, repositoryRoot, pluginVersion),
     );
     writeFileSync(path.join(source, 'hooks', 'validate-access.cjs'), 'stale');
     assert.throws(
-      () => findInstalledPlugin(plugins, pluginId, repositoryRoot, revision),
+      () =>
+        findInstalledPlugin(plugins, pluginId, repositoryRoot, pluginVersion),
       /installed-revision-unverified/u,
     );
   } finally {
@@ -510,25 +517,34 @@ test('preserves installed hook cancellation before paid execution', async () => 
 test('binds local plugin entries without requiring an undocumented project path', () => {
   const { matchesInstalledPlugin } = modules().runner;
   const pluginId = 'playwright-testgen@playwright-testgen-eval-0123456789ab';
-  const revision = 'a'.repeat(40);
+  const version = '0.1.0';
   const entry = {
     id: pluginId,
-    version: revision.slice(0, 12),
+    version,
     scope: 'local',
     enabled: true,
     installPath: 'C:/plugin-cache/playwright-testgen',
   };
 
   assert.equal(
-    matchesInstalledPlugin(entry, pluginId, repositoryRoot, revision),
+    matchesInstalledPlugin(entry, pluginId, repositoryRoot, version),
     true,
+  );
+  assert.equal(
+    matchesInstalledPlugin(
+      { ...entry, version: '0.0.9' },
+      pluginId,
+      repositoryRoot,
+      version,
+    ),
+    false,
   );
   assert.equal(
     matchesInstalledPlugin(
       { ...entry, projectPath: 'C:/different-project' },
       pluginId,
       repositoryRoot,
-      revision,
+      version,
     ),
     false,
   );

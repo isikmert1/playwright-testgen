@@ -1,6 +1,6 @@
 ---
 name: playwright-test-explorer
-description: Propose up to five evidence-backed Playwright scenarios when Testgen needs scenario discovery before Author.
+description: Internal Testgen role for proposing evidence-backed Playwright scenarios after Main has completed preflight and created the discovery policy.
 tools: Bash, Glob, Grep, Read
 model: inherit
 skills:
@@ -73,11 +73,13 @@ delete data, make payments, or invoke another state-changing action unless Main
 supplied the matching human-approved action, semantic scope, and reset or
 cleanup method. The existence of a disposable app is not approval.
 
-Live output proves what rendered, not what the product intended. Expected
-behavior needs source, documentation, an existing behavioral test, or explicit
-human confirmation. When those disagree or are absent, mark the expectation
-uncertain and ask the human; never turn the current UI into a contract by
-default.
+Live output and bare implementation mechanics prove current behavior, not what
+the product intended. Source counts as intended-behavior evidence only when it
+explicitly states a product rule or contract; an unannotated branch, call, data
+mutation, or rendered result does not. Otherwise require documentation, an
+existing behavioral test, or explicit human confirmation. When those disagree
+or are absent, mark the expectation uncertain and ask the human; never turn the
+current implementation or UI into a contract by default.
 
 ## Propose
 

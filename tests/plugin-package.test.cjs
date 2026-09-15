@@ -284,6 +284,12 @@ test('workflow guidance removes avoidable pre-Author ambiguity', () => {
     /complete trace.*one whole-file `Write`.*validate\s+once/isu,
   );
   assert.match(healer, /overwrite.*whole-file `Write`/isu);
+  assert.match(healer, /Never use `Edit` on\s+the trace/iu);
+  assert.match(
+    healer,
+    /First operations.*`Read`.*healer input.*trace draft.*approved spec/isu,
+  );
+  assert.match(healer, /Do not recompute.*starting digest/iu);
   assert.match(healer, /Put one command in one\s+Bash call/iu);
   assert.match(
     author,
@@ -378,7 +384,11 @@ test('ships bounded Explorer discovery as a transient human decision', () => {
   assert.match(explorer, /Discovery summary.*Reads: <count>\/10/isu);
   assert.match(
     explorer,
-    /Live output proves what rendered, not what the product intended/iu,
+    /bare implementation mechanics prove current behavior, not what\s+the product intended/iu,
+  );
+  assert.match(
+    explorer,
+    /Source counts as intended-behavior evidence only when it\s+explicitly states a product rule or contract/iu,
   );
   assert.match(explorer, /`no supported proposal`/iu);
   assert.match(scenarioSourcing, /policy_kind.*discovery/isu);
@@ -389,6 +399,10 @@ test('ships bounded Explorer discovery as a transient human decision', () => {
   );
   assert.match(
     scenarioSourcing,
+    /Bare implementation\s+mechanics and live observation are current-behavior evidence, not\s+intended-behavior evidence/iu,
+  );
+  assert.match(
+    scenarioSourcing,
     /Standalone Explorer.*stops before scenario selection/isu,
   );
   assert.match(artifactContract, /transient, untrusted discovery output/iu);
@@ -396,6 +410,7 @@ test('ships bounded Explorer discovery as a transient human decision', () => {
 
 test('ships one command with explicit and discovery entry paths', () => {
   const commandPath = path.join(repositoryRoot, 'commands', 'testgen.md');
+  const readme = readFileSync(path.join(repositoryRoot, 'README.md'), 'utf8');
   const skill = readFileSync(
     path.join(repositoryRoot, 'skills', 'playwright-testgen', 'SKILL.md'),
     'utf8',
@@ -424,6 +439,11 @@ test('ships one command with explicit and discovery entry paths', () => {
   assert.match(command, /(?:missing facts.*clarif|clarif.*missing facts)/isu);
   assert.match(command, /run.*adjust.*skip/isu);
 
+  for (const document of [readme, skill, pipeline]) {
+    assert.match(document, /`\/playwright-testgen:testgen(?:\s|`)/u);
+    assert.doesNotMatch(document, /`\/testgen(?:\s|`)/u);
+  }
+
   assert.match(skill, /pipeline\.md.*generation workflow/isu);
   assert.match(
     skill,
@@ -444,6 +464,22 @@ test('ships one command with explicit and discovery entry paths', () => {
   assert.match(pipeline, /standalone Healer.*existing failing spec/isu);
   assert.match(pipeline, /minimal coordinator.*policy.*artifacts/isu);
   assert.match(pipeline, /never require.*passing spec.*refusal/isu);
+  assert.match(
+    pipeline,
+    /Standalone Explorer.*delegates?\s+`playwright-testgen:playwright-test-explorer`/isu,
+  );
+  assert.match(
+    pipeline,
+    /Standalone Author.*delegates?\s+`playwright-testgen:playwright-test-author`/isu,
+  );
+  assert.match(
+    pipeline,
+    /Standalone Healer.*delegates?\s+`playwright-testgen:playwright-test-healer`/isu,
+  );
+  assert.match(
+    pipeline,
+    /Main never performs the delegated role's\s+browser, authoring, execution, or repair work/iu,
+  );
 });
 
 test('ships a sequential multi-scenario queue around the existing flow', () => {

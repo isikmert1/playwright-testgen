@@ -46,9 +46,10 @@ artifact boundaries, and release rules.
 
 ## Use
 
-- `/testgen` discovers scenarios, waits for one selection, then enters the
-  one-scenario pipeline.
-- `/testgen "<scenario>"` skips discovery and starts from that written intent.
+- `/playwright-testgen:testgen` discovers scenarios, waits for one or more
+  selections, then processes them sequentially.
+- `/playwright-testgen:testgen "<scenario>"` skips discovery and starts from
+  that written intent.
 - A natural-language request may run Explorer, Author, or Healer alone. A
   standalone Healer can repair one existing human-approved failing spec and
   stops without starting generation or mutation verification.
