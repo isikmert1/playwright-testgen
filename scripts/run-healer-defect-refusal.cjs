@@ -1029,10 +1029,17 @@ async function preparePluginSource(
     `${JSON.stringify({ ...marketplace, name: marketplaceName }, null, 2)}\n`,
   );
   assertPluginBlind(source);
+  const version = readJson(
+    path.join(source, '.claude-plugin', 'plugin.json'),
+    'plugin-source-unavailable',
+  )?.version;
+  if (typeof version !== 'string' || version.length === 0)
+    fail('plugin-source-unavailable');
   return {
     marketplace_name: marketplaceName,
     plugin_id: `${PLUGIN_NAME}@${marketplaceName}`,
     source,
+    version,
   };
 }
 
@@ -1506,12 +1513,12 @@ function sameProjectPath(left, right) {
     : first === second;
 }
 
-function matchesInstalledPlugin(plugin, pluginId, repository, revision) {
+function matchesInstalledPlugin(plugin, pluginId, repository, version) {
   return (
     plugin?.id === pluginId &&
     plugin.scope === 'local' &&
     plugin.enabled === true &&
-    plugin.version === revision.slice(0, 12) &&
+    plugin.version === version &&
     typeof plugin.installPath === 'string' &&
     (plugin.projectPath == null ||
       (typeof plugin.projectPath === 'string' &&
@@ -1519,10 +1526,10 @@ function matchesInstalledPlugin(plugin, pluginId, repository, revision) {
   );
 }
 
-function findInstalledPlugin(plugins, pluginId, repository, revision) {
+function findInstalledPlugin(plugins, pluginId, repository, version) {
   const expectedProject = realpathSync(repository);
   const entry = plugins.find((plugin) =>
-    matchesInstalledPlugin(plugin, pluginId, expectedProject, revision),
+    matchesInstalledPlugin(plugin, pluginId, expectedProject, version),
   );
   if (entry == null || typeof entry.installPath !== 'string')
     fail('installed-revision-unverified');
@@ -1776,7 +1783,7 @@ async function evaluateInstalledHealer(signal) {
       await pluginList(state.repository, signal),
       pluginSource.plugin_id,
       state.repository,
-      revision,
+      pluginSource.version,
     );
     runtime.plugin_runtime_sha256 = installed.runtime_sha256;
 

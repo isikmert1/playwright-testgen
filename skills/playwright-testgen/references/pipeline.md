@@ -45,7 +45,7 @@ not an operational profile, and must not be sent to Explorer or Author.
 
 ## Entry routing and standalone roles
 
-`/testgen` routes into this full pipeline in two ways:
+`/playwright-testgen:testgen` routes into this full pipeline in two ways:
 
 - Blank or whitespace input starts scenario discovery. Load
   `scenario-sourcing.md`, which owns the bounded proposal contract, human
@@ -73,27 +73,32 @@ correct behavior is refusal.
 The same roles have bounded standalone entry flows through an explicit
 natural-language request; no extra slash commands are needed:
 
-- Standalone Explorer returns proposals only, then Main validates the bounded
-  result under `scenario-sourcing.md`, cleans its discovery scope, and stops
-  before scenario selection. Load that reference even when the human supplied
-  Explorer's scope.
-- Standalone Author receives one human-approved written scenario and returns
-  one validated, unexecuted spec, then Main cleans the run and stops before the
-  candidate checkpoint.
-- Standalone Healer receives one exact existing failing spec, explicit original
-  criteria and intent, and human approval to run it. Main records that intent
-  and its truthful assertion mapping in a standalone `healer-input.json`,
-  validates the starting spec digest, and creates the trace draft. Healer
-  diagnoses and may make only bounded repairs, returns a validated trace, then
-  Main cleans the run and stops before the vacuity gate or any other stage.
+- Standalone Explorer: Main delegates
+  `playwright-testgen:playwright-test-explorer`. Explorer returns proposals only,
+  then Main validates the bounded result under `scenario-sourcing.md`, cleans
+  its discovery scope, and stops before scenario selection. Load that reference
+  even when the human supplied Explorer's scope.
+- Standalone Author: Main delegates
+  `playwright-testgen:playwright-test-author` with one human-approved written
+  scenario. Author returns one validated, unexecuted spec, then Main cleans the
+  run and stops before the candidate checkpoint.
+- Standalone Healer repairs one existing failing spec. Main delegates
+  `playwright-testgen:playwright-test-healer` with one exact existing failing
+  spec, explicit original criteria and intent, and human approval to run it.
+  Main records that intent and its truthful assertion mapping in a standalone
+  `healer-input.json`, validates the starting spec digest, and creates the trace
+  draft. Healer diagnoses and may make only bounded repairs, returns a validated
+  trace, then Main cleans the run and stops before the vacuity gate or any other
+  stage.
 
 For every standalone flow, Main is a minimal coordinator. It performs runtime
 and readiness checks, collects missing facts, creates the role's normal policy
 and required artifacts, grants only exact paths/actions, validates the result,
-and applies the same cleanup contract. Main may inspect only the exact existing
-spec when preparing standalone Healer's criterion mapping; it does not debug or
-repair. If the original criteria or a truthful required artifact cannot be
-established, stop for human input. Agents never create their own authority,
+and applies the same cleanup contract. Main never performs the delegated role's
+browser, authoring, execution, or repair work. Main may inspect only the exact
+existing spec when preparing standalone Healer's criterion mapping; it does not
+debug or repair. If the original criteria or a truthful required artifact cannot
+be established, stop for human input. Agents never create their own authority,
 infer missing test intent, bypass another role's ownership, or silently enter
 the full pipeline. Standalone operation preserves the same approvals, write
 limits, validation, and cleanup rules as the corresponding pipeline role.

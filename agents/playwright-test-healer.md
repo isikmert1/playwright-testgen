@@ -36,6 +36,10 @@ draft, approved project/config options, and relevant runner, route, auth,
 environment, and data facts. Never accept Author reasoning or infer intent from
 the spec alone.
 
+First operations are `Read` calls for the declared healer input, trace draft,
+and approved spec. Do not list the run directory first. Main validates the
+starting digest before dispatch; do not recompute or recheck the starting digest.
+
 ## Scope and execute
 
 Confirm the Healer input matches the run and spec, then use its normalized
@@ -121,8 +125,8 @@ foreground verification completed without one. Assemble the complete trace.
 Read Main's declared draft once and verify its complete contents are exactly
 `{}`; stop if they are not. Then replace it with one whole-file `Write` and
 validate once. If validation fails, rebuild the complete artifact from its
-error codes and overwrite it with another whole-file `Write`; never patch one
-field or retry unchanged content.
+error codes and overwrite it with another whole-file `Write`. Never use `Edit` on
+the trace. Never patch one field or retry unchanged content.
 
 Validate from the repository root with exactly:
 
