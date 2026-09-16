@@ -336,6 +336,10 @@ test('workflow guidance removes avoidable pre-Author ambiguity', () => {
   );
   assert.match(mutationCheck, /no prepared adapter.*do not ask.*digest/isu);
   assert.match(
+    mutationCheck,
+    /no approved adapter exists.*```sh\s*node "\$PLAYWRIGHT_TESTGEN_ROOT\/scripts\/mutation-check\.cjs" verify --repo \. --run-id <run_id> --criterion-id <criterion_id>\s*```.*omit only `--adapter`, `--mutation-id`, and `--approval-digest`/isu,
+  );
+  assert.match(
     readFileSync(
       path.join(
         repositoryRoot,

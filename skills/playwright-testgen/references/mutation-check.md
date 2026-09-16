@@ -143,9 +143,16 @@ required, and it returns `unavailable` with reason `criterion-unmapped`. If the
 adapter does map the criterion, those omitted arguments are an approval error,
 not permission to execute it.
 
-When no approved adapter exists, also omit `--adapter`. After validating the
-fixed trace and criterion, the command returns `unavailable` with reason
-`adapter-absent` without attempting product mutation.
+When no approved adapter exists, run:
+
+```sh
+node "$PLAYWRIGHT_TESTGEN_ROOT/scripts/mutation-check.cjs" verify --repo . --run-id <run_id> --criterion-id <criterion_id>
+```
+
+Omit only `--adapter`, `--mutation-id`, and `--approval-digest`. The criterion
+ID remains required. After validating the fixed trace and criterion, the command
+returns `unavailable` with reason `adapter-absent` without attempting product
+mutation.
 
 Adapter verification requires a Git repository with a committed `HEAD` and the
 Git CLI available. The target runner owns application-specific dependencies,
