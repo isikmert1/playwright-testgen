@@ -59,5 +59,65 @@ Predictions were recorded before each run.
   75k host-reported tokens in 5 minutes; Healer used about 47.5k in 58 seconds.
 
 The run did not change the application's source, Playwright configuration, CI,
-or package scripts. Deliberately vacuous and unrelated-mutant paths remain to
-be exercised separately.
+or package scripts.
+
+## Later installed workflow checks
+
+The following 2026-09-19 observations used Testgen base revision
+`88d974a31472757ff2d5a063c928569f2375e980` plus uncommitted instruction
+fixes for resource paths and Explorer reporting. They are evidence for those
+working bytes, not a claim that this exact revision was committed or released.
+Claude Code was 2.1.278, Node.js 22.14.0, npm 11.19.1, Playwright and
+`@playwright/test` 1.62.1, and Playwright CLI 0.1.19.
+
+- Standalone RWA Explorer inspected existing Cypress test bodies, identified
+  `data-test` from repository evidence, stopped at its 10/10 source/test read
+  limit with partial proposals, and started no Author or browser execution.
+  A separate invalid-sign-in scope cited existing Cypress coverage and returned
+  no supported proposal.
+- Standalone Explorer on the owned semantic target declined to infer intended
+  duplicate-order behavior from the current implementation and requested human
+  clarification. Explicit scenario generation bypassed Explorer; Author revised
+  the candidate within the same run, and `skip` left it unexecuted.
+- Standalone Author wrote and collection-validated one order spec without
+  executing it. Standalone Healer then used a Main-owned input, not an Author
+  handoff, to repair only a controlled `Add order` → `Create order` selector
+  drift. The second attempt passed, assertions stayed unchanged, and no vacuity
+  stage started. Both accepted run directories were removed.
+- A clean three-scenario queue selected dialog details, unique order creation,
+  and empty-item validation. The dialog spec passed on one attempt and ended
+  `mutation-not-verified` because no matching adapter existed. The order spec
+  failed under a deliberately applied order-insertion defect; Healer made no
+  repair and returned `product-behavior-wrong`, pausing the queue. The product
+  patch was reversed before continuation. The empty-item spec was skipped at
+  its candidate checkpoint and never executed. The final report listed all
+  three distinct specs and runs with each checkpoint, attempts, mutation
+  status, disposition, and owner; accepted scratch was removed.
+
+## Real Playwright negative checks
+
+On 2026-09-20, the owned semantic target at
+`00706a91805f153c7debf6ff35ee7aaccc07ee52` exercised the two remaining
+mutation negatives with temporary, hand-written Playwright specs. The checker
+came from Testgen base revision `88d974a31472757ff2d5a063c928569f2375e980`
+plus uncommitted documentation/instruction changes; its mutation code was
+unchanged. Node.js was 22.14.0 and both Playwright packages were 1.62.1.
+Synthetic, validated handoff/input/trace artifacts supplied the checker
+prerequisites; no Author or Healer agent was invoked for these fixtures.
+
+- A zero-iteration row loop passed against the healthy app and the isolated
+  order-insertion mutant. The checker returned `survived` with baseline and
+  mutant both `pass`, and a validated vacuity report mapped that result to
+  `rejected-vacuous`.
+- A two-step spec passed against the healthy app. Under the same mutant, its
+  vacuous order-existence step stayed green while the separate quantity step
+  failed. The real adapter returned `failure-unattributed`; the checker
+  returned `verification-error` (`mutant-runner-error`), not `killed`. A
+  validated vacuity report retained `verification-error`.
+
+Both checker runs removed their disposable worktrees. The controlled product
+patch was reversed after direct failure-location inspection; the active product
+diff was empty. Temporary specs and run artifacts were removed. Earlier
+deterministic fixture tests also cover these mappings, but neither the tests
+nor these real-spec checks establish installed-agent behavior for the negative
+paths.

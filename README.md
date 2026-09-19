@@ -61,8 +61,10 @@ installations against an owned target and a pinned real-world application.
 Those revision-specific observations are retained in the sanitized
 [installed-workflow record](docs/validation/installed-workflow.md). The first
 [independently graded installed-Healer case](docs/validation/healer-defect-refusal-eval.md)
-also passed with verified hook governance and cleanup. Deliberately vacuous and
-unrelated-mutant validation remains pending.
+also passed with verified hook governance and cleanup. Controlled real-Playwright
+checker cases confirm that a surviving mutant is rejected as vacuous and a
+failure in an unrelated criterion is reported as a verification error. These
+are checker observations, not additional installed-agent observations.
 
 ## Prerequisites
 
