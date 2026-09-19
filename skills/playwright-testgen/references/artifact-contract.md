@@ -44,9 +44,10 @@ any spec path, execution, handoff, or mutation is approved.
   describe the element in words.
 - Validation diagnostics may name rejected fields but must not echo their
   values.
-- Schemas live at `${CLAUDE_PLUGIN_ROOT}/schemas/author-handoff.v1.schema.json`,
-  `${CLAUDE_PLUGIN_ROOT}/schemas/healer-input.v1.schema.json`, and
-  `${CLAUDE_PLUGIN_ROOT}/schemas/healer-trace.v2.schema.json`. The plugin
+- Schemas live at `schemas/author-handoff.v1.schema.json`,
+  `schemas/healer-input.v1.schema.json`, and
+  `schemas/healer-trace.v2.schema.json` under the installed resource root
+  supplied by the loaded skill or agent. The plugin
   validator implements these schema-specific contracts directly, verifies the
   bundled schema identity, and refuses validation when the selected schema is
   absent, malformed, or changed without its validator; it is not a generic JSON
@@ -56,8 +57,9 @@ any spec path, execution, handoff, or mutation is approved.
   the reported execution outcome; Main and approved target runners establish
   execution evidence independently.
 
-  When exact schema shape is needed, use `Read` on the applicable substituted
-  `${CLAUDE_PLUGIN_ROOT}/schemas/...` path. Never use Bash, `cat`, or an
+  When exact schema shape is needed, use `Read` on that concrete root plus the
+  applicable schema path. Never pass a literal substitution token from this
+  supporting file as a path. Never use Bash, `cat`, or an
   environment-variable probe to find or read a schema.
 
   Validate with:

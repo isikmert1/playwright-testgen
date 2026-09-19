@@ -336,6 +336,10 @@ test('workflow guidance removes avoidable pre-Author ambiguity', () => {
   );
   assert.match(mutationCheck, /no prepared adapter.*do not ask.*digest/isu);
   assert.match(
+    mutationCheck,
+    /no approved adapter exists.*```sh\s*node "\$PLAYWRIGHT_TESTGEN_ROOT\/scripts\/mutation-check\.cjs" verify --repo \. --run-id <run_id> --criterion-id <criterion_id>\s*```.*omit only `--adapter`, `--mutation-id`, and `--approval-digest`/isu,
+  );
+  assert.match(
     readFileSync(
       path.join(
         repositoryRoot,
@@ -391,6 +395,10 @@ test('ships bounded Explorer discovery as a transient human decision', () => {
     /Source counts as intended-behavior evidence only when it\s+explicitly states a product rule or contract/iu,
   );
   assert.match(explorer, /`no supported proposal`/iu);
+  assert.match(
+    explorer,
+    /report.*test-id attribute convention.*evidence path/isu,
+  );
   assert.match(scenarioSourcing, /policy_kind.*discovery/isu);
   assert.match(scenarioSourcing, /agent-enforced.*hooks.*do not count/isu);
   assert.match(
@@ -404,6 +412,26 @@ test('ships bounded Explorer discovery as a transient human decision', () => {
   assert.match(
     scenarioSourcing,
     /Standalone Explorer.*stops before scenario selection/isu,
+  );
+  assert.match(
+    scenarioSourcing,
+    /present.*complete.*proposal.*source.*coverage.*prerequisites/isu,
+  );
+  assert.match(
+    scenarioSourcing,
+    /preserve.*Explorer.*reported.*Reads.*Budget.*never.*infer.*exhausted/isu,
+  );
+  assert.match(
+    scenarioSourcing,
+    /allowed_origins.*always.*confirmed target application origin.*static.*no-browser.*empty.*invalid/isu,
+  );
+  assert.match(
+    scenarioSourcing,
+    /final summary entry.*Scenario.*Spec.*Run.*Checkpoint.*Disposition.*Healer attempts.*Mutation.*Owner/isu,
+  );
+  assert.match(
+    scenarioSourcing,
+    /derive.*retained spec count.*current checkout/isu,
   );
   assert.match(artifactContract, /transient, untrusted discovery output/iu);
 });
@@ -557,7 +585,7 @@ test('ships a sequential multi-scenario queue around the existing flow', () => {
   assert.match(scenarioSourcing, /execution.*mutation approval.*never carr/isu);
   assert.match(
     scenarioSourcing,
-    /final summary.*disposition.*attempts.*mutation coverage.*unresolved owner/isu,
+    /Use this shape for every final summary entry:[\s\S]*?Scenario:[^\n]*\nSpec:[^\n]*\nRun:[^\n]*\nCheckpoint:[^\n]*\nDisposition:[^\n]*\nHealer attempts:[^\n]*\nMutation:[^\n]*\nOwner:/u,
   );
   assert.match(cleanup, /before activating the next scenario/iu);
   assert.match(cleanup, /preserve.*completed.*spec/isu);

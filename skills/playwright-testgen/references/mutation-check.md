@@ -18,7 +18,8 @@ permission to invent a mutation.
 
 An adapter is a committed `mutation-adapter.v1` JSON file with one committed
 Node runner and one or more criterion-linked patch entries. Its public schema
-is `${CLAUDE_PLUGIN_ROOT}/schemas/mutation-adapter.v1.schema.json`.
+is `schemas/mutation-adapter.v1.schema.json` under the installed resource root
+supplied by the loaded skill. Use that concrete root for `Read` of schemas.
 
 The manifest contains:
 
@@ -121,7 +122,7 @@ human run approval and handoff validation, and `post-healer` after trace
 validation. The later boundaries reject changed pre-existing dirty paths,
 unreported Author or Healer writes, changed `HEAD`, and unrelated fingerprint
 drift. Its schema is
-`${CLAUDE_PLUGIN_ROOT}/schemas/change-manifest.v1.schema.json`. Retain it through
+`schemas/change-manifest.v1.schema.json` under that resource root. Retain it through
 verification, then remove it with run scratch under `cleanup-contract.md`.
 
 ## Verification
@@ -143,9 +144,16 @@ required, and it returns `unavailable` with reason `criterion-unmapped`. If the
 adapter does map the criterion, those omitted arguments are an approval error,
 not permission to execute it.
 
-When no approved adapter exists, also omit `--adapter`. After validating the
-fixed trace and criterion, the command returns `unavailable` with reason
-`adapter-absent` without attempting product mutation.
+When no approved adapter exists, run:
+
+```sh
+node "$PLAYWRIGHT_TESTGEN_ROOT/scripts/mutation-check.cjs" verify --repo . --run-id <run_id> --criterion-id <criterion_id>
+```
+
+Omit only `--adapter`, `--mutation-id`, and `--approval-digest`. The criterion
+ID remains required. After validating the fixed trace and criterion, the command
+returns `unavailable` with reason `adapter-absent` without attempting product
+mutation.
 
 Adapter verification requires a Git repository with a committed `HEAD` and the
 Git CLI available. The target runner owns application-specific dependencies,
@@ -195,7 +203,7 @@ An unrelated red mutant is `verification-error`, never `killed`.
 
 Main alone writes `.playwright-cli/testgen/<run_id>/vacuity-report.json` after a
 validated `fixed` trace. Read
-`${CLAUDE_PLUGIN_ROOT}/schemas/vacuity-report.v1.schema.json` when writing it.
+`schemas/vacuity-report.v1.schema.json` under that resource root when writing it.
 It binds the approved spec to separate product-mutation and assertion-sensitivity
 results. Author and Healer never mutate it.
 
