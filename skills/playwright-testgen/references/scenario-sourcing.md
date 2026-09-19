@@ -22,8 +22,11 @@ writes `.playwright-cli/testgen/<discovery_id>/command-policy.json` with only:
 }
 ```
 
-The origin is illustrative, never a default. `allowed_state_paths` follows the
-same exact existing-file and opacity rules as generation. Keep
+The origin is illustrative, never a default. `allowed_origins` always contains
+the one confirmed target application origin, including static or no-browser
+discovery; an empty list is invalid and does not grant browser actions.
+`allowed_state_paths` follows the same exact existing-file and opacity rules as
+generation. Keep
 `allowed_browser_actions` empty unless the human approved a concrete exploration
 scope and reset or cleanup method. It may then contain only the action names
 `check`, `click`, `dblclick`, `fill`, `keydown`, `keyup`, `press`, `select`,
@@ -62,6 +65,16 @@ approved. Selection never approves a spec path, execution, or mutation.
 Standalone Explorer validates and reports the proposals, performs discovery
 cleanup, and stops before scenario selection.
 
+When presenting valid proposals, Main shows each complete compact proposal,
+including its source/test references, expected-behavior evidence label, coverage,
+and prerequisites or questions. Do not replace them with a title-only or lossy
+summary. Explorer's observed test-id convention is reporting evidence only; it
+is not a `/setup` profile and does not replace Author's bounded convention scan.
+Preserve Explorer's reported `Reads` and `Budget` status exactly. Never infer
+that a limit was exhausted from approximate wall time or tool-call totals; when
+the report and independent evidence conflict, state that the boundary is
+unverified.
+
 ## Sequential queue
 
 When the human selects multiple Explorer proposals, Main keeps their order in a
@@ -96,7 +109,19 @@ A cleanup failure keeps the queue paused before activating the next scenario.
 Execution approval and mutation approval never carry from one scenario into
 another.
 
-The final summary has one entry per selected scenario and lists its reference,
-spec path, run ID (or `not allocated`), checkpoint decision, disposition,
-Healer attempts, mutation coverage, and unresolved owner. Report blocked and
-`not-started` entries directly; never collapse the queue into "all passed."
+Use this shape for every final summary entry:
+
+```text
+Scenario: <reference>
+Spec: <path>
+Run: <run ID or not allocated>
+Checkpoint: <run, adjust then final decision, skip, or not reached>
+Disposition: <final disposition>
+Healer attempts: <count or not-run>
+Mutation: <coverage/result or not-run>
+Owner: <unresolved owner or none>
+```
+
+Report blocked and `not-started` entries directly; never collapse the queue into
+"all passed." Derive the retained spec count and current checkout status after
+accepted cleanup; do not present a historical controlled defect as current.

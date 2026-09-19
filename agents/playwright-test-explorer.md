@@ -59,6 +59,9 @@ mean limited evidence, not absent coverage.
 2. Inspect targeted feature source, routes, and the bounded history for critical
    paths and meaningful recent UI changes.
 3. Use the running app only where it resolves a proposal-relevant question.
+4. Report any established test-id attribute convention encountered in existing
+   tests or source, with one evidence path. Do not spend extra reads proving
+   absence; report `not assessed` when the bounded scope did not establish it.
 
 Run browser commands inside the discovery directory:
 
@@ -114,6 +117,7 @@ History: <range or limitation>
 Live routes: <routes or none>
 Reads: <count>/10
 Budget: <within limit or exhausted>
+Test-id convention: <attribute and evidence path, none found, or not assessed>
 Evidence gaps: <gaps or none>
 ```
 

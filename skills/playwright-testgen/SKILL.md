@@ -12,6 +12,12 @@ behavior; the running application proves what actually renders.
 
 ## Runtime boundary
 
+Installed resource root: `${CLAUDE_PLUGIN_ROOT}`. Use this already-expanded
+absolute root for `Read` of bundled references and schemas. Supporting files
+are read literally: resolve their plugin-relative paths against this root,
+not the repository being tested. This resource path does not replace the
+SessionStart environment variable used for Bash scripts below.
+
 Run the workflow inside the repository being tested. It must already
 provide its local `playwright` and `@playwright/test` runtime. The current
 official `@playwright/cli` must be installed globally so its documented
