@@ -5,6 +5,7 @@ const {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   unlinkSync,
@@ -16,6 +17,7 @@ const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 const { setTimeout: delay } = require('node:timers/promises');
 const { verifyMutation } = require('../scripts/mutation-isolation.cjs');
+const { samePath } = require('../hooks/run-policy.cjs');
 
 const pluginRoot = path.resolve(__dirname, '..');
 const mutationCheckPath = path.join(
@@ -52,6 +54,22 @@ function git(repository, args) {
   });
   assert.equal(result.status, 0, result.stderr);
   return result.stdout;
+}
+
+function removeDisposableWorktree(repository) {
+  const worktrees = git(repository, ['worktree', 'list', '--porcelain'])
+    .split(/\r?\n/u)
+    .filter((line) => line.startsWith('worktree '))
+    .map((line) => path.resolve(line.slice('worktree '.length)));
+  const main = realpathSync.native(repository);
+  const disposable = worktrees.find(
+    (candidate) => !samePath(realpathSync.native(candidate), main),
+  );
+  if (disposable != null) {
+    git(repository, ['worktree', 'unlock', disposable]);
+    git(repository, ['worktree', 'remove', '--force', '--', disposable]);
+    rmSync(path.dirname(disposable), { force: true, recursive: true });
+  }
 }
 
 function createRepository() {
@@ -1444,18 +1462,7 @@ test('preserves a primary failure when cleanup also fails', () => {
       assert.equal(path.dirname(recovery.worktree), recovery.temporary_root);
       assert.equal(existsSync(recovery.worktree), true);
     } finally {
-      const worktrees = git(repository, ['worktree', 'list', '--porcelain'])
-        .split(/\r?\n/u)
-        .filter((line) => line.startsWith('worktree '))
-        .map((line) => path.resolve(line.slice('worktree '.length)));
-      const disposable = worktrees.find(
-        (candidate) => candidate !== path.resolve(repository),
-      );
-      if (disposable != null) {
-        git(repository, ['worktree', 'unlock', disposable]);
-        git(repository, ['worktree', 'remove', '--force', '--', disposable]);
-        rmSync(path.dirname(disposable), { force: true, recursive: true });
-      }
+      removeDisposableWorktree(repository);
     }
   });
 });
@@ -1522,18 +1529,7 @@ test('reports a locked disposable checkout as a cleanup failure', () => {
         'module.exports = 1;\n',
       );
     } finally {
-      const worktrees = git(repository, ['worktree', 'list', '--porcelain'])
-        .split(/\r?\n/u)
-        .filter((line) => line.startsWith('worktree '))
-        .map((line) => path.resolve(line.slice('worktree '.length)));
-      const disposable = worktrees.find(
-        (candidate) => candidate !== path.resolve(repository),
-      );
-      if (disposable != null) {
-        git(repository, ['worktree', 'unlock', disposable]);
-        git(repository, ['worktree', 'remove', '--force', '--', disposable]);
-        rmSync(path.dirname(disposable), { force: true, recursive: true });
-      }
+      removeDisposableWorktree(repository);
     }
   });
 });
@@ -1567,18 +1563,7 @@ test('rechecks the active checkout even when isolation cleanup fails', () => {
       assert.equal(output.error, 'active-checkout-changed');
       assert.equal(output.cleanup, 'failed');
     } finally {
-      const worktrees = git(repository, ['worktree', 'list', '--porcelain'])
-        .split(/\r?\n/u)
-        .filter((line) => line.startsWith('worktree '))
-        .map((line) => path.resolve(line.slice('worktree '.length)));
-      const disposable = worktrees.find(
-        (candidate) => candidate !== path.resolve(repository),
-      );
-      if (disposable != null) {
-        git(repository, ['worktree', 'unlock', disposable]);
-        git(repository, ['worktree', 'remove', '--force', '--', disposable]);
-        rmSync(path.dirname(disposable), { force: true, recursive: true });
-      }
+      removeDisposableWorktree(repository);
     }
   });
 });

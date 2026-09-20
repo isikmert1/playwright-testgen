@@ -114,7 +114,7 @@ function exactSpecFilter(repository, relative = 'tests/account.spec.ts') {
 
 function runnerCommand(repository, output, options = '') {
   const filter = exactSpecFilter(repository);
-  return `PLAYWRIGHT_HTML_OPEN=never npx --no playwright test '${filter}' ${options}--retries=0 --repeat-each=1 --output=${output}`;
+  return `PLAYWRIGHT_HTML_OPEN=never npx --no playwright test '${filter}' ${options}--retries=0 --repeat-each=1 --output='${output}'`;
 }
 
 test('makes exact spec filters explicit about platform case semantics', () => {
