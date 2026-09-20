@@ -484,7 +484,7 @@ test('reserves margin below the installed hook timeout', () => {
   assert.equal(installedHookPreflightTimeout(0.025), 20);
 });
 
-test('preserves installed hook cancellation before paid execution', async () => {
+test('preserves installed hook cancellation before paid execution', async (t) => {
   const { verifyInstalledHook } = modules().runner;
   const temporaryRoot = mkdtempSync(
     path.join(tmpdir(), 'testgen-installed-hook-cancel-'),
@@ -511,7 +511,13 @@ test('preserves installed hook cancellation before paid execution', async () => 
           repository,
           path.join(temporaryRoot, 'hook-preflight.jsonl'),
           controller.signal,
-        ),
+        ).catch((error) => {
+          if (error.code === 'process-tree-cleanup-failed')
+            t.diagnostic(
+              `cleanup reason: ${error.details.join(',') || 'unknown'}`,
+            );
+          throw error;
+        }),
         /evaluation-cancelled/u,
       );
     } finally {
@@ -1494,6 +1500,32 @@ test(
     assert.deepEqual(JSON.parse(result.stdout), {
       code: 'process-tree-cleanup-failed',
       details: ['snapshot-timeout'],
+    });
+  },
+);
+
+test(
+  'accepts a Windows child that exits before termination',
+  { skip: process.platform !== 'win32' },
+  () => {
+    const script = [
+      "const tree=require('./scripts/windows-process-tree.cjs');",
+      'let calls=0;',
+      'tree.windowsProcessTree=()=>({root_exists:++calls===1,descendants:[],known_running:[]});',
+      "const {stopProcessTree}=require('./scripts/run-healer-defect-refusal.cjs');",
+      'const diagnostics={};',
+      'stopProcessTree({pid:2147483647,kill(){}},diagnostics).then(stopped=>process.stdout.write(JSON.stringify({stopped,reason:diagnostics.reason??null})));',
+    ].join('');
+    const result = spawnSync(process.execPath, ['-e', script], {
+      cwd: repositoryRoot,
+      encoding: 'utf8',
+      timeout: 5000,
+      windowsHide: true,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), {
+      stopped: true,
+      reason: null,
     });
   },
 );

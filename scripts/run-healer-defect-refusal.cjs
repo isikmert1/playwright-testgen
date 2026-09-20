@@ -762,7 +762,7 @@ async function stopProcessTree(child, diagnostics = {}) {
           return failed(diagnostics.reason ?? 'snapshot-unavailable');
         for (const target of current.descendants) known.add(target);
         if (
-          rootTerminated &&
+          !current.root_exists &&
           current.known_running.length === 0 &&
           current.descendants.length === 0
         )
