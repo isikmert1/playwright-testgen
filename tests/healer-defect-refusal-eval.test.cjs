@@ -1440,6 +1440,32 @@ test('hard timeout terminates a non-returning process', async () => {
 });
 
 test(
+  'accepts a slow but successful Windows process snapshot',
+  { skip: process.platform !== 'win32' },
+  () => {
+    const script = [
+      "const childProcess=require('node:child_process');",
+      'const spawnSync=childProcess.spawnSync;',
+      "childProcess.spawnSync=(name,args,options)=>name==='powershell.exe'?spawnSync(process.execPath,['-e',\"setTimeout(()=>process.stdout.write('0||'),5600)\"],options):spawnSync(name,args,options);",
+      "const {windowsProcessTree}=require('./scripts/windows-process-tree.cjs');",
+      'process.stdout.write(JSON.stringify(windowsProcessTree(999999)));',
+    ].join('');
+    const result = spawnSync(process.execPath, ['-e', script], {
+      cwd: repositoryRoot,
+      encoding: 'utf8',
+      timeout: 12000,
+      windowsHide: true,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), {
+      root_exists: false,
+      descendants: [],
+      known_running: [],
+    });
+  },
+);
+
+test(
   'reports a Windows process snapshot timeout without raw output',
   { skip: process.platform !== 'win32' },
   () => {

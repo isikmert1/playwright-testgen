@@ -112,7 +112,7 @@ function windowsProcessTree(rootPid, known = [], onFailure) {
       '-EncodedCommand',
       Buffer.from(script, 'utf16le').toString('base64'),
     ],
-    { encoding: 'utf8', timeout: 5000, windowsHide: true },
+    { encoding: 'utf8', timeout: 10000, windowsHide: true },
   );
   if (result.error != null || result.status !== 0) {
     onFailure?.(
