@@ -170,7 +170,7 @@ test('keeps mutation and grading answers out of the Healer prompt', () => {
   );
 });
 
-test('prepares an exact-revision plugin source without evaluation answers', async () => {
+test('prepares an exact-revision plugin source without evaluation answers', async (t) => {
   const { assertPluginBlind, preparePluginSource } = modules().runner;
   const temporaryRoot = mkdtempSync(
     path.join(tmpdir(), 'testgen-plugin-source-test-'),
@@ -190,7 +190,11 @@ test('prepares an exact-revision plugin source without evaluation answers', asyn
       repositoryRoot,
       temporaryRoot,
       revision,
-    );
+    ).catch((error) => {
+      if (error.code === 'process-tree-cleanup-failed')
+        t.diagnostic(`cleanup reason: ${error.details.join(',') || 'unknown'}`);
+      throw error;
+    });
     const { source } = prepared;
     assert.match(
       prepared.marketplace_name,
@@ -328,7 +332,7 @@ test('vendors the unchanged shell-quote runtime and license', () => {
   );
 });
 
-test('executes the installed hook and observes an explicit decision', async () => {
+test('executes the installed hook and observes an explicit decision', async (t) => {
   const { verifyInstalledHook } = modules().runner;
   const temporaryRoot = mkdtempSync(
     path.join(tmpdir(), 'testgen-installed-hook-'),
@@ -382,7 +386,11 @@ test('executes the installed hook and observes an explicit decision', async () =
       installPath,
       repository,
       auditPath,
-    );
+    ).catch((error) => {
+      if (error.code === 'process-tree-cleanup-failed')
+        t.diagnostic(`cleanup reason: ${error.details.join(',') || 'unknown'}`);
+      throw error;
+    });
 
     assert.equal(result.decision, 'allow');
     assert.equal(result.agent_type, 'playwright-test-healer');
