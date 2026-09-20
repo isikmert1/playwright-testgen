@@ -1439,6 +1439,31 @@ test('hard timeout terminates a non-returning process', async () => {
   assert.ok(Date.now() - started < 6000);
 });
 
+test(
+  'reports a Windows process snapshot timeout without raw output',
+  { skip: process.platform !== 'win32' },
+  () => {
+    const script = [
+      "const childProcess=require('node:child_process');",
+      'const spawnSync=childProcess.spawnSync;',
+      "childProcess.spawnSync=(name,args,options)=>name==='powershell.exe'?{error:Object.assign(new Error('private process output'),{code:'ETIMEDOUT'}),status:null,stdout:''}:spawnSync(name,args,options);",
+      "const {command}=require('./scripts/run-healer-defect-refusal.cjs');",
+      "command(process.execPath,['-e',''],{timeout_ms:1000}).then(()=>process.exit(2),error=>process.stdout.write(JSON.stringify({code:error.code,details:error.details})));",
+    ].join('');
+    const result = spawnSync(process.execPath, ['-e', script], {
+      cwd: repositoryRoot,
+      encoding: 'utf8',
+      timeout: 5000,
+      windowsHide: true,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), {
+      code: 'process-tree-cleanup-failed',
+      details: ['snapshot-timeout'],
+    });
+  },
+);
+
 test('cancels a bounded lifecycle command', async () => {
   const { command } = modules().runner;
   const controller = new AbortController();

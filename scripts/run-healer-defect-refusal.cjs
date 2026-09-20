@@ -77,8 +77,8 @@ class EvaluationError extends Error {
   }
 }
 
-function fail(code) {
-  throw new EvaluationError(code);
+function fail(code, details = []) {
+  throw new EvaluationError(code, details);
 }
 
 function executable(name) {
@@ -110,7 +110,8 @@ async function command(commandName, args, options = {}) {
     timeout_ms: options.timeout_ms ?? LIFECYCLE_COMMAND_TIMEOUT_MS,
     verify_process_tree: true,
   });
-  if (result.tree_cleanup_failed) fail('process-tree-cleanup-failed');
+  if (result.tree_cleanup_failed)
+    fail('process-tree-cleanup-failed', [result.tree_cleanup_reason]);
   if (result.cancelled) fail('evaluation-cancelled');
   if (result.timed_out) fail('lifecycle-command-timeout');
   if (
@@ -716,13 +717,21 @@ function processTreeExists(pid) {
   }
 }
 
-async function stopProcessTree(child) {
+async function stopProcessTree(child, diagnostics = {}) {
   if (child == null || child.pid == null) return true;
   const pid = child.pid;
+  const failed = (reason) => {
+    diagnostics.reason = reason;
+    return false;
+  };
   try {
     if (process.platform === 'win32') {
-      const initial = windowsProcessTree(pid);
-      if (initial == null) return false;
+      const onSnapshotFailure = (reason) => {
+        diagnostics.reason = reason;
+      };
+      const initial = windowsProcessTree(pid, [], onSnapshotFailure);
+      if (initial == null)
+        return failed(diagnostics.reason ?? 'snapshot-unavailable');
       const known = new Set(initial.descendants);
       const terminate = (target) => {
         const result = spawnSync(
@@ -748,8 +757,9 @@ async function stopProcessTree(child) {
 
       for (let attempt = 0; attempt < 3; attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, 100));
-        const current = windowsProcessTree(pid, known);
-        if (current == null) return false;
+        const current = windowsProcessTree(pid, known, onSnapshotFailure);
+        if (current == null)
+          return failed(diagnostics.reason ?? 'snapshot-unavailable');
         for (const target of current.descendants) known.add(target);
         if (
           rootTerminated &&
@@ -764,7 +774,9 @@ async function stopProcessTree(child) {
         if (current.root_exists && !rootTerminated)
           rootTerminated = terminate(pid);
       }
-      return false;
+      return failed(
+        rootTerminated ? 'process-still-running' : 'termination-failed',
+      );
     } else {
       try {
         process.kill(-pid, 'SIGKILL');
@@ -773,16 +785,16 @@ async function stopProcessTree(child) {
       }
     }
   } catch {
-    return false;
+    return failed('cleanup-exception');
   }
 
   for (let attempt = 0; attempt < 20; attempt += 1) {
     const exists = processTreeExists(pid);
     if (exists === false) return true;
-    if (exists == null) return false;
+    if (exists == null) return failed('snapshot-unavailable');
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
-  return false;
+  return failed('process-still-running');
 }
 
 function runBounded(commandName, args, options) {
@@ -794,6 +806,7 @@ function runBounded(commandName, args, options) {
     let cancelled = false;
     let overflow = false;
     let treeCleanupFailed = false;
+    let treeCleanupReason = null;
     let settled = false;
     let stopTimer = null;
     let stopping = null;
@@ -808,6 +821,7 @@ function runBounded(commandName, args, options) {
         status: null,
         timed_out: false,
         tree_cleanup_failed: false,
+        tree_cleanup_reason: null,
       });
       return;
     }
@@ -839,11 +853,16 @@ function runBounded(commandName, args, options) {
         status,
         timed_out: timedOut,
         tree_cleanup_failed: treeCleanupFailed,
+        tree_cleanup_reason: treeCleanupReason,
       });
     };
     const ensureStopped = () => {
-      stopping ??= stopProcessTree(child).then((stopped) => {
-        if (!stopped) treeCleanupFailed = true;
+      const diagnostics = {};
+      stopping ??= stopProcessTree(child, diagnostics).then((stopped) => {
+        if (!stopped) {
+          treeCleanupFailed = true;
+          treeCleanupReason = diagnostics.reason ?? 'cleanup-unverified';
+        }
       });
       return stopping;
     };
@@ -851,6 +870,7 @@ function runBounded(commandName, args, options) {
       void ensureStopped().then(() => finish(child.exitCode, 'terminated'));
       stopTimer ??= setTimeout(() => {
         treeCleanupFailed = true;
+        treeCleanupReason = 'stop-timeout';
         finish(null, 'forced-stop');
       }, 5000);
     };
@@ -1218,7 +1238,8 @@ async function runTarget(
       verify_process_tree: true,
     },
   );
-  if (result.tree_cleanup_failed) fail('process-tree-cleanup-failed');
+  if (result.tree_cleanup_failed)
+    fail('process-tree-cleanup-failed', [result.tree_cleanup_reason]);
   if (result.cancelled) fail('evaluation-cancelled');
   if (result.timed_out) fail('target-runner-timeout');
   if (
@@ -1405,7 +1426,8 @@ async function validateArtifact(
       verify_process_tree: true,
     },
   );
-  if (result.tree_cleanup_failed) fail('process-tree-cleanup-failed');
+  if (result.tree_cleanup_failed)
+    fail('process-tree-cleanup-failed', [result.tree_cleanup_reason]);
   if (result.cancelled) fail('evaluation-cancelled');
   if (result.timed_out) fail('lifecycle-command-timeout');
   if (result.status !== 0) {
@@ -1645,7 +1667,8 @@ async function runRuntimePreflight(
       verify_process_tree: true,
     },
   );
-  if (result.tree_cleanup_failed) fail('process-tree-cleanup-failed');
+  if (result.tree_cleanup_failed)
+    fail('process-tree-cleanup-failed', [result.tree_cleanup_reason]);
   if (result.cancelled) fail('evaluation-cancelled');
   if (result.timed_out) fail('runtime-preflight-timeout');
   if (result.output_overflow || result.spawn_error != null)
@@ -1882,7 +1905,8 @@ async function evaluateInstalledHealer(signal) {
     Object.assign(runtime, parsedAgent.runtime, {
       model_resolved: parsedAgent.runtime.model ?? null,
     });
-    if (agent.tree_cleanup_failed) fail('agent-process-tree-cleanup-failed');
+    if (agent.tree_cleanup_failed)
+      fail('agent-process-tree-cleanup-failed', [agent.tree_cleanup_reason]);
     if (
       agent.timed_out ||
       agent.cancelled ||
