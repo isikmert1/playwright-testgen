@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
-const { spawnSync } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
+const { once } = require('node:events');
 const {
   cpSync,
   existsSync,
@@ -1605,7 +1606,14 @@ test('cleans a descendant after its immediate parent exits', async () => {
     assert.equal(result.status, 0);
     assert.equal(result.tree_cleanup_failed, false);
     assert.match(result.output, /^\d+$/u);
-    assert.throws(() => process.kill(descendantPid, 0));
+    if (process.platform === 'linux') {
+      try {
+        const stat = readFileSync(`/proc/${descendantPid}/stat`, 'utf8');
+        assert.equal(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[0], 'Z');
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+      }
+    } else assert.throws(() => process.kill(descendantPid, 0));
   } finally {
     if (Number.isInteger(descendantPid)) {
       try {
@@ -1616,6 +1624,53 @@ test('cleans a descendant after its immediate parent exits', async () => {
     }
   }
 });
+
+test(
+  'ignores a zombie-only Linux process group after cleanup',
+  { skip: process.platform !== 'linux' },
+  async (t) => {
+    if (spawnSync('python3', ['--version']).status !== 0)
+      return t.skip('python3 is needed to hold an unreaped child');
+    const { stopProcessTree } = modules().runner;
+    const python = [
+      'import os,sys',
+      'pid=os.fork()',
+      'if pid == 0:',
+      '    os.setpgid(0,0)',
+      '    os._exit(0)',
+      'print(pid,flush=True)',
+      'sys.stdin.readline()',
+      'os.waitpid(pid,0)',
+    ].join('\n');
+    const parent = spawn('python3', ['-u', '-c', python], {
+      stdio: ['pipe', 'pipe', 'ignore'],
+    });
+    const closed = once(parent, 'close');
+    parent.stdin.on('error', () => {});
+    try {
+      const [output] = await once(parent.stdout, 'data');
+      const zombiePid = Number(output.toString().trim());
+      assert.ok(Number.isInteger(zombiePid));
+      const state = () => {
+        const stat = readFileSync(`/proc/${zombiePid}/stat`, 'utf8');
+        return stat.slice(stat.lastIndexOf(')') + 2).split(' ')[0];
+      };
+      for (let attempt = 0; attempt < 20 && state() !== 'Z'; attempt += 1)
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      assert.equal(state(), 'Z');
+      assert.doesNotThrow(() => process.kill(-zombiePid, 0));
+      assert.equal(await stopProcessTree({ pid: zombiePid, kill() {} }), true);
+    } finally {
+      const rescue = setTimeout(() => parent.kill('SIGKILL'), 2000);
+      parent.stdin.end('\n');
+      try {
+        await closed;
+      } finally {
+        clearTimeout(rescue);
+      }
+    }
+  },
+);
 
 test(
   'cleans a Windows descendant whose parent is already gone',
