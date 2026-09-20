@@ -86,9 +86,9 @@ const RAW_CONTENT_KEYS = new Set([
 const SECRET_VALUE =
   /(?:-----BEGIN [A-Z ]*PRIVATE KEY-----|authorization\s*:|(?:api[-_ ]?key|token|secret|password|passwd|cookie|set-cookie)\s*[:=]|\bhttps?:\/\/[^\s/@]+@[^\s]+)/iu;
 const RAW_CONTENT_VALUE =
-  /(?:\bsnapshot\s*:|\b(?:test|describe|expect)\s*\(|```)/iu;
+  /(?:\bsnapshot\s*:|\b(?:test|describe|expect)\(|\b(?:test|describe)\s*\(\s*['"`]|\b(?:test|describe)\s*\([^,;\r\n]+,\s*(?:async\b|function\b|\([^)]*\)\s*=>)|\bexpect\s*\([^;\r\n]*\)\s*(?:\.[A-Za-z_$][\w$]*)+\s*\(|```)/iu;
 const ENVIRONMENT_VALUE =
-  /(?:^|[^A-Za-z0-9_])(?:env:)?(?:[A-Z_][A-Z0-9_]*|[a-z][a-z0-9]*_[a-z0-9_]+)=[^\s]+/u;
+  /(?:\bexport\s+[A-Za-z_][A-Za-z0-9_]*=|(?:^|[^A-Za-z0-9_])(?:(?:env:)?[A-Z_][A-Z0-9_]*|env:[a-z][a-z0-9_]*|(?:database|db|redis|aws|azure|gcp|node|server)_[a-z0-9_]+)=[^\s]+|(?:^|[^A-Za-z0-9_])[a-z][a-z0-9_]*=(?:[A-Za-z][A-Za-z0-9+.-]*:\/\/))/u;
 const CSS_ATTRIBUTE_SELECTOR =
   /\[[A-Za-z_][A-Za-z0-9_.:-]*\s*(?:[~|^$*]?=)\s*(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\]\s]+)\s*\]/gu;
 const RAW_DOM_TAG = /<\/?[A-Za-z][A-Za-z0-9:-]*(?:\s[^<>]*?)?\/?>/u;

@@ -93,7 +93,7 @@ public static class TestgenProcessTree {
 }
 `;
 
-function windowsProcessTree(rootPid, known = []) {
+function windowsProcessTree(rootPid, known = [], onFailure) {
   const script = [
     `$source = @'${PROCESS_SNAPSHOT_SOURCE}'@`,
     'Add-Type -TypeDefinition $source',
@@ -112,9 +112,18 @@ function windowsProcessTree(rootPid, known = []) {
       '-EncodedCommand',
       Buffer.from(script, 'utf16le').toString('base64'),
     ],
-    { encoding: 'utf8', timeout: 5000, windowsHide: true },
+    { encoding: 'utf8', timeout: 10000, windowsHide: true },
   );
-  if (result.error != null || result.status !== 0) return null;
+  if (result.error != null || result.status !== 0) {
+    onFailure?.(
+      result.error?.code === 'ETIMEDOUT'
+        ? 'snapshot-timeout'
+        : result.error != null
+          ? 'snapshot-spawn-failed'
+          : 'snapshot-command-failed',
+    );
+    return null;
+  }
   const [root, descendantsText, knownText] = result.stdout.trim().split('|');
   const parseIds = (value) =>
     value === '' ? [] : value.split(',').map(Number).filter(Number.isInteger);
@@ -122,8 +131,10 @@ function windowsProcessTree(rootPid, known = []) {
     !['0', '1'].includes(root) ||
     descendantsText == null ||
     knownText == null
-  )
+  ) {
+    onFailure?.('snapshot-invalid-output');
     return null;
+  }
   return {
     root_exists: root === '1',
     descendants: parseIds(descendantsText),

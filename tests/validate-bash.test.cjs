@@ -114,7 +114,7 @@ function exactSpecFilter(repository, relative = 'tests/account.spec.ts') {
 
 function runnerCommand(repository, output, options = '') {
   const filter = exactSpecFilter(repository);
-  return `PLAYWRIGHT_HTML_OPEN=never npx --no playwright test '${filter}' ${options}--retries=0 --repeat-each=1 --output=${output}`;
+  return `PLAYWRIGHT_HTML_OPEN=never npx --no playwright test '${filter}' ${options}--retries=0 --repeat-each=1 --output='${output}'`;
 }
 
 test('makes exact spec filters explicit about platform case semantics', () => {
@@ -2124,6 +2124,125 @@ test('keeps approved storage state outside Grep search roots', () => {
   });
 });
 
+test('keeps credential-like files out of Author and Healer reads and searches', () => {
+  withTargetRepository(({ targetRepository }) => {
+    const sourceDirectory = path.join(targetRepository, 'src');
+    mkdirSync(sourceDirectory);
+    const secretPaths = [
+      path.join(targetRepository, '.npmrc'),
+      path.join(sourceDirectory, '.env'),
+      path.join(sourceDirectory, 'credentials.json'),
+      path.join(sourceDirectory, 'client.key'),
+    ];
+    for (const secretPath of secretPaths) writeFileSync(secretPath, 'secret');
+
+    for (const role of ['playwright-test-author', 'playwright-test-healer']) {
+      for (const secretPath of secretPaths) {
+        assert.equal(
+          runToolHook(
+            targetRepository,
+            'Read',
+            {
+              file_path: secretPath,
+            },
+            role,
+          ).permissionDecision,
+          'deny',
+          `${role}: ${secretPath}`,
+        );
+        assert.equal(
+          runToolHook(
+            targetRepository,
+            'Grep',
+            {
+              path: secretPath,
+              pattern: 'secret',
+            },
+            role,
+          ).permissionDecision,
+          'deny',
+          `${role}: ${secretPath}`,
+        );
+      }
+      assert.equal(
+        runToolHook(
+          targetRepository,
+          'Grep',
+          {
+            path: sourceDirectory,
+            pattern: 'secret',
+          },
+          role,
+        ).permissionDecision,
+        'deny',
+      );
+      assert.deepEqual(
+        runToolHook(
+          targetRepository,
+          'Grep',
+          {
+            path: path.join(targetRepository, 'tests'),
+            pattern: 'test',
+          },
+          role,
+        ),
+        {},
+      );
+    }
+    assert.equal(
+      runToolHook(
+        targetRepository,
+        'Read',
+        {
+          file_path: path.join(targetRepository, 'tests', 'account.spec.ts'),
+        },
+        'playwright-test-healer',
+      ).permissionDecision,
+      'allow',
+    );
+  });
+});
+
+test('checks resolved credential targets, not just link names', (t) => {
+  withTargetRepository(({ targetRepository }) => {
+    const secretPath = path.join(targetRepository, '.env');
+    const linkPath = path.join(targetRepository, 'tests', 'looks-safe.ts');
+    writeFileSync(secretPath, 'secret');
+    try {
+      symlinkSync(secretPath, linkPath, 'file');
+    } catch (error) {
+      if (error.code === 'EPERM') return t.skip('file symlinks unavailable');
+      throw error;
+    }
+
+    for (const role of ['playwright-test-author', 'playwright-test-healer']) {
+      assert.equal(
+        runToolHook(
+          targetRepository,
+          'Read',
+          {
+            file_path: linkPath,
+          },
+          role,
+        ).permissionDecision,
+        'deny',
+      );
+      assert.equal(
+        runToolHook(
+          targetRepository,
+          'Grep',
+          {
+            path: linkPath,
+            pattern: 'secret',
+          },
+          role,
+        ).permissionDecision,
+        'deny',
+      );
+    }
+  });
+});
+
 test('denies run ownership through a repository junction or symlink', () => {
   const targetRepository = mkdtempSync(path.join(tmpdir(), 'testgen-hook-'));
   const outside = mkdtempSync(path.join(tmpdir(), 'testgen-outside-'));
@@ -2785,15 +2904,22 @@ test('rejects non-regular and oversized trace drafts before reading', () => {
 test('limits governed file mutations to explicitly approved paths', () => {
   withTargetRepository(({ runDirectory, targetRepository }) => {
     const helperPath = path.join(targetRepository, 'tests', 'selectors.ts');
+    const exactCredentialWrite = path.join(targetRepository, 'tests', '.env');
     const packagePath = path.join(targetRepository, 'package.json');
     writeFileSync(helperPath, 'export const account = "account";\n');
+    writeFileSync(exactCredentialWrite, 'EXAMPLE=fixture\n');
     writeFileSync(packagePath, '{}\n');
     updatePolicy(runDirectory, {
-      allowed_write_paths: ['tests/selectors.ts'],
+      allowed_write_paths: ['tests/selectors.ts', 'tests/.env'],
     });
 
     assert.equal(
       runToolHook(targetRepository, 'Edit', { file_path: helperPath })
+        .permissionDecision,
+      'allow',
+    );
+    assert.equal(
+      runToolHook(targetRepository, 'Edit', { file_path: exactCredentialWrite })
         .permissionDecision,
       'allow',
     );

@@ -151,15 +151,10 @@ const EXCLUDED_DISCOVERY_PARTS = new Set([
   'variants',
 ]);
 
-function isExcludedDiscoveryPath(policy, ...paths) {
+function isCredentialPath(...paths) {
   return paths.some((absolute) => {
-    const relative = normalizePath(
-      path.relative(policy.repositoryRoot, absolute),
-    ).toLowerCase();
-    const parts = relative.split('/');
-    const basename = parts.at(-1);
+    const basename = path.basename(absolute).toLowerCase();
     return (
-      parts.some((part) => EXCLUDED_DISCOVERY_PARTS.has(part)) ||
       basename === '.env' ||
       basename.startsWith('.env.') ||
       basename.endsWith('.env') ||
@@ -173,7 +168,18 @@ function isExcludedDiscoveryPath(policy, ...paths) {
   });
 }
 
-function searchMayReachExcludedDiscoveryPath(policy, root) {
+function isExcludedDiscoveryPath(policy, ...paths) {
+  if (isCredentialPath(...paths)) return true;
+  return paths.some((absolute) => {
+    const relative = normalizePath(
+      path.relative(policy.repositoryRoot, absolute),
+    ).toLowerCase();
+    const parts = relative.split('/');
+    return parts.some((part) => EXCLUDED_DISCOVERY_PARTS.has(part));
+  });
+}
+
+function searchMayReachExcludedPath(policy, root, excludesPath) {
   const pending = [root];
   const visited = new Set();
   let entriesVisited = 0;
@@ -204,7 +210,7 @@ function searchMayReachExcludedDiscoveryPath(policy, root) {
         if (entry.isSymbolicLink()) canonicalChild = realpathSync(child);
         if (
           !isContained(policy.canonicalRepositoryRoot, canonicalChild, true) ||
-          isExcludedDiscoveryPath(policy, child, canonicalChild)
+          excludesPath(child, canonicalChild)
         ) {
           return true;
         }
@@ -254,6 +260,10 @@ function validateFileAccess(payload) {
     } catch {
       // The normal tool sandbox handles paths with no resolvable ancestor.
     }
+  }
+
+  if (payload.tool_name === 'Read' && isCredentialPath(absolute, canonical)) {
+    return deny('Credential-like files are opaque to governed agents.');
   }
 
   const pluginRead = validatePluginRead(payload, absolute, canonical);
@@ -557,6 +567,18 @@ function validateGrepAccess(payload) {
     );
   }
 
+  if (
+    isCredentialPath(absolute, canonical) ||
+    (searchesDirectory &&
+      policies.some((policy) =>
+        searchMayReachExcludedPath(policy, absolute, isCredentialPath),
+      ))
+  ) {
+    return deny(
+      'Credential-like files are opaque to governed agents. Scope Grep to a safe source or test path.',
+    );
+  }
+
   if (isExplorer(payload)) {
     const policy = explorerPolicy(policies, absolute, canonical);
     const {
@@ -570,7 +592,9 @@ function validateGrepAccess(payload) {
       samePath(absolute, policy.repositoryRoot) ||
       isExcludedDiscoveryPath(policy, absolute, canonical) ||
       (searchesDirectory &&
-        searchMayReachExcludedDiscoveryPath(policy, absolute)) ||
+        searchMayReachExcludedPath(policy, absolute, (...paths) =>
+          isExcludedDiscoveryPath(policy, ...paths),
+        )) ||
       typeof pattern !== 'string' ||
       pattern.length === 0 ||
       pattern.length > 500 ||
@@ -644,7 +668,10 @@ function validateGlobAccess(payload) {
     (explorer && samePath(absolute, policy.repositoryRoot)) ||
     (explorer && isExcludedDiscoveryPath(policy, absolute, canonical)) ||
     !statSync(absolute).isDirectory() ||
-    (explorer && searchMayReachExcludedDiscoveryPath(policy, absolute)) ||
+    (explorer &&
+      searchMayReachExcludedPath(policy, absolute, (...paths) =>
+        isExcludedDiscoveryPath(policy, ...paths),
+      )) ||
     linkedStateCouldBeInSearch ||
     policy.allowedStatePaths.some(
       (state) =>

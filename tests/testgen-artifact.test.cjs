@@ -1253,11 +1253,52 @@ test('accepts benign equals syntax in bounded artifact prose', () => {
   });
 });
 
+test('accepts ordinary prose containing test and expect followed by parentheses', () => {
+  withRepository((repository) => {
+    const artifact = handoff();
+    artifact.assumptions = [
+      'The test (after login) still checks the signed-in page.',
+      'We expect (once loaded) one visible result.',
+    ];
+    const artifactPath = writeArtifact(
+      repository,
+      runId,
+      'handoff.json',
+      artifact,
+    );
+
+    const result = validate(repository, 'handoff', runId, artifactPath);
+    assert.equal(result.status, 0, result.stderr);
+  });
+});
+
+test('accepts a benign lowercase field assignment in artifact prose', () => {
+  withRepository((repository) => {
+    const artifact = handoff();
+    artifact.assumptions = ['The row keeps order_status=pending until review.'];
+    const artifactPath = writeArtifact(
+      repository,
+      runId,
+      'handoff.json',
+      artifact,
+    );
+
+    const result = validate(repository, 'handoff', runId, artifactPath);
+    assert.equal(result.status, 0, result.stderr);
+  });
+});
+
 test('rejects environment assignments and raw snapshots', () => {
   withRepository((repository) => {
     for (const value of [
       'DATABASE_URL=postgres://example.test/app',
       'database_url=postgres://example.test/app',
+      'node_env=production',
+      'server_port=3000',
+      'export http_proxy=http://proxy.internal:8080',
+      'export service_url=https://internal.example.test',
+      'service_url=https://internal.example.test',
+      'env:order_status=pending',
       'env:DATABASE_URL=postgres://example.test/app',
       '(database_url=postgres://example.test/app)',
       '"DATABASE_URL=postgres://example.test/app"',
@@ -1269,6 +1310,14 @@ test('rejects environment assignments and raw snapshots', () => {
       '<my-widget />',
       'https://admin:hunter2@example.test/account',
       'https://private-user@example.test/account',
+      "test ('saves an order', async () => {})",
+      'expect (result).toBe(1)',
+      'await expect (page.getByRole("button")).toBeVisible();',
+      'expect (value).not.toBe(1)',
+      'test (scenarioName, async () => {})',
+      'test(foo)',
+      'describe(foo)',
+      'expect(value)',
     ]) {
       const artifact = handoff();
       artifact.assumptions = [value];
