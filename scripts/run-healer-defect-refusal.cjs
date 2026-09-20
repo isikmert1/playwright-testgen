@@ -9,6 +9,7 @@ const {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   rmSync,
   writeFileSync,
@@ -708,6 +709,31 @@ function processTreeExists(pid) {
     return tree == null
       ? null
       : tree.root_exists || tree.descendants.length > 0;
+  }
+  if (process.platform === 'linux') {
+    try {
+      for (const name of readdirSync('/proc')) {
+        if (!/^\d+$/u.test(name)) continue;
+        let stat;
+        try {
+          stat = readFileSync(`/proc/${name}/stat`, 'utf8');
+        } catch (error) {
+          if (error.code === 'ENOENT' || error.code === 'ESRCH') continue;
+          return null;
+        }
+        const end = stat.lastIndexOf(')');
+        const fields = stat
+          .slice(end + 2)
+          .trim()
+          .split(/\s+/u);
+        if (end < 0 || fields.length < 3) return null;
+        if (Number(fields[2]) === pid && fields[0] !== 'Z' && fields[0] !== 'X')
+          return true;
+      }
+      return false;
+    } catch {
+      return null;
+    }
   }
   try {
     process.kill(-pid, 0);
