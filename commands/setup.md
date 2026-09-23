@@ -28,8 +28,12 @@ Unknown frameworks and no test IDs are valid results. Multiple observed test-ID
 conventions remain ambiguous; never pick one globally or rewrite the app. The
 normal locator ladder keeps roles, labels, and visible semantics ahead of test
 IDs. A custom attribute is usable only with explicit `testIdAttribute`
-evidence. With no tests, propose a minimal spec location matching the selected
-package/config; a proposal is not approval to write it.
+evidence. An empty test list from a partial scan does not establish that tests
+are absent. If no Playwright specs exist in the selected package, propose one
+descriptive `.spec.ts` path using the selected config's test directory. In
+configless mode, follow an existing E2E layout; otherwise suggest `tests/` only
+when it does not conflict with another test suite. Ask when the runnable
+location cannot be determined safely. A proposal is not approval to write it.
 
 ## 2. Diagnose runtime readiness
 
@@ -191,6 +195,11 @@ spec-level `test.use({ storageState: "<path>" })`. Do not silently rewrite
 project-wide config. SessionStorage/IndexedDB-only login, client certificates,
 expired state, or another unsupported mechanism remains an actionable blocker;
 recapture is human-operated and never automatic.
+
+Human-assisted capture prepares local state, not CI authentication. Reuse an
+existing project-owned CI mechanism when one works; otherwise report CI
+authentication as incomplete. Do not create a generic login setup test or CI
+workflow during setup.
 
 ## 5. Report
 
