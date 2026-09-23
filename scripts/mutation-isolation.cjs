@@ -165,24 +165,49 @@ function parseRunnerOutput(result) {
   )
     fail('runner-output-invalid');
   const keys = Object.keys(output).sort();
-  const expectedKeys =
+  const requiredKeys =
     output.outcome === 'error'
       ? ['criterion_id', 'outcome', 'protocol_version', 'reason']
       : ['criterion_id', 'outcome', 'protocol_version'];
+  const allowedKeys =
+    output.outcome === 'error'
+      ? [...requiredKeys, 'primary_reason', 'cleanup_reasons']
+      : requiredKeys;
+  const boundedReason = (value) =>
+    typeof value === 'string' && /^[a-z][a-z0-9-]{0,79}$/u.test(value);
   if (
-    keys.length !== expectedKeys.length ||
-    keys.some((key, index) => key !== expectedKeys[index]) ||
+    requiredKeys.some((key) => !keys.includes(key)) ||
+    keys.some((key) => !allowedKeys.includes(key)) ||
     (output.outcome === 'pass' && output.criterion_id !== null) ||
     (output.outcome === 'fail' &&
       (typeof output.criterion_id !== 'string' ||
         !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$/u.test(output.criterion_id))) ||
     (output.outcome === 'error' &&
       (output.criterion_id !== null ||
-        typeof output.reason !== 'string' ||
-        !/^[a-z][a-z0-9-]{0,79}$/u.test(output.reason)))
+        !boundedReason(output.reason) ||
+        (Object.hasOwn(output, 'primary_reason') &&
+          !boundedReason(output.primary_reason)) ||
+        (Object.hasOwn(output, 'cleanup_reasons') &&
+          (!Array.isArray(output.cleanup_reasons) ||
+            output.cleanup_reasons.length === 0 ||
+            output.cleanup_reasons.length > 8 ||
+            output.cleanup_reasons.some((reason) => !boundedReason(reason))))))
   )
     fail('runner-output-invalid');
   return output;
+}
+
+function runnerDiagnostics(output) {
+  if (output.outcome !== 'error') return {};
+  return {
+    runner_reason: output.reason,
+    ...(output.primary_reason == null
+      ? {}
+      : { runner_primary_reason: output.primary_reason }),
+    ...(output.cleanup_reasons == null
+      ? {}
+      : { runner_cleanup_reasons: output.cleanup_reasons }),
+  };
 }
 
 function stopRunnerTree(child) {
@@ -306,8 +331,12 @@ function changedPaths(before, after) {
 
 function cleanupWorktree(repository, temporaryRoot, worktree) {
   try {
-    if (worktree != null && existsSync(worktree))
+    if (worktree != null && existsSync(worktree)) {
+      const dependencies = path.join(worktree, 'node_modules');
+      if (lstatSync(dependencies, { throwIfNoEntry: false })?.isSymbolicLink())
+        unlinkSync(dependencies);
       runGit(repository, ['worktree', 'remove', '--force', '--', worktree]);
+    }
   } catch {
     fail('isolation-cleanup-failed');
   }
@@ -461,6 +490,7 @@ async function verifyMutation(
   let baselineOutcome = null;
   let mutantOutcome = null;
   let result = null;
+  let diagnostics = {};
   let recoveryOwned = false;
   let recoveryRecord = null;
   try {
@@ -494,6 +524,7 @@ async function verifyMutation(
       signal,
     );
     baselineOutcome = baseline.outcome;
+    diagnostics = runnerDiagnostics(baseline);
     if (
       currentHead(worktree) !== manifest.head ||
       !snapshotsMatch(beforeBaseline, captureSnapshot(worktree, runId))
@@ -529,6 +560,7 @@ async function verifyMutation(
       signal,
     );
     mutantOutcome = mutant.outcome;
+    diagnostics = runnerDiagnostics(mutant);
     if (
       currentHead(worktree) !== manifest.head ||
       !snapshotsMatch(beforeMutant, captureSnapshot(worktree, runId))
@@ -555,6 +587,7 @@ async function verifyMutation(
       mutant: mutantOutcome,
       isolation: 'disposable-worktree',
       error: errorCode(error),
+      ...diagnostics,
     };
   } finally {
     let cleanup = 'failed';
@@ -588,6 +621,7 @@ async function verifyMutation(
         mutant: mutantOutcome,
         isolation: 'disposable-worktree',
         error: finalError,
+        ...diagnostics,
       };
       if (activeError != null && activeError !== finalError)
         result.active_error = activeError;

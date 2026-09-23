@@ -595,6 +595,30 @@ test('makes active target dependencies available to the isolated runner', () => 
   });
 });
 
+test('preserves runner primary and nested cleanup reasons in the final result', () => {
+  withRepository(({ repository, runDirectory }) => {
+    const adapterPath = writeAdapter(repository, {
+      runner: [
+        "process.stdout.write(JSON.stringify({protocol_version:1,outcome:'error',criterion_id:null,reason:'runner-cleanup-failed',primary_reason:'backend-unavailable',cleanup_reasons:['enoent','eacces']}));",
+        '',
+      ].join('\n'),
+    });
+    const definitionDigest = commitAdapter(repository, adapterPath);
+    capturePassingRun(repository, runDirectory);
+
+    const result = verify(repository, adapterPath, definitionDigest);
+
+    assert.equal(result.status, 1);
+    const output = JSON.parse(result.stdout);
+    assert.equal(output.status, 'verification-error');
+    assert.equal(output.error, 'baseline-not-passing');
+    assert.equal(output.runner_reason, 'runner-cleanup-failed');
+    assert.equal(output.runner_primary_reason, 'backend-unavailable');
+    assert.deepEqual(output.runner_cleanup_reasons, ['enoent', 'eacces']);
+    assert.equal(output.cleanup, 'removed');
+  });
+});
+
 test('rejects a dangling overlay destination in the disposable checkout', () => {
   withRepository(({ repository, runDirectory }) => {
     git(repository, ['config', 'core.symlinks', 'true']);
@@ -1329,6 +1353,39 @@ test('times out a runner and removes its disposable checkout', () => {
     assert.equal(output.status, 'verification-error');
     assert.equal(output.error, 'runner-timeout');
     assert.equal(output.cleanup, 'removed');
+  });
+});
+
+test('timeout cleanup never follows the runner dependency link', () => {
+  withRepository(({ repository, runDirectory }) => {
+    writeFileSync(
+      path.join(repository, '.git', 'info', 'exclude'),
+      'node_modules/\n',
+    );
+    const dependencies = path.join(repository, 'node_modules');
+    mkdirSync(dependencies);
+    const sentinel = path.join(dependencies, 'testgen-sentinel');
+    writeFileSync(sentinel, 'preserve me\n');
+    const adapterPath = writeAdapter(repository, {
+      runner: [
+        "const {symlinkSync}=require('node:fs');",
+        "const path=require('node:path');",
+        "symlinkSync(process.env.TESTGEN_TARGET_NODE_MODULES,path.join(process.cwd(),'node_modules'),process.platform==='win32'?'junction':'dir');",
+        'setTimeout(() => {}, 5000);',
+        '',
+      ].join('\n'),
+      mutation: { timeout_ms: 1000 },
+    });
+    const definitionDigest = commitAdapter(repository, adapterPath);
+    capturePassingRun(repository, runDirectory);
+
+    const result = verify(repository, adapterPath, definitionDigest);
+
+    assert.equal(result.status, 1);
+    const output = JSON.parse(result.stdout);
+    assert.equal(output.error, 'runner-timeout');
+    assert.equal(output.cleanup, 'removed');
+    assert.equal(readFileSync(sentinel, 'utf8'), 'preserve me\n');
   });
 });
 

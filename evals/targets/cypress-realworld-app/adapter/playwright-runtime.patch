@@ -1,0 +1,91 @@
+diff --git a/.gitattributes b/.gitattributes
+new file mode 100644
+index 0000000..b7f7e8a
+--- /dev/null
++++ b/.gitattributes
+@@ -0,0 +1,2 @@
++.testgen/mutation-runner.cjs text eol=lf
++.testgen/mutations/require-signin-username.patch text eol=lf
+diff --git a/package.json b/package.json
+index 79f85fc..dd2a49b 100644
+--- a/package.json
++++ b/package.json
+@@ -61,6 +61,7 @@
+     "@faker-js/faker": "6.1.2",
+     "@percy/cli": "^1.27.4",
+     "@percy/cypress": "^3.1.8",
++    "@playwright/test": "1.62.1",
+     "@testing-library/jest-dom": "^5.16.5",
+     "@testing-library/react": "^14.0.0",
+     "@types/bcryptjs": "2.4.2",
+@@ -127,6 +128,7 @@
+     "passport": "0.5.0",
+     "passport-local": "1.0.0",
+     "patch-package": "^7.0.0",
++    "playwright": "1.62.1",
+     "prettier": "^3.0.0",
+     "start-server-and-test": "1.14.0",
+     "ts-node": "10.9.2",
+diff --git a/vite.config.ts b/vite.config.ts
+index 4240c8f..1fd0daf 100644
+--- a/vite.config.ts
++++ b/vite.config.ts
+@@ -6,6 +6,7 @@ import istanbul from "vite-plugin-istanbul";
+ export default defineConfig(({ mode }) => {
+   const env = loadEnv(mode, process.cwd(), "VITE");
+   return {
++    cacheDir: process.env.TESTGEN_VITE_CACHE_DIR,
+     // expose all vite "VITE_*" variables as process.env.VITE_* in the browser
+     define: {
+       "process.env": env,
+diff --git a/yarn.lock b/yarn.lock
+index d135b35..24372e1 100644
+--- a/yarn.lock
++++ b/yarn.lock
+@@ -3188,6 +3188,13 @@
+   resolved "https://registry.yarnpkg.com/@pkgjs/parseargs/-/parseargs-0.11.0.tgz#a77ea742fab25775145434eb1d2328cf5013ac33"
+   integrity sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg==
+ 
++"@playwright/test@1.62.1":
++  version "1.62.1"
++  resolved "https://registry.yarnpkg.com/@playwright/test/-/test-1.62.1.tgz#68e1aaf6e480e1923936dee6c66fae1921d3a65a"
++  integrity sha512-DTcUc8qii+cpHvtOwggMtBRMjKZHXYWdw8syRYu2vtzuq4Wxphqq4NfCs5Zt44L6mA8rfDfj+PHnxFc/FeK6mQ==
++  dependencies:
++    playwright "1.62.1"
++
+ "@popperjs/core@^2.11.8":
+   version "2.11.8"
+   resolved "https://registry.yarnpkg.com/@popperjs/core/-/core-2.11.8.tgz#6b79032e760a0899cd4204710beede972a3a185f"
+@@ -7443,6 +7450,11 @@ fs.realpath@^1.0.0:
+   resolved "https://registry.yarnpkg.com/fs.realpath/-/fs.realpath-1.0.0.tgz#1504ad2523158caa40db4a2787cb01411994ea4f"
+   integrity sha512-OO0pH2lK6a0hZnAdau5ItzHPI6pUlvI7jMVnxUQRtw4owF2wk8lOSabtGDCTP4Ggrg2MbGnWO9X8K1t4+fGMDw==
+ 
++fsevents@2.3.2:
++  version "2.3.2"
++  resolved "https://registry.yarnpkg.com/fsevents/-/fsevents-2.3.2.tgz#8a526f78b8fdf4623b709e0b975c52c24c02fd1a"
++  integrity sha512-xiqMQR4xAeHTuB9uWm+fFRcIOgKBMiOBP+eXiyT7jsgVCq1bkVygt00oASowB7EdtpOHaaPgKt812P9ab+DDKA==
++
+ fsevents@~2.3.2, fsevents@~2.3.3:
+   version "2.3.3"
+   resolved "https://registry.yarnpkg.com/fsevents/-/fsevents-2.3.3.tgz#cac6407785d03675a2a5e1a5305c697b347d90d6"
+@@ -10557,6 +10569,20 @@ pkg-dir@^4.1.0:
+   dependencies:
+     find-up "^4.0.0"
+ 
++playwright-core@1.62.1:
++  version "1.62.1"
++  resolved "https://registry.yarnpkg.com/playwright-core/-/playwright-core-1.62.1.tgz#120f67a19181bfd183c60fa903c0d99330b56785"
++  integrity sha512-wPYSwEBJY9GHraISXqyqtx0na0LpO3XEX7jNDhntbex7tzUS7kLnZsOlFruFJB4Hi/rhDMjXGqHewDZ68nYZVw==
++
++playwright@1.62.1:
++  version "1.62.1"
++  resolved "https://registry.yarnpkg.com/playwright/-/playwright-1.62.1.tgz#8447b6755e8aec85a3cb7207c823e3ed2fc66700"
++  integrity sha512-0M+L3LAD8/nm554LOla9Ayx0j0tmFZ0FBcoQ7F1VuVHpM/XpiC8RcDzBQB8W5+hA8L22THxELzeF+2WcUzvcLg==
++  dependencies:
++    playwright-core "1.62.1"
++  optionalDependencies:
++    fsevents "2.3.2"
++
+ posix-character-classes@^0.1.0:
+   version "0.1.1"
+   resolved "https://registry.yarnpkg.com/posix-character-classes/-/posix-character-classes-0.1.1.tgz#01eac0fe3b5af71a2a6c02feabb8c1fef7e00eab"

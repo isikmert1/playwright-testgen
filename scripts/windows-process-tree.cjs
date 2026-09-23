@@ -1,4 +1,4 @@
-const { spawnSync } = require('node:child_process');
+const { execFile } = require('node:child_process');
 
 const PROCESS_SNAPSHOT_SOURCE = String.raw`
 using System;
@@ -93,7 +93,7 @@ public static class TestgenProcessTree {
 }
 `;
 
-function windowsProcessTree(rootPid, known = [], onFailure) {
+async function windowsProcessTree(rootPid, known = [], onFailure) {
   const script = [
     `$source = @'${PROCESS_SNAPSHOT_SOURCE}'@`,
     'Add-Type -TypeDefinition $source',
@@ -101,30 +101,35 @@ function windowsProcessTree(rootPid, known = [], onFailure) {
       ...known,
     ].join(',')}'))`,
   ].join('\n');
-  const result = spawnSync(
-    'powershell.exe',
-    [
-      '-NoLogo',
-      '-NoProfile',
-      '-NonInteractive',
-      '-ExecutionPolicy',
-      'Bypass',
-      '-EncodedCommand',
-      Buffer.from(script, 'utf16le').toString('base64'),
-    ],
-    { encoding: 'utf8', timeout: 10000, windowsHide: true },
-  );
-  if (result.error != null || result.status !== 0) {
+  let stdout;
+  try {
+    stdout = await new Promise((resolve, reject) => {
+      execFile(
+        'powershell.exe',
+        [
+          '-NoLogo',
+          '-NoProfile',
+          '-NonInteractive',
+          '-ExecutionPolicy',
+          'Bypass',
+          '-EncodedCommand',
+          Buffer.from(script, 'utf16le').toString('base64'),
+        ],
+        { encoding: 'utf8', timeout: 20000, windowsHide: true },
+        (error, output) => (error == null ? resolve(output) : reject(error)),
+      );
+    });
+  } catch (error) {
     onFailure?.(
-      result.error?.code === 'ETIMEDOUT'
+      error.killed || error.code === 'ETIMEDOUT'
         ? 'snapshot-timeout'
-        : result.error != null
-          ? 'snapshot-spawn-failed'
-          : 'snapshot-command-failed',
+        : typeof error.code === 'number'
+          ? 'snapshot-command-failed'
+          : 'snapshot-spawn-failed',
     );
     return null;
   }
-  const [root, descendantsText, knownText] = result.stdout.trim().split('|');
+  const [root, descendantsText, knownText] = stdout.trim().split('|');
   const parseIds = (value) =>
     value === '' ? [] : value.split(',').map(Number).filter(Number.isInteger);
   if (

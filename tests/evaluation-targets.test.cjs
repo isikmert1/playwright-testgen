@@ -56,7 +56,10 @@ test('active external target descriptors pin reproducible sources without vendor
     );
     assert.equal(typeof descriptor.reset.strategy, 'string');
     assert.notEqual(descriptor.reset.strategy, '');
-    assert.deepEqual(readdirSync(targetDirectory), ['target.json']);
+    assert.deepEqual(readdirSync(targetDirectory).sort(), [
+      'adapter',
+      'target.json',
+    ]);
     sourceUrls.add(descriptor.source.url);
   }
 
