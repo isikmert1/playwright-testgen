@@ -21,7 +21,7 @@
             "type": "command",
             "command": "node",
             "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/validate-bash.cjs"],
-            "timeout": 5
+            "timeout": 10
           }
         ]
       }

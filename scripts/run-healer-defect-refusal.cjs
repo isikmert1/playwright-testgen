@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const { spawn, spawnSync, fork } = require('node:child_process');
+const { execFile, spawn, spawnSync, fork } = require('node:child_process');
 const { createHash, randomBytes } = require('node:crypto');
 const {
   copyFileSync,
@@ -704,12 +704,6 @@ function processExists(pid) {
 }
 
 function processTreeExists(pid) {
-  if (process.platform === 'win32') {
-    const tree = windowsProcessTree(pid);
-    return tree == null
-      ? null
-      : tree.root_exists || tree.descendants.length > 0;
-  }
   if (process.platform === 'linux') {
     try {
       for (const name of readdirSync('/proc')) {
@@ -755,10 +749,11 @@ async function stopProcessTree(child, diagnostics = {}) {
       const onSnapshotFailure = (reason) => {
         diagnostics.reason = reason;
       };
-      const initial = windowsProcessTree(pid, [], onSnapshotFailure);
+      const initial = await windowsProcessTree(pid, [], onSnapshotFailure);
       if (initial == null)
         return failed(diagnostics.reason ?? 'snapshot-unavailable');
       const known = new Set(initial.descendants);
+      if (!initial.root_exists && known.size === 0) return true;
       const terminate = (target) => {
         const result = spawnSync(
           'taskkill.exe',
@@ -783,7 +778,7 @@ async function stopProcessTree(child, diagnostics = {}) {
 
       for (let attempt = 0; attempt < 3; attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, 100));
-        const current = windowsProcessTree(pid, known, onSnapshotFailure);
+        const current = await windowsProcessTree(pid, known, onSnapshotFailure);
         if (current == null)
           return failed(diagnostics.reason ?? 'snapshot-unavailable');
         for (const target of current.descendants) known.add(target);
@@ -893,6 +888,17 @@ function runBounded(commandName, args, options) {
       return stopping;
     };
     const terminate = () => {
+      if (stopping != null) return;
+      if (process.platform === 'win32') {
+        execFile(
+          'taskkill.exe',
+          ['/pid', String(child.pid), '/t', '/f'],
+          { timeout: 5000, windowsHide: true },
+          (error) => {
+            if (error != null) child.kill('SIGKILL');
+          },
+        );
+      }
       void ensureStopped().then(() => finish(child.exitCode, 'terminated'));
       stopTimer ??= setTimeout(() => {
         treeCleanupFailed = true;
@@ -936,6 +942,7 @@ function runBounded(commandName, args, options) {
     else child.stderr.resume();
     child.once('error', (error) => finish(null, null, error.code ?? 'error'));
     child.once('close', (status, signal) => {
+      clearTimeout(timer);
       if (options.verify_process_tree === true || stopping != null) {
         void ensureStopped().then(() => finish(status, signal));
         return;

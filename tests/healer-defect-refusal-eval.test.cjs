@@ -479,11 +479,19 @@ test('uses the installed hook timeout before paid execution', async () => {
   }
 });
 
-test('reserves margin below the installed hook timeout', () => {
+test('reserves enough time and margin for the installed hook preflight', () => {
   const { installedHookPreflightTimeout } = modules().runner;
+  const hooks = JSON.parse(
+    readFileSync(path.join(repositoryRoot, 'hooks', 'hooks.json'), 'utf8'),
+  );
+  const timeoutSeconds = hooks.hooks.PreToolUse[0].hooks[0].timeout;
 
   assert.equal(installedHookPreflightTimeout(5), 4000);
   assert.equal(installedHookPreflightTimeout(0.025), 20);
+  assert.ok(installedHookPreflightTimeout(timeoutSeconds) >= 8000);
+  assert.ok(
+    installedHookPreflightTimeout(timeoutSeconds) < timeoutSeconds * 1000,
+  );
 });
 
 test('preserves installed hook cancellation before paid execution', async (t) => {
@@ -1456,20 +1464,50 @@ test('hard timeout terminates a non-returning process', async () => {
 });
 
 test(
-  'accepts a slow but successful Windows process snapshot',
+  'keeps the Windows hard timeout responsive during a stalled snapshot',
   { skip: process.platform !== 'win32' },
   () => {
     const script = [
       "const childProcess=require('node:child_process');",
       'const spawnSync=childProcess.spawnSync;',
-      "childProcess.spawnSync=(name,args,options)=>name==='powershell.exe'?spawnSync(process.execPath,['-e',\"setTimeout(()=>process.stdout.write('0||'),5600)\"],options):spawnSync(name,args,options);",
-      "const {windowsProcessTree}=require('./scripts/windows-process-tree.cjs');",
-      'process.stdout.write(JSON.stringify(windowsProcessTree(999999)));',
+      'const spawn=childProcess.spawn;',
+      'let childPid;',
+      'childProcess.spawn=(...args)=>{const child=spawn(...args);childPid=child.pid;return child};',
+      "childProcess.spawnSync=(name,args,options)=>name==='powershell.exe'?(Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,6500),{status:0,stdout:'1||'}):spawnSync(name,args,options);",
+      'const execFile=childProcess.execFile;',
+      "childProcess.execFile=(name,args,options,callback)=>name==='powershell.exe'?undefined:execFile(name,args,options,callback);",
+      "const {runBounded}=require('./scripts/run-healer-defect-refusal.cjs');",
+      'const started=Date.now();',
+      "runBounded(process.execPath,['-e','setInterval(()=>{},1000)'],{cwd:process.cwd(),env:process.env,timeout_ms:50}).then(result=>{let childAlive;try{process.kill(childPid,0);childAlive=true}catch{childAlive=false}process.stdout.write(JSON.stringify({elapsed:Date.now()-started,timed_out:result.timed_out,tree_cleanup_failed:result.tree_cleanup_failed,child_alive:childAlive}))});",
     ].join('');
     const result = spawnSync(process.execPath, ['-e', script], {
       cwd: repositoryRoot,
       encoding: 'utf8',
       timeout: 12000,
+      windowsHide: true,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const outcome = JSON.parse(result.stdout);
+    assert.equal(outcome.timed_out, true);
+    assert.equal(outcome.child_alive, false);
+    assert.ok(outcome.elapsed < 6000, JSON.stringify(outcome));
+  },
+);
+
+test(
+  'accepts a Windows process snapshot delayed by CI load',
+  { skip: process.platform !== 'win32' },
+  () => {
+    const script = [
+      "const childProcess=require('node:child_process');",
+      "childProcess.execFile=(name,args,options,callback)=>name==='powershell.exe'?callback(options.timeout>=15000?null:Object.assign(new Error('slow process snapshot'),{code:'ETIMEDOUT'}),'0||',''):undefined;",
+      "const {windowsProcessTree}=require('./scripts/windows-process-tree.cjs');",
+      'windowsProcessTree(999999).then(tree=>process.stdout.write(JSON.stringify(tree)));',
+    ].join('');
+    const result = spawnSync(process.execPath, ['-e', script], {
+      cwd: repositoryRoot,
+      encoding: 'utf8',
+      timeout: 5000,
       windowsHide: true,
     });
     assert.equal(result.status, 0, result.stderr);
@@ -1482,13 +1520,34 @@ test(
 );
 
 test(
+  'does not time out an exited Windows command during tree verification',
+  { skip: process.platform !== 'win32' },
+  () => {
+    const script = [
+      "const childProcess=require('node:child_process');",
+      'const execFile=childProcess.execFile;',
+      "childProcess.execFile=(name,args,options,callback)=>name==='powershell.exe'?setTimeout(()=>callback(null,'0||',''),2500):execFile(name,args,options,callback);",
+      "const {command}=require('./scripts/run-healer-defect-refusal.cjs');",
+      "command(process.execPath,['-e',''],{cwd:process.cwd(),timeout_ms:1500}).then(()=>process.stdout.write('passed'),error=>process.stdout.write(error.code));",
+    ].join('');
+    const result = spawnSync(process.execPath, ['-e', script], {
+      cwd: repositoryRoot,
+      encoding: 'utf8',
+      timeout: 6000,
+      windowsHide: true,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, 'passed');
+  },
+);
+
+test(
   'reports a Windows process snapshot timeout without raw output',
   { skip: process.platform !== 'win32' },
   () => {
     const script = [
       "const childProcess=require('node:child_process');",
-      'const spawnSync=childProcess.spawnSync;',
-      "childProcess.spawnSync=(name,args,options)=>name==='powershell.exe'?{error:Object.assign(new Error('private process output'),{code:'ETIMEDOUT'}),status:null,stdout:''}:spawnSync(name,args,options);",
+      "childProcess.execFile=(name,args,options,callback)=>name==='powershell.exe'?callback(Object.assign(new Error('private process output'),{code:'ETIMEDOUT'}),'',''):undefined;",
       "const {command}=require('./scripts/run-healer-defect-refusal.cjs');",
       "command(process.execPath,['-e',''],{timeout_ms:1000}).then(()=>process.exit(2),error=>process.stdout.write(JSON.stringify({code:error.code,details:error.details})));",
     ].join('');
@@ -1529,6 +1588,28 @@ test(
       stopped: true,
       reason: null,
     });
+  },
+);
+
+test(
+  'does not resnapshot a Windows child already gone without descendants',
+  { skip: process.platform !== 'win32' },
+  () => {
+    const script = [
+      "const tree=require('./scripts/windows-process-tree.cjs');",
+      'let calls=0;',
+      "tree.windowsProcessTree=()=>{if(++calls>1)throw new Error('redundant snapshot');return {root_exists:false,descendants:[],known_running:[]}};",
+      "const {stopProcessTree}=require('./scripts/run-healer-defect-refusal.cjs');",
+      'stopProcessTree({pid:2147483647,kill(){}},{}).then(stopped=>process.stdout.write(JSON.stringify({stopped,calls})));',
+    ].join('');
+    const result = spawnSync(process.execPath, ['-e', script], {
+      cwd: repositoryRoot,
+      encoding: 'utf8',
+      timeout: 5000,
+      windowsHide: true,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(JSON.parse(result.stdout), { stopped: true, calls: 1 });
   },
 );
 
@@ -1710,7 +1791,7 @@ test(
 test(
   'finds descendants of an exited Windows child observed earlier',
   { skip: process.platform !== 'win32' },
-  () => {
+  async () => {
     const { windowsProcessTree } = modules().runner;
     const script = [
       "const { spawn } = require('node:child_process');",
@@ -1728,7 +1809,7 @@ test(
     try {
       assert.equal(exitedChild.status, 0, exitedChild.stderr);
       assert.equal(Number.isInteger(exitedChild.pid), true);
-      const tree = windowsProcessTree(999_999, [exitedChild.pid]);
+      const tree = await windowsProcessTree(999_999, [exitedChild.pid]);
       assert.notEqual(tree, null);
       assert.ok(tree.descendants.includes(grandchildPid));
     } finally {
