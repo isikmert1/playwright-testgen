@@ -7,7 +7,8 @@ passing-looking test cannot silently replace the requested behavior.
 ## Ownership
 
 - **Main** owns preflight, run policy, the human checkpoint, artifact
-  validation, optional mutation verification, final reporting, and cleanup.
+  validation, optional mutation verification, final reporting, cleanup, and
+  the explicitly approved `/setup` profile/remediation flow.
 - **Explorer** performs bounded, read-only scenario discovery and returns
   evidence-backed proposals without choosing a spec path or executing tests.
 - **Author** reads the scenario, relevant project source, and live application;
@@ -30,8 +31,13 @@ Preflight accepts those packages only when they resolve inside that project's
 canonical repository root. The official `playwright-cli` is deliberately a
 separate global installation.
 
-Testgen does not install project dependencies or rewrite existing Playwright
-configuration and CI rules. A missing capability stops with a bounded reason.
+Normal generation does not install project dependencies or rewrite existing
+Playwright configuration and CI rules. Optional setup may offer one bounded
+compatible remedy after approval, then rechecks it. The ignored target-owned
+profile records only non-secret navigation evidence bound to one Git root,
+package, and config or configless mode. Governed roles cannot read or edit it.
+Authentication state remains opaque; human capture is setup-owned and separate
+from login-test generation.
 
 ## Workflow and evidence
 
@@ -56,6 +62,10 @@ The active checkout must remain unchanged.
 `.playwright-cli/testgen/<run-id>/` is transient. It contains policy, bounded
 handoff, Healer input, trace data, runner evidence, and optional mutation state. Main
 removes only that exact directory after the result is accepted.
+
+`.playwright-testgen/profile.v1.json` and approved durable authentication state
+live outside run scratch and survive normal cleanup. Failed setup removes only
+new incomplete output and preserves prior files.
 
 For an accepted `product-behavior-wrong` result, the human may approve one
 sanitized entry in `.playwright-cli/testgen/findings.md`. That sibling file is

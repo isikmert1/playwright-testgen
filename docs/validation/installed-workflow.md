@@ -121,3 +121,27 @@ diff was empty. Temporary specs and run artifacts were removed. Earlier
 deterministic fixture tests also cover these mappings, but neither the tests
 nor these real-spec checks establish installed-agent behavior for the negative
 paths.
+
+## Installed setup and first use (2026-09-21)
+
+These observations used an isolated local marketplace installation of the
+`feature/repository-profiler` worktree at base commit `68fdad7`, including
+uncommitted setup changes. They establish behavior of those installed bytes,
+not a released revision. Claude Code was 2.1.278, Node.js 22.14.0,
+Playwright and `@playwright/test` 1.62.1, and Playwright CLI 0.1.19. Agent
+tokens and cost were not captured.
+
+- In the disposable semantic target at
+  `00706a91805f153c7debf6ff35ee7aaccc07ee52`, `/setup` created an ignored,
+  fresh profile without requesting authentication. The explicit seeded
+  Notebook dialog scenario bypassed Explorer. Author wrote one candidate;
+  human `run` approval preceded execution. Healer passed on its first attempt
+  with no repair. With no matching mutation adapter, the final disposition was
+  `mutation-not-verified` (`behavior: unavailable`, assertion sensitivity:
+  `not-run`). Accepted run scratch was removed; the spec and profile remained
+  in the disposable target.
+- In the owned RWA smoke clone at
+  `804397a95a7471bbc7df6551e176cdb25c135ebe`, `/setup` selected
+  configless mode and captured approved login state without exposing its
+  contents. Fresh CLI-browser reuse succeeded; a later recapture passed one
+  Playwright runner test using `storageState`. Temporary state was removed.

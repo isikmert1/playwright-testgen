@@ -46,6 +46,8 @@ artifact boundaries, and release rules.
 
 ## Use
 
+- `/playwright-testgen:setup` checks and prepares the target repository; see
+  [Setup after installation](#setup-after-installation).
 - `/playwright-testgen:testgen` discovers scenarios, waits for one or more
   selections, then processes them sequentially.
 - `/playwright-testgen:testgen "<scenario>"` skips discovery and starts from
@@ -53,6 +55,22 @@ artifact boundaries, and release rules.
 - A natural-language request may run Explorer, Author, or Healer alone. A
   standalone Healer can repair one existing human-approved failing spec and
   stops without starting generation or mutation verification.
+
+### Setup after installation
+
+From the repository you want to test, run `/playwright-testgen:setup` after
+installing the plugin. It selects one Playwright package and config (or
+configless mode), checks the local packages, global CLI, project-local CLI skill
+and browser, and explains missing prerequisites. When authentication matters,
+it checks for an existing fixture or state and can offer human-operated capture.
+Setup asks before installing anything, writing an ignore rule or profile, or
+capturing login state; it does not generate or run tests.
+
+Setup may create the optional, Git-ignored
+`.playwright-testgen/profile.v1.json` to reuse bounded repository facts. A
+missing or stale profile falls back to normal grounding. Run setup again when
+your Playwright or authentication setup changes. Generation still rechecks live
+application, browser, and authentication readiness for each run.
 
 ## Current status
 
@@ -70,15 +88,13 @@ are checker observations, not additional installed-agent observations.
 
 - Node.js 22.13 or later and npm available to Claude Code.
 - A project with local `playwright` and `@playwright/test` packages.
-- The current official `@playwright/cli` installed globally, plus its skill
+- The tested official `@playwright/cli` installed globally, plus its skill
   installed from that project:
 
   ```sh
-  npm install -g @playwright/cli@latest
+  npm install -g @playwright/cli@0.1.19
   playwright-cli install --skills
   ```
-
-This tooling repository does not install the application's Playwright dependencies.
 
 ## Local validation
 
