@@ -231,13 +231,11 @@ function runtimePreflight(options) {
     error: 'git-head-unavailable',
   });
   if (!/^[a-f0-9]{40}$/u.test(gitHead)) fail('git-head-unavailable');
-  const gitRoot = realpathSync(
-    run('git', ['rev-parse', '--show-toplevel'], {
-      cwd: repository,
-      error: 'git-head-unavailable',
-    }),
-  );
-  if (gitRoot !== repository) fail('repository-root-invalid');
+  const gitRootRelative = run('git', ['rev-parse', '--show-cdup'], {
+    cwd: repository,
+    error: 'git-head-unavailable',
+  });
+  if (gitRootRelative !== '') fail('repository-root-invalid');
   const packageDirectory = resolveRelative(
     repository,
     options.package,

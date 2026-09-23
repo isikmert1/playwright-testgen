@@ -597,7 +597,10 @@ function profileRepository({
   try {
     const cwd = realpathSync(path.resolve(repository));
     root = realpathSync(
-      git(cwd, ['rev-parse', '--show-toplevel'], deadline).trim(),
+      path.resolve(
+        cwd,
+        git(cwd, ['rev-parse', '--show-cdup'], deadline).trim(),
+      ),
     );
     if (!inside(root, cwd)) fail('repository-root-invalid');
   } catch (error) {
