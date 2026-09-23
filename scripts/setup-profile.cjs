@@ -585,6 +585,7 @@ function publishProfile(root, profile) {
 
 function createProfile(options) {
   const root = repositoryRoot(options.repository);
+  checkedProfilePath(root, true);
   if (!gitIgnored(root, PROFILE_PATH)) fail('profile-path-not-ignored');
   if (gitTracked(root, PROFILE_PATH)) fail('profile-path-tracked');
   const scan = profileRepository({
