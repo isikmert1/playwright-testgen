@@ -33,7 +33,9 @@ standalone runs.
 An attempt is one test execution, including the first reproduction. The maximum
 is five attempts.
 
-Start from the repository root with one foreground verification run:
+Start the foreground verification run from the selected package directory.
+Bash starts at the repository root: for a nested package use the validated
+`cd <package_directory> &&` wrapper; for `.` use the bare command:
 
 ```sh
 PLAYWRIGHT_HTML_OPEN=never npx --no playwright test <approved-spec-filter-argument> --retries=0 --repeat-each=1 --output=<attempt-results-dir>
@@ -41,8 +43,10 @@ PLAYWRIGHT_HTML_OPEN=never npx --no playwright test <approved-spec-filter-argume
 
 Main supplies `<approved-spec-filter-argument>` as the shell-safe output of
 `print-approved-spec-filter.cjs`. Use it unchanged and do not add quotes, derive
-another filter, or add a title `--grep`. Do not prefix a runner command with
-`cd`; every Bash call already starts at the repository root. A hook rejection
+another filter, or add a title `--grep`. Resolve `<attempt-results-dir>`
+relative to the selected package so it names the current attempt under the
+repository-owned run directory. Do not enter the run directory to execute a
+test. A hook rejection
 before the runner process starts does not consume or reserve an attempt.
 Include every project/config option recorded by Main. Record this first attempt
 as `verification-run`. If it passes before any repair or debug run, report
@@ -65,7 +69,7 @@ diagnostic attempt:
    cd <validated-run-directory> && PWTEST_CLI_GLOBAL_CONFIG=. playwright-cli -s=<emitted-session> <inspection-command>
    ```
 
-   Run from the repository. `--no` refuses npm's fallback package
+   Run from the selected package. `--no` refuses npm's fallback package
    installation; a missing local executable is a prerequisite failure. Start
    the runner in the background, wait for its debugging instructions, and
    attach only to the `tw-*` session identifier it emits. Track that session

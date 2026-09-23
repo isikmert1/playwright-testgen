@@ -18,6 +18,7 @@ writes `.playwright-cli/testgen/<discovery_id>/command-policy.json` with only:
   "allowed_state_paths": [],
   "discovery_id": "tg-<24hex>",
   "format_version": 1,
+  "package_directory": ".",
   "policy_kind": "discovery"
 }
 ```
@@ -33,9 +34,13 @@ scope and reset or cleanup method. It may then contain only the action names
 `type`, or `uncheck` that the approved scope needs. This policy contains no
 `approved_spec`, runner options, write paths, trace options, or generation
 `run_id`; it grants no test or repository-write authority.
+`package_directory` is the selected package relative to the Git-owned policy
+root. Explorer source reads, bounded searches, and history start from that exact
+package; `.` means the root package.
 
 Main delegates `playwright-testgen:playwright-test-explorer` with the passed
-preflight fact, discovery ID, repository root, approved origin, application and
+preflight fact, discovery ID, repository root, selected package/config mode,
+relevant fresh profile facts, approved origin, application and
 exploration-browser readiness, auth/data facts, exact approved state paths, and
 optional human scope. For an approved state-changing action, also pass the
 action names, semantic scope, and reset or cleanup method. Never pass evaluation

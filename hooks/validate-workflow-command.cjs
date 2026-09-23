@@ -404,15 +404,15 @@ function validatePlaywright(cwd, assignments, args, toolInput) {
   );
   if (outputs.length !== 1 || outputRunId == null || outputMatch == null) {
     return deny(
-      'Runner output must use the current run attempt directory. Use --output=.playwright-cli/testgen/<run_id>/attempt-<1-5>/test-results.',
+      'Runner output must resolve from the selected package to the current repository-owned run attempt directory.',
     );
   }
 
   const loaded = requirePolicy(cwd, outputRunId);
   if (loaded.result != null) return loaded.result;
-  if (!samePath(path.resolve(cwd), loaded.policy.repositoryRoot)) {
+  if (!samePath(path.resolve(cwd), loaded.policy.packageDirectory)) {
     return deny(
-      'Playwright test runners must start from the exact repository root so its approved configuration and package context apply.',
+      'Playwright test runners must start from the exact selected package directory so its approved configuration and package context apply.',
     );
   }
   const expectedOutput = path.join(

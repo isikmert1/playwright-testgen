@@ -4,6 +4,7 @@ const parse = require('../vendor/shell-quote/parse');
 const { decision, deny } = require('./hook-result.cjs');
 const {
   RUN_ID,
+  isGitBoundary,
   loadPolicy,
   runIdFromOwnedPath,
   samePath,
@@ -21,32 +22,52 @@ const {
 const ENVIRONMENT_ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/u;
 const PACKAGE_SCRIPT_RUNNERS = new Set(['bun', 'npm', 'pnpm', 'yarn']);
 function repositoryPolicies(cwd) {
-  let entries;
-  try {
-    entries = readdirSync(path.join(cwd, '.playwright-cli', 'testgen'), {
-      withFileTypes: true,
-    });
-  } catch {
-    return [];
+  const policies = [];
+  const seen = new Set();
+  let directory = path.resolve(cwd);
+  while (true) {
+    let entries = [];
+    try {
+      entries = readdirSync(
+        path.join(directory, '.playwright-cli', 'testgen'),
+        {
+          withFileTypes: true,
+        },
+      );
+    } catch {
+      // This ancestor has no Testgen policies.
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || !RUN_ID.test(entry.name)) continue;
+      const policy = loadPolicy(directory, entry.name);
+      if (policy == null) {
+        policies.push(null);
+        continue;
+      }
+      if (seen.has(policy.policyPath)) continue;
+      seen.add(policy.policyPath);
+      policies.push(policy);
+    }
+    if (isGitBoundary(directory)) break;
+    const parent = path.dirname(directory);
+    if (parent === directory) break;
+    directory = parent;
   }
-
-  return entries
-    .filter((entry) => entry.isDirectory() && RUN_ID.test(entry.name))
-    .map((entry) => loadPolicy(cwd, entry.name));
+  return policies;
 }
 
-function hasPolicyAtRepositoryRoot(cwd) {
+function hasPolicyAtExecutionRoot(cwd) {
   return repositoryPolicies(cwd).some(
     (policy) =>
       policy?.kind === 'generation' &&
-      samePath(path.resolve(cwd), policy.repositoryRoot),
+      samePath(path.resolve(cwd), policy.packageDirectory),
   );
 }
 
 function validateAuthorCollection(cwd, assignments, args, toolInput) {
   if (assignments.length !== 0 || toolInput.run_in_background === true) {
     return deny(
-      'Author collection must run in the foreground from the repository root without environment assignments. Only Healer may execute the spec after the human checkpoint.',
+      'Author collection must run in the foreground from the selected package without environment assignments. Only Healer may execute the spec after the human checkpoint.',
     );
   }
 
@@ -77,7 +98,7 @@ function validateAuthorCollection(cwd, assignments, args, toolInput) {
   }
   const policy =
     candidate?.kind === 'generation' &&
-    samePath(path.resolve(cwd), candidate.repositoryRoot) &&
+    samePath(path.resolve(cwd), candidate.packageDirectory) &&
     args.length === expected.length &&
     args.every((value, index) => value === expected[index]) &&
     specIsFile
@@ -216,9 +237,17 @@ function parseCommand(command, cwd) {
     ) {
       return { cwd: runDirectory, tokens: tokens.slice(3) };
     }
+    const policies = repositoryPolicies(cwd).filter(
+      (policy) =>
+        ['discovery', 'generation'].includes(policy?.kind) &&
+        samePath(runDirectory, policy.packageDirectory),
+    );
+    if (policies.length === 1 && existsSync(runDirectory)) {
+      return { cwd: runDirectory, tokens: tokens.slice(3) };
+    }
     return {
       result: deny(
-        'Run repository commands directly from the current repository root. A cd wrapper is allowed only when it enters .playwright-cli/testgen/<run_id> for one run-owned CLI or trace command.',
+        'Use cd only for the exact selected package or the current .playwright-cli/testgen/<run_id> directory.',
       ),
     };
   }
@@ -226,7 +255,7 @@ function parseCommand(command, cwd) {
   if (syntax.length !== 0) {
     return {
       result: deny(
-        'Shell operators, comments, globs, and expansions are not allowed. Run one allowlisted command at a time; the only compound form is cd <exact-run-directory> && <allowlisted-command>.',
+        'Shell operators, comments, globs, and expansions are not allowed. Run one allowlisted command at a time; cd && is allowed only for the exact selected package or run directory.',
       ),
     };
   }
@@ -328,7 +357,7 @@ function validateCommand(payload) {
       if (
         policies.length === 1 &&
         policies[0]?.kind === 'discovery' &&
-        samePath(path.resolve(parsed.cwd), policies[0].repositoryRoot)
+        samePath(path.resolve(parsed.cwd), policies[0].packageDirectory)
       ) {
         return decision(
           'allow',
@@ -395,9 +424,9 @@ function validateCommand(payload) {
     split.assignments.length === 0 &&
     args[0] === 'run'
   ) {
-    if (!hasPolicyAtRepositoryRoot(parsed.cwd)) {
+    if (!hasPolicyAtExecutionRoot(parsed.cwd)) {
       return deny(
-        'Validation scripts must run from the exact repository root that owns the current Testgen policy.',
+        'Validation scripts must run from the exact selected package directory in the current Testgen policy.',
       );
     }
     const scriptName = args[1];

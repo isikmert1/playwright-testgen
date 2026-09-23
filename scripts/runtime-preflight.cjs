@@ -14,6 +14,7 @@ const { createRequire } = require('node:module');
 const { tmpdir } = require('node:os');
 const path = require('node:path');
 const { isInside } = require('./artifact-validation-common.cjs');
+const { hasDefaultConfig, selectedConfigPath } = require('./profile-repo.cjs');
 
 const REQUIRED_CLI_COMMANDS = [
   'attach',
@@ -62,19 +63,55 @@ function versionAtLeast(value, minimum) {
 }
 
 function parseArguments(args) {
-  const options = { playwrightCli: null, repository: null };
-  for (let index = 0; index < args.length; index += 2) {
+  const options = {
+    configless: false,
+    package: '.',
+    playwrightCli: null,
+    repository: null,
+    selectedConfig: null,
+  };
+  for (let index = 0; index < args.length; index += 1) {
     const name = args[index];
+    if (name === '--configless' && !options.configless) {
+      options.configless = true;
+      continue;
+    }
     const value = args[index + 1];
     if (typeof value !== 'string') fail('preflight-arguments-invalid');
     if (name === '--repo' && options.repository == null)
       options.repository = value;
+    else if (name === '--package' && options.package === '.')
+      options.package = value;
+    else if (name === '--config' && options.selectedConfig == null)
+      options.selectedConfig = value;
     else if (name === '--playwright-cli' && options.playwrightCli == null)
       options.playwrightCli = value;
     else fail('preflight-arguments-invalid');
+    index += 1;
   }
-  if (options.repository == null) fail('preflight-arguments-invalid');
+  if (
+    options.repository == null ||
+    options.configless === (options.selectedConfig != null)
+  )
+    fail('preflight-selection-required');
   return options;
+}
+
+function resolveRelative(root, value, error, allowRoot = false) {
+  if (typeof value !== 'string' || value.length === 0 || path.isAbsolute(value))
+    fail(error);
+  const absolute = path.resolve(root, value);
+  if (!isInside(root, absolute) && !(allowRoot && absolute === root))
+    fail(error);
+  try {
+    const canonical = realpathSync(absolute);
+    if (!isInside(root, canonical) && !(allowRoot && canonical === root))
+      fail(error);
+    return canonical;
+  } catch (caught) {
+    if (caught instanceof PreflightError) throw caught;
+    fail(error);
+  }
 }
 
 function run(command, args, options = {}) {
@@ -189,8 +226,49 @@ function runtimePreflight(options) {
   if (!versionAtLeast(process.versions.node, '22.13.0'))
     fail('node-version-unsupported');
   const repository = realpathSync(path.resolve(options.repository));
-  const manifest = path.join(repository, 'package.json');
+  const gitHead = run('git', ['rev-parse', '--verify', 'HEAD'], {
+    cwd: repository,
+    error: 'git-head-unavailable',
+  });
+  if (!/^[a-f0-9]{40}$/u.test(gitHead)) fail('git-head-unavailable');
+  const gitRootRelative = run('git', ['rev-parse', '--show-cdup'], {
+    cwd: repository,
+    error: 'git-head-unavailable',
+  });
+  if (gitRootRelative !== '') fail('repository-root-invalid');
+  const packageDirectory = resolveRelative(
+    repository,
+    options.package,
+    'package-selection-invalid',
+    true,
+  );
+  const manifest = path.join(packageDirectory, 'package.json');
   if (!existsSync(manifest)) fail('package-json-unavailable');
+  if (options.configless && hasDefaultConfig(packageDirectory))
+    fail('config-selection-invalid');
+  let selectedConfig = null;
+  if (!options.configless) {
+    const configRelative = options.selectedConfig.replaceAll('\\', '/');
+    if (
+      !selectedConfigPath(
+        repository,
+        configRelative,
+        options.package.replaceAll('\\', '/'),
+      )
+    )
+      fail('config-selection-invalid');
+    selectedConfig = resolveRelative(
+      repository,
+      options.selectedConfig,
+      'config-selection-invalid',
+    );
+    try {
+      if (!lstatSync(selectedConfig).isFile()) fail('config-selection-invalid');
+    } catch (caught) {
+      if (caught instanceof PreflightError) throw caught;
+      fail('config-selection-invalid');
+    }
+  }
   const requireFromRepository = createRequire(manifest);
   const playwright = readPackage(
     requireFromRepository,
@@ -208,19 +286,13 @@ function runtimePreflight(options) {
   if (playwright.version !== playwrightTest.version)
     fail('playwright-version-mismatch');
 
-  const gitHead = run('git', ['rev-parse', '--verify', 'HEAD'], {
-    cwd: repository,
-    error: 'git-head-unavailable',
-  });
-  if (!/^[a-f0-9]{40}$/u.test(gitHead)) fail('git-head-unavailable');
-
   const runner = packageExecutable(
     playwright,
     'playwright',
     'playwright-runner-unavailable',
   );
   const runnerHelp = runNodeScript(runner, ['test', '--help'], {
-    cwd: repository,
+    cwd: packageDirectory,
     error: 'playwright-runner-contract-mismatch',
   });
   if (!includesEvery(runnerHelp, REQUIRED_RUNNER_OPTIONS))
@@ -290,7 +362,7 @@ function runtimePreflight(options) {
     fail('playwright-cli-skill-outdated');
 
   const pluginRoot = path.resolve(__dirname, '..');
-  inspectHook(pluginRoot, repository);
+  inspectHook(pluginRoot, packageDirectory);
 
   let traceSnapshotOption =
     TRACE_OPTIONS.get(`${playwright.version}|${normalizedCliVersion}`) ?? null;
@@ -298,7 +370,7 @@ function runtimePreflight(options) {
   if (traceSnapshotOption != null) {
     try {
       const traceHelp = runNodeScript(runner, ['trace', 'snapshot', '--help'], {
-        cwd: repository,
+        cwd: packageDirectory,
         error: 'playwright-trace-contract-mismatch',
       });
       if (!includesEvery(traceHelp, [traceSnapshotOption]))
@@ -332,7 +404,26 @@ function runtimePreflight(options) {
       required_commands: REQUIRED_CLI_COMMANDS,
       skill_path: realpathSync(skill),
       skill_ready: true,
+      auth_state_capabilities: {
+        load: includesEvery(cliHelp, ['state-load']),
+        save: includesEvery(cliHelp, ['state-save']),
+      },
       version: normalizedCliVersion,
+    },
+    selection: {
+      package: options.package.replaceAll('\\', '/'),
+      package_directory: packageDirectory.replaceAll('\\', '/'),
+      config_mode: options.configless ? 'configless' : 'config',
+      config:
+        selectedConfig == null
+          ? null
+          : path.relative(repository, selectedConfig).replaceAll('\\', '/'),
+      runner_config:
+        selectedConfig == null
+          ? null
+          : path
+              .relative(packageDirectory, selectedConfig)
+              .replaceAll('\\', '/'),
     },
     hook_dependency_ready: true,
     trace_snapshot_option: traceSnapshotOption,

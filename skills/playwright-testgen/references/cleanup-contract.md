@@ -80,6 +80,13 @@ of run directories and cleanup preserves it on every path. Full run-directory
 removal belongs to Main after the result is accepted. Governed agents may remove
 only the generated children described below.
 
+Setup-owned `.playwright-testgen/profile.v1.json` and every explicitly approved
+durable authentication state path live outside run scratch. Normal run cleanup
+preserves them. A cancelled or failed auth capture removes only its newly
+created incomplete file; it never deletes or overwrites a pre-existing state.
+Setup closes only its own named browser sessions and reports cleanup failure
+separately.
+
 In a sequential queue, finish the active scenario's accepted result and scoped
 cleanup before activating the next scenario. Remove only that scenario's exact
 run directory. Preserve every completed generated spec, durable finding, and

@@ -106,16 +106,16 @@ function createRepository({
     [
       "if (process.env.PWTEST_CLI_GLOBAL_CONFIG !== '.') process.exit(9);",
       `if (process.argv.includes('--version')) console.log('${cliVersion}');`,
-      "else console.log('attach find generate-locator requests');",
+      "else console.log('attach find generate-locator requests state-load state-save');",
     ].join('\n'),
   );
   return { cli, fixtureRoot, repository };
 }
 
-function runPreflight(repository, cli) {
+function runPreflight(repository, cli, selection = ['--configless']) {
   const result = spawnSync(
     process.execPath,
-    [preflight, '--repo', repository, '--playwright-cli', cli],
+    [preflight, '--repo', repository, '--playwright-cli', cli, ...selection],
     { encoding: 'utf8' },
   );
   return {
@@ -123,6 +123,90 @@ function runPreflight(repository, cli) {
     report: JSON.parse(result.stdout),
   };
 }
+
+test('binds a hoisted runtime to the selected package and config', () => {
+  withRepository({}, ({ cli, repository }) => {
+    const packageDirectory = path.join(repository, 'apps', 'web');
+    mkdirSync(packageDirectory, { recursive: true });
+    writeJson(path.join(packageDirectory, 'package.json'), { private: true });
+    writeFileSync(
+      path.join(packageDirectory, 'playwright.config.ts'),
+      'export default {};\n',
+    );
+
+    const result = runPreflight(repository, cli, [
+      '--package',
+      'apps/web',
+      '--config',
+      'apps/web/playwright.config.ts',
+    ]);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(result.report.selection, {
+      package: 'apps/web',
+      package_directory: packageDirectory.replaceAll('\\', '/'),
+      config_mode: 'config',
+      config: 'apps/web/playwright.config.ts',
+      runner_config: 'playwright.config.ts',
+    });
+  });
+});
+
+test('requires one selected config or explicit configless mode', () => {
+  withRepository({}, ({ cli, repository }) => {
+    const result = runPreflight(repository, cli, []);
+
+    assert.equal(result.status, 1);
+    assert.deepEqual(result.report, {
+      ok: false,
+      error: 'preflight-selection-required',
+    });
+  });
+});
+
+test('rejects configless preflight when the selected package has a default config', () => {
+  withRepository({}, ({ cli, repository }) => {
+    writeFileSync(
+      path.join(repository, 'playwright.config.ts'),
+      'export default {};\n',
+    );
+    const result = runPreflight(repository, cli);
+    assert.equal(result.status, 1);
+    assert.equal(result.report.error, 'config-selection-invalid');
+  });
+});
+
+test('rejects a selected config that is not a Playwright config', () => {
+  withRepository({}, ({ cli, repository }) => {
+    const result = runPreflight(repository, cli, ['--config', 'package.json']);
+
+    assert.equal(result.status, 1);
+    assert.equal(result.report.error, 'config-selection-invalid');
+  });
+});
+
+test('rejects a selected package config from a sibling package', () => {
+  withRepository({}, ({ cli, repository }) => {
+    mkdirSync(path.join(repository, 'apps', 'web'), { recursive: true });
+    mkdirSync(path.join(repository, 'apps', 'other'), { recursive: true });
+    writeJson(path.join(repository, 'apps', 'web', 'package.json'), {
+      private: true,
+    });
+    writeFileSync(
+      path.join(repository, 'apps', 'other', 'playwright.config.ts'),
+      'export default {};\n',
+    );
+    const result = runPreflight(repository, cli, [
+      '--package',
+      'apps/web',
+      '--config',
+      'apps/other/playwright.config.ts',
+    ]);
+
+    assert.equal(result.status, 1);
+    assert.equal(result.report.error, 'config-selection-invalid');
+  });
+});
 
 function withRepository(options, callback) {
   const fixture = createRepository(options);
@@ -172,6 +256,10 @@ for (const [version, option] of [
       assert.equal(result.report.playwright_test.version, version);
       assert.equal(result.report.playwright_cli.version, '0.1.19');
       assert.equal(result.report.playwright_cli.skill_ready, true);
+      assert.deepEqual(result.report.playwright_cli.auth_state_capabilities, {
+        load: true,
+        save: true,
+      });
       assert.equal(result.report.hook_dependency_ready, true);
       assert.equal(result.report.trace_snapshot_option, option);
       assert.match(result.report.git_head, /^[a-f0-9]{40}$/u);
