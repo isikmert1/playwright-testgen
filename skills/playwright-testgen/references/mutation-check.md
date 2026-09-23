@@ -53,7 +53,9 @@ stdout:
 
 For an operational problem it uses `outcome: "error"`, a null criterion, and a
 short lowercase hyphenated `reason`. Raw Playwright output, logs, file content,
-environment values, and secrets never enter this protocol.
+environment values, and secrets never enter this protocol. A runner may also
+include a bounded `primary_reason` and `cleanup_reasons` array so both failures
+remain visible when cleanup fails after execution.
 
 ## Approval
 
