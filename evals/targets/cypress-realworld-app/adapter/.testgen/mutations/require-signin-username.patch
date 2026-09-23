@@ -1,0 +1,10 @@
+diff --git a/src/components/SignInForm.tsx b/src/components/SignInForm.tsx
+--- a/src/components/SignInForm.tsx
++++ b/src/components/SignInForm.tsx
+@@ -26,5 +26,5 @@ import { Alert } from "@mui/material";
+ const validationSchema = object({
+-  username: string().required("Username is required"),
++  username: string(),
+   password: string()
+     .min(4, "Password must contain at least 4 characters")
+     .required("Enter your password"),

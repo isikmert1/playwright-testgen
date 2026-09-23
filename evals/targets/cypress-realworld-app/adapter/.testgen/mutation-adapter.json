@@ -1,0 +1,15 @@
+{
+  "schema_version": "mutation-adapter.v1",
+  "adapter_id": "rwa-signin-validation",
+  "runner_path": ".testgen/mutation-runner.cjs",
+  "mutations": [
+    {
+      "mutation_id": "signin-username-required",
+      "criterion_id": "criterion-1",
+      "affected_paths": ["src/components/SignInForm.tsx"],
+      "patch_path": ".testgen/mutations/require-signin-username.patch",
+      "definition_digest": "ee50ac99e3073fdf1c5def36e3065ed1969931275b7f3dc56aff7c74a383748f",
+      "timeout_ms": 120000
+    }
+  ]
+}
