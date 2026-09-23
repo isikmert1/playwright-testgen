@@ -119,6 +119,18 @@ limits, validation, and cleanup rules as the corresponding pipeline role.
    confirms the application is already running at the approved origin and
    records separate readiness facts for the Playwright CLI exploration browser
    and the browser selected by the repository's existing runner configuration.
+   Decide from the written scenario whether authentication is needed. A public
+   landing page or login screen does not itself require authentication. For an
+   authenticated scenario, verify both CLI exploration and runner access to a
+   harmless authenticated page using the approved mechanism. An existing fixture
+   may ready the runner without readying the CLI browser; a profile reference or
+   saved state file proves neither. If either check fails or no mechanism is
+   approved, stop before Author with `needs-user-input` and the exact missing
+   prerequisite. Offer an existing project fixture or approved state path, or
+   the setup-owned human-assisted capture flow. Ask only for non-sensitive
+   account purpose and paths; never ask the human to paste credentials, MFA
+   codes, tokens, or state contents into model context. Never substitute an
+   unauthenticated scenario.
 2. Main receives one written scenario, preserves its acceptance criteria,
    assigns stable local criterion identifiers and a non-sensitive scenario
    reference, identifies the repository root and proposed spec path, and
@@ -145,14 +157,20 @@ limits, validation, and cleanup rules as the corresponding pipeline role.
    the selected Playwright config, then match their test directory, naming, and
    language. Use JavaScript only when existing Playwright specs establish that
    convention. When no Playwright specs exist, default to a descriptive
-   TypeScript `.spec.ts` file in the configured test directory. Ask before
-   creating the policy when conventions or the selected config are ambiguous.
+   TypeScript `.spec.ts` file in the configured test directory. In configless
+   mode, follow an existing E2E layout; otherwise suggest `tests/` only when it
+   does not conflict with another test suite. A partial profile scan does not
+   prove that tests are absent; inspect the selected package before choosing
+   the path. Ask before creating the policy when conventions or the runnable
+   location are ambiguous; never execute the config to resolve it.
    Playwright transforms `.spec.ts` files without a project `tsconfig` or direct
    `typescript` dependency; this does not replace a repository's own typecheck.
    Only an actual `/setup` profile can make a locator convention
-   `profile-backed`. Without one, tell Author no profile exists and let it run
-   the single bounded convention scan. Never substitute evaluation metadata or
-   Main's source guess for that profile.
+   `profile-backed`. Pass its exact validated test-ID status to Author. A fresh
+   `none-found` result is a conclusive absence within the inspected scope: tell
+   Author to skip convention scans and use the remaining locator rungs. Without
+   usable profile facts, let Author run the bounded convention scans. Never
+   substitute evaluation metadata or Main's source guess for profile facts.
 
    Main writes `.playwright-cli/testgen/<run_id>/command-policy.json` with only
    this shape:
