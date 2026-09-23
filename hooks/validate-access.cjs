@@ -10,6 +10,8 @@ const { decision, deny } = require('./hook-result.cjs');
 const {
   RUN_ID,
   comparablePath,
+  crossesGitBoundary,
+  isGitBoundary,
   isContained,
   loadPolicy,
   normalizePath,
@@ -51,6 +53,7 @@ function policiesAbove(cwd) {
       policies.push(policy);
     }
 
+    if (isGitBoundary(directory)) break;
     const parent = path.dirname(directory);
     if (parent === directory) break;
     directory = parent;
@@ -59,13 +62,23 @@ function policiesAbove(cwd) {
   return { invalid, policies };
 }
 
-function policiesNear(...paths) {
-  const discovered = paths.map(policiesAbove);
+function policiesNear(cwd, ...paths) {
+  const discovered = [cwd, ...paths].map(policiesAbove);
+  let canonicalCwd;
+  try {
+    canonicalCwd = realpathSync(cwd);
+  } catch {
+    return { invalid: true, policies: [] };
+  }
   const policies = discovered.flatMap((entry) => entry.policies);
   return {
     invalid: discovered.some((entry) => entry.invalid),
     policies: policies.filter(
       (policy, index) =>
+        isContained(policy.repositoryRoot, path.resolve(cwd), true) &&
+        isContained(policy.canonicalRepositoryRoot, canonicalCwd, true) &&
+        !crossesGitBoundary(policy.repositoryRoot, path.resolve(cwd)) &&
+        !crossesGitBoundary(policy.canonicalRepositoryRoot, canonicalCwd) &&
         policies.findIndex((candidate) =>
           samePath(candidate.policyPath, policy.policyPath),
         ) === index,
@@ -123,8 +136,8 @@ function explorerPolicy(policies, absolute, canonical) {
   const matches = policies.filter(
     (policy) =>
       policy.kind === 'discovery' &&
-      isContained(policy.repositoryRoot, absolute, true) &&
-      isContained(policy.canonicalRepositoryRoot, canonical, true),
+      isContained(policy.packageDirectory, absolute, true) &&
+      isContained(policy.canonicalPackageDirectory, canonical, true),
   );
   return matches.length === 1 ? matches[0] : null;
 }
@@ -136,6 +149,7 @@ const EXCLUDED_DISCOVERY_PARTS = new Set([
   '.git',
   '.next',
   '.playwright-cli',
+  '.playwright-testgen',
   '.testgen',
   'blob-report',
   'build',
@@ -166,6 +180,46 @@ function isCredentialPath(...paths) {
       )
     );
   });
+}
+
+function isRepositoryProfile(...paths) {
+  return paths.some((value) =>
+    comparablePath(normalizePath(value)).endsWith(
+      '/.playwright-testgen/profile.v1.json',
+    ),
+  );
+}
+
+function aliasesRepositoryProfile(policies, ...paths) {
+  return policies.some((policy) => {
+    const profile = path.join(
+      policy.repositoryRoot,
+      '.playwright-testgen',
+      'profile.v1.json',
+    );
+    return paths.some((value) => sameFile(profile, value));
+  });
+}
+
+function searchIncludesRepositoryProfile(policy, absolute, canonical) {
+  const profile = path.join(
+    policy.repositoryRoot,
+    '.playwright-testgen',
+    'profile.v1.json',
+  );
+  if (!existsSync(profile)) return false;
+  if (isContained(absolute, profile, true)) return true;
+  try {
+    if (isContained(canonical, realpathSync(profile), true)) return true;
+    if (statSync(profile, { bigint: true }).nlink > 1n) {
+      return searchMayReachExcludedPath(policy, absolute, (...paths) =>
+        paths.some((value) => sameFile(profile, value)),
+      );
+    }
+  } catch {
+    return true;
+  }
+  return false;
 }
 
 function isExcludedDiscoveryPath(policy, ...paths) {
@@ -262,6 +316,12 @@ function validateFileAccess(payload) {
     }
   }
 
+  if (isRepositoryProfile(absolute, canonical)) {
+    return deny(
+      'The repository profile is Main-owned navigation evidence; governed roles receive only relevant validated facts.',
+    );
+  }
+
   if (payload.tool_name === 'Read' && isCredentialPath(absolute, canonical)) {
     return deny('Credential-like files are opaque to governed agents.');
   }
@@ -280,6 +340,11 @@ function validateFileAccess(payload) {
   if (nearbyPolicies.length === 0) {
     return deny(
       'No valid Testgen run policy authorizes this access. Return to Main so it can create command-policy.json before dispatching a governed agent.',
+    );
+  }
+  if (aliasesRepositoryProfile(nearbyPolicies, absolute, canonical)) {
+    return deny(
+      'The repository profile is Main-owned navigation evidence; governed roles receive only relevant validated facts.',
     );
   }
   if (
@@ -517,6 +582,12 @@ function validateGrepAccess(payload) {
     // Grep reports missing paths; lexical containment is sufficient here.
   }
 
+  if (isRepositoryProfile(absolute, canonical)) {
+    return deny(
+      'The repository profile is Main-owned navigation evidence; governed roles receive only relevant validated facts.',
+    );
+  }
+
   const discovered = policiesNear(payload.cwd, absolute, canonical);
   if (discovered.invalid) {
     return deny(
@@ -526,8 +597,8 @@ function validateGrepAccess(payload) {
   const policies = discovered.policies.filter(
     (policy) =>
       (isExplorer(payload) || policy.kind === 'generation') &&
-      isContained(policy.repositoryRoot, absolute, true) &&
-      isContained(policy.canonicalRepositoryRoot, canonical, true),
+      isContained(policy.packageDirectory, absolute, true) &&
+      isContained(policy.canonicalPackageDirectory, canonical, true),
   );
   if (policies.length === 0) {
     return deny(
@@ -540,6 +611,17 @@ function validateGrepAccess(payload) {
     searchesDirectory = statSync(absolute).isDirectory();
   } catch {
     // Grep reports missing paths after this policy check.
+  }
+  if (
+    aliasesRepositoryProfile(policies, absolute, canonical) ||
+    (searchesDirectory &&
+      policies.some((policy) =>
+        searchIncludesRepositoryProfile(policy, absolute, canonical),
+      ))
+  ) {
+    return deny(
+      'The repository profile is Main-owned navigation evidence; scope search away from it.',
+    );
   }
   const linkedStateCouldBeInSearch =
     searchesDirectory &&
@@ -650,10 +732,18 @@ function validateGlobAccess(payload) {
   const matches = discovered.policies.filter(
     (policy) =>
       policy.kind === (explorer ? 'discovery' : 'generation') &&
-      isContained(policy.repositoryRoot, absolute, true) &&
-      isContained(policy.canonicalRepositoryRoot, canonical, true),
+      isContained(policy.packageDirectory, absolute, true) &&
+      isContained(policy.canonicalPackageDirectory, canonical, true),
   );
   const policy = matches.length === 1 ? matches[0] : null;
+  if (
+    policy != null &&
+    searchIncludesRepositoryProfile(policy, absolute, canonical)
+  ) {
+    return deny(
+      'The repository profile is Main-owned navigation evidence; scope search away from it.',
+    );
+  }
   const linkedStateCouldBeInSearch = discovered.policies.some((candidate) =>
     candidate.allowedStatePaths.some((state) => {
       try {

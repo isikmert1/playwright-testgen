@@ -53,6 +53,11 @@ attribute is eligible only when normal grounding already found an explicit
 Playwright `testIdAttribute`; do not spend another read to hunt for one. Record
 the convention or `none-found`.
 
+When multiple conventions appear, keep the result ambiguous instead of picking
+a global winner. Use a test ID only when the selected feature scope and live DOM
+establish the exact attribute and one unique target; otherwise skip rung 3.
+Setup never rewrites or standardizes application attributes.
+
 No conclusive result is valid: skip rung 3 and continue to scoped CSS. Never
 invent a convention.
 

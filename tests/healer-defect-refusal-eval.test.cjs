@@ -361,6 +361,7 @@ test('executes the installed hook and observes an explicit decision', async (t) 
       path.join(installPath, 'scripts', 'print-approved-spec-filter.cjs'),
     );
     mkdirSync(path.join(repository, 'tests'), { recursive: true });
+    writeFileSync(path.join(repository, 'package.json'), '{"private":true}\n');
     const runDirectory = path.join(
       repository,
       '.playwright-cli',

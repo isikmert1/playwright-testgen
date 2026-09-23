@@ -144,6 +144,44 @@ test('requires explicit package and config selection when either is ambiguous', 
   );
 });
 
+test('supports an explicit configless selection without reading a config', () => {
+  fixture(
+    {
+      'package.json': JSON.stringify({ private: true }),
+      'configs/playwright.config.ts':
+        "export default { use: { testIdAttribute: 'qa-id' } };\n",
+      'src/app.tsx': 'export const App = () => <button data-test="save" />;\n',
+    },
+    (repository) => {
+      const report = run(repository, '--package', '.', '--configless');
+
+      assert.equal(report.selection.status, 'selected');
+      assert.equal(report.selection.config_mode, 'configless');
+      assert.equal(report.selection.config, null);
+      assert.equal(report.facts.test_id.attribute, 'data-test');
+      assert.equal(report.facts.test_id.config_attribute, null);
+    },
+  );
+});
+
+test('rejects configless when Playwright would discover a package-root config', () => {
+  fixture(
+    {
+      'package.json': '{"private":true}\n',
+      'playwright.config.ts': 'export default {};\n',
+    },
+    (repository) => {
+      const result = spawnSync(
+        process.execPath,
+        [profiler, '--repo', repository, '--package', '.', '--configless'],
+        { encoding: 'utf8' },
+      );
+      assert.equal(result.status, 1);
+      assert.equal(JSON.parse(result.stdout).error, 'config-selection-invalid');
+    },
+  );
+});
+
 test('keeps an unknown-framework workspace package selectable beside a known one', () => {
   fixture(
     {
@@ -185,6 +223,28 @@ test('uses exact attribute boundaries and requires config evidence for custom ID
       assert.equal(report.facts.test_id.config_attribute, 'qa-id');
     },
   );
+});
+
+test('does not infer test-ID configuration from metadata or project expressions', () => {
+  for (const config of [
+    "export default { metadata: { testIdAttribute: 'qa-id' } };\n",
+    "export default { metadata: { use: { testIdAttribute: 'qa-id' } } };\n",
+    "export default { projects: [{ use: { testIdAttribute: 'qa-id' } }] };\n",
+  ]) {
+    fixture(
+      {
+        'package.json': '{}',
+        'playwright.config.ts': config,
+        'src/page.tsx': '<div qa-id="save" />\n',
+      },
+      (root) => {
+        const report = run(root);
+        assert.equal(report.facts.test_id.config_attribute, null);
+        assert.equal(report.facts.test_id.status, 'unknown');
+        assert.equal(report.facts.test_id.attribute, null);
+      },
+    );
+  }
 });
 
 test('does not cross a nested Git root or follow a symlinked source', (t) => {
@@ -450,6 +510,22 @@ test('does not treat an unrelated object as exported test-id configuration', () 
       'package.json': '{}',
       'playwright.config.ts':
         "const example = { testIdAttribute: 'qa-id' }; export default {};\n",
+      'src/page.tsx': '<div qa-id="save" />\n',
+    },
+    (root) => {
+      const report = run(root);
+      assert.equal(report.facts.test_id.config_attribute, null);
+      assert.notEqual(report.facts.test_id.status, 'detected');
+    },
+  );
+});
+
+test('does not assign a later unrelated object to an identifier export', () => {
+  fixture(
+    {
+      'package.json': '{}',
+      'playwright.config.ts':
+        "export default config; const example = { testIdAttribute: 'qa-id' };\n",
       'src/page.tsx': '<div qa-id="save" />\n',
     },
     (root) => {

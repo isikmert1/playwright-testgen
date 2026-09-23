@@ -39,6 +39,7 @@ const EXCLUDED = new Set([
 ]);
 const ATTRIBUTES = ['data-testid', 'data-test', 'data-cy', 'test-id'];
 const CONFIG = /^playwright\.config\.[cm]?[jt]s$/u;
+const DEFAULT_CONFIG_EXTENSIONS = ['ts', 'js', 'mts', 'mjs', 'cts', 'cjs'];
 const SOURCE = /\.(?:[cm]?[jt]sx?|vue|svelte|cshtml|erb|blade\.php|html)$/u;
 const CREDENTIAL =
   /^(?:\.env(?:\..*)?|\.npmrc|auth\.json|storage[-_]?state(?:\..*)?|credentials?(?:\..*)?|secrets?(?:\..*)?|.*\.(?:pem|p12|pfx|key))$/iu;
@@ -109,6 +110,18 @@ function excluded(relative) {
   return (
     parts.some((part) => EXCLUDED.has(part) || CREDENTIAL.test(part)) ||
     /(?:^|\/)(?:evals|mutations?)(?:\/|$)/u.test(relative)
+  );
+}
+
+function hasDefaultConfig(directory) {
+  return DEFAULT_CONFIG_EXTENSIONS.some((extension) =>
+    existsSync(path.join(directory, `playwright.config.${extension}`)),
+  );
+}
+
+function inspectionSource(relative) {
+  return (
+    path.posix.basename(relative) === 'package.json' || SOURCE.test(relative)
   );
 }
 
@@ -284,6 +297,28 @@ function matchingConfigs(paths, selectedPackage, packages) {
     .sort();
 }
 
+function selectedConfigPath(root, relative, selectedPackage) {
+  if (
+    !CONFIG.test(path.posix.basename(relative)) ||
+    (selectedPackage !== '.' &&
+      relative.includes('/') &&
+      !relative.startsWith(`${selectedPackage}/`)) ||
+    nestedRoot(root, relative) != null
+  )
+    return false;
+  let parent = path.posix.dirname(relative);
+  while (parent !== '.') {
+    if (
+      parent !== selectedPackage &&
+      !selectedPackage.startsWith(`${parent}/`) &&
+      existsSync(path.join(root, parent, 'package.json'))
+    )
+      return false;
+    parent = path.posix.dirname(parent);
+  }
+  return true;
+}
+
 function attributeCount(text, attribute) {
   const regex = new RegExp(
     '(?<![A-Za-z0-9_-])' + attribute + '(?![A-Za-z0-9_-])(?=\\s*=)',
@@ -295,7 +330,7 @@ function attributeCount(text, attribute) {
 function configuredTestIds(text) {
   const tokens = [
     ...text.matchAll(
-      /\/\*[\s\S]*?\*\/|\/\/[^\n]*|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`|[A-Za-z_$][\w$]*|[{}:,.=]/gu,
+      /\/\*[\s\S]*?\*\/|\/\/[^\n]*|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`|[A-Za-z_$][\w$]*|[{}:,.=()]/gu,
     ),
   ]
     .map((match) => match[0])
@@ -312,7 +347,14 @@ function configuredTestIds(text) {
     )
       start = index + 4;
   }
-  const open = tokens.indexOf('{', start);
+  const open =
+    tokens[start] === '{'
+      ? start
+      : tokens[start] === 'defineConfig' &&
+          tokens[start + 1] === '(' &&
+          tokens[start + 2] === '{'
+        ? start + 2
+        : -1;
   if (start < 0 || open < 0) return { values: new Set(), dynamic: false };
   let depth = 0;
   let close = -1;
@@ -327,15 +369,54 @@ function configuredTestIds(text) {
   const configuration = tokens.slice(open, close + 1);
   const values = new Set();
   let dynamic = false;
-  for (let index = 1; index < configuration.length - 2; index += 1) {
+  let propertyDepth = 0;
+  let useDepth = -1;
+  let useCount = 0;
+  for (let index = 0; index < configuration.length; index += 1) {
+    const token = configuration[index];
+    if (token === '{') {
+      if (
+        propertyDepth === 1 &&
+        configuration[index - 1] === ':' &&
+        ['use', "'use'", '"use"'].includes(configuration[index - 2])
+      )
+        useDepth = 2;
+      propertyDepth += 1;
+      continue;
+    }
+    if (token === '}') {
+      if (propertyDepth === useDepth) useDepth = -1;
+      propertyDepth -= 1;
+      continue;
+    }
+    if (
+      propertyDepth === 1 &&
+      ['use', "'use'", '"use"'].includes(token) &&
+      configuration[index + 1] === ':'
+    ) {
+      useCount += 1;
+      if (useCount > 1 || configuration[index + 2] !== '{') dynamic = true;
+    }
+    if (
+      useDepth === 2 &&
+      propertyDepth >= useDepth &&
+      token === '.' &&
+      configuration[index + 1] === '.' &&
+      configuration[index + 2] === '.'
+    )
+      dynamic = true;
     if (
       !['testIdAttribute', "'testIdAttribute'", '"testIdAttribute"'].includes(
-        configuration[index],
+        token,
       ) ||
       !['{', ','].includes(configuration[index - 1]) ||
       configuration[index + 1] !== ':'
     )
       continue;
+    if (useDepth !== 2 || propertyDepth !== 2) {
+      dynamic = true;
+      continue;
+    }
     const value = configuration[index + 2];
     if (/^(['"])[A-Za-z][A-Za-z0-9_-]*\1$/u.test(value))
       values.add(value.slice(1, -1));
@@ -498,6 +579,7 @@ function profileRepository({
   repository,
   selectedPackage,
   selectedConfig,
+  configless = false,
   limits: overrides = {},
 }) {
   if (typeof repository !== 'string' || repository.length === 0)
@@ -558,14 +640,22 @@ function profileRepository({
     packagePath == null
       ? []
       : matchingConfigs(paths, packagePath, packagePaths);
+  if (configless && selectedConfig != null) fail('config-selection-invalid');
+  if (
+    configless &&
+    packagePath != null &&
+    hasDefaultConfig(path.join(root, packagePath))
+  )
+    fail('config-selection-invalid');
   if (
     selectedConfig != null &&
     !configs.includes(selectedConfig) &&
     !discoveryPartial
   )
     fail('config-selection-invalid');
-  const config =
-    selectedConfig != null
+  const config = configless
+    ? null
+    : selectedConfig != null
       ? configs.includes(selectedConfig)
         ? selectedConfig
         : null
@@ -578,11 +668,13 @@ function profileRepository({
       ? packages.length === 0
         ? 'package-unavailable'
         : 'package-required'
-      : configs.length > 1 && config == null
-        ? 'config-required'
-        : config == null
-          ? 'config-unavailable'
-          : 'selected';
+      : configless
+        ? 'selected'
+        : configs.length > 1 && config == null
+          ? 'config-required'
+          : config == null
+            ? 'config-unavailable'
+            : 'selected';
   const record = records.find((item) => item.path === packagePath);
   const facts =
     status === 'selected' || status === 'config-unavailable'
@@ -596,6 +688,14 @@ function profileRepository({
     selection: {
       status,
       package: packagePath,
+      config_mode:
+        packagePath == null
+          ? null
+          : configless
+            ? 'configless'
+            : config == null
+              ? null
+              : 'config',
       config,
       packages: packages.slice(0, 16),
       configs: configs.slice(0, 16),
@@ -614,8 +714,12 @@ function profileRepository({
 
 function parseArguments(argv) {
   const options = {};
-  for (let index = 0; index < argv.length; index += 2) {
+  for (let index = 0; index < argv.length; index += 1) {
     const key = argv[index];
+    if (key === '--configless' && options.configless == null) {
+      options.configless = true;
+      continue;
+    }
     const value = argv[index + 1];
     if (typeof value !== 'string' || value.length === 0)
       fail('arguments-invalid');
@@ -626,6 +730,7 @@ function parseArguments(argv) {
     else if (key === '--config' && options.selectedConfig == null)
       options.selectedConfig = value;
     else fail('arguments-invalid');
+    index += 1;
   }
   return options;
 }
@@ -646,4 +751,11 @@ function main() {
 }
 
 if (require.main === module) main();
-module.exports = { DEFAULT_LIMITS, profileRepository };
+module.exports = {
+  DEFAULT_LIMITS,
+  excluded,
+  hasDefaultConfig,
+  inspectionSource,
+  profileRepository,
+  selectedConfigPath,
+};

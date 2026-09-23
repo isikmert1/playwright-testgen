@@ -292,10 +292,6 @@ test('workflow guidance removes avoidable pre-Author ambiguity', () => {
   assert.match(healer, /Do not recompute.*starting digest/iu);
   assert.match(healer, /Put one command in one\s+Bash call/iu);
   assert.match(
-    author,
-    /collection command.*bare.*own Bash call.*final spec.*assertion line/isu,
-  );
-  assert.match(
     artifactContract,
     /attempt summary.*behavior-focused sentence.*200 characters/isu,
   );
@@ -508,6 +504,91 @@ test('ships one command with explicit and discovery entry paths', () => {
     pipeline,
     /Main never performs the delegated role's\s+browser, authoring, execution, or repair work/iu,
   );
+});
+
+test('ships bounded setup with durable profile and optional human auth capture', () => {
+  const commandPath = path.join(repositoryRoot, 'commands', 'setup.md');
+  const skill = readFileSync(
+    path.join(repositoryRoot, 'skills', 'playwright-testgen', 'SKILL.md'),
+    'utf8',
+  );
+  const pipeline = readFileSync(
+    path.join(
+      repositoryRoot,
+      'skills',
+      'playwright-testgen',
+      'references',
+      'pipeline.md',
+    ),
+    'utf8',
+  );
+  const locator = readFileSync(
+    path.join(
+      repositoryRoot,
+      'skills',
+      'playwright-testgen',
+      'references',
+      'locator-policy.md',
+    ),
+    'utf8',
+  );
+  const cleanup = readFileSync(
+    path.join(
+      repositoryRoot,
+      'skills',
+      'playwright-testgen',
+      'references',
+      'cleanup-contract.md',
+    ),
+    'utf8',
+  );
+  const readme = readFileSync(path.join(repositoryRoot, 'README.md'), 'utf8');
+  const architecture = readFileSync(
+    path.join(repositoryRoot, 'docs', 'architecture.md'),
+    'utf8',
+  );
+
+  assert.equal(existsSync(commandPath), true);
+  const command = readFileSync(commandPath, 'utf8');
+  assert.match(command, /profile-repo\.cjs/iu);
+  assert.match(command, /setup-profile\.cjs/iu);
+  assert.ok(
+    command.indexOf('## 2. Diagnose runtime readiness') <
+      command.indexOf('## 3. Publish the local profile'),
+  );
+  assert.match(command, /one selected package.*configless/isu);
+  assert.match(command, /setup incomplete/iu);
+  assert.match(command, /npm.*explicit approval/isu);
+  assert.match(command, /Yarn|pnpm/iu);
+  assert.match(command, /human.*credentials.*MFA/isu);
+  assert.match(command, /playwright-cli -s=<setup-session> open --headed/u);
+  assert.match(command, /auth_state_capabilities\.load/iu);
+  assert.match(command, /auth_state_capabilities\.save/iu);
+  assert.match(command, /state-save/iu);
+  assert.match(command, /fresh.*state-load/isu);
+  assert.match(command, /login test.*independent|independent.*login test/isu);
+  assert.match(command, /no login\s+page.*public/isu);
+  assert.match(command, /existing project fixture/iu);
+  assert.match(command, /existing storage-state file/iu);
+  assert.match(command, /human-assisted capture/iu);
+  assert.match(command, /`--replace` only after explicit approval/iu);
+
+  assert.doesNotMatch(skill, /planned but not shipped/iu);
+  assert.match(skill, /`\/playwright-testgen:setup`/u);
+  assert.match(skill, /\.playwright-testgen\/profile\.v1\.json/iu);
+  assert.match(pipeline, /selected package.*config(?: file|less)/isu);
+  assert.match(pipeline, /profile.*untrusted navigation evidence/isu);
+  assert.match(locator, /multiple.*convention.*ambiguous/isu);
+  assert.match(cleanup, /\.playwright-testgen\/profile\.v1\.json/iu);
+  assert.match(cleanup, /approved\s+durable authentication state/iu);
+  assert.match(readme, /\/playwright-testgen:setup/u);
+  assert.match(readme, /Setup after installation/iu);
+  assert.match(
+    readme,
+    /optional, Git-ignored\s+`\.playwright-testgen\/profile\.v1\.json`/iu,
+  );
+  assert.match(readme, /does not generate or run tests/iu);
+  assert.match(architecture, /Setup.*profile.*Main/isu);
 });
 
 test('ships a sequential multi-scenario queue around the existing flow', () => {

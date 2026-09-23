@@ -1,6 +1,6 @@
 ---
 name: playwright-testgen
-description: Use when discovering Playwright scenarios, turning human-approved scenarios into grounded end-to-end specs, running and repairing a spec produced by that workflow, or explicitly requesting Explorer, Author, or Healer standalone.
+description: Use when preparing a repository for Testgen, discovering Playwright scenarios, turning human-approved scenarios into grounded end-to-end specs, running and repairing a spec produced by that workflow, or explicitly requesting Explorer, Author, or Healer standalone.
 license: Apache-2.0
 ---
 
@@ -18,8 +18,8 @@ are read literally: resolve their plugin-relative paths against this root,
 not the repository being tested. This resource path does not replace the
 SessionStart environment variable used for Bash scripts below.
 
-Run the workflow inside the repository being tested. It must already
-provide its local `playwright` and `@playwright/test` runtime. The current
+Run generation only after the selected package provides its local `playwright`
+and `@playwright/test` runtime. The current
 official `@playwright/cli` must be installed globally so its documented
 `playwright-cli` command is available without depending on the repository's
 `node_modules` layout. Never install or resolve these dependencies from this
@@ -32,22 +32,40 @@ documented script call reports it missing, stop and ask the human to restart
 Claude Code after installing or reloading the plugin. Never infer it from
 `SKILL.md`, search for another checkout, or hardcode a development path.
 
-Main runs one read-only preflight from the repository's package directory before
-every generation:
+`/playwright-testgen:setup` is the optional Main-owned onboarding flow. It runs
+the bounded static profiler, publishes the ignored target-owned
+`.playwright-testgen/profile.v1.json` only after approval, and offers relevant
+remedies without starting generation. Governed roles never read or edit that
+profile; Main validates freshness and passes only relevant facts. Setup remains
+usable without authentication and never generates a login test.
+
+Before every generation, Main validates the profile when present:
 
 ```sh
-node "$PLAYWRIGHT_TESTGEN_ROOT/scripts/runtime-preflight.cjs" --repo .
+node "$PLAYWRIGHT_TESTGEN_ROOT/scripts/setup-profile.cjs" validate --repo .
 ```
 
-Run it bare from the repository root; do not prefix it with `cd`, combine it
-with another command, or append discovery probes. It resolves and records the
-repository's local `playwright` and `@playwright/test`, the global
+Missing, invalid, stale, partial, or wrong-target profile facts fall back to
+ordinary grounding. Main then runs one read-only preflight from the Git root
+with one selected package and either one selected config or explicit configless
+mode:
+
+```sh
+node "$PLAYWRIGHT_TESTGEN_ROOT/scripts/runtime-preflight.cjs" --repo . --package . --configless
+```
+
+Replace the package and use `--config <repo-relative-config>` when selected.
+Run it bare from the Git root; do not prefix it with `cd`, combine it with
+another command, or append discovery probes. It resolves and records the
+selected package's local `playwright` and `@playwright/test`, the global
 `playwright-cli`, its installed project skill, required runner/CLI capabilities,
 Git HEAD, hook dependency readiness, and the supported trace snapshot spelling.
 It checks the skill file itself and does not rely on the obsolete `Agent skill:`
 help heading. `ok: false` stops before Author with the reported bounded reason;
-an unborn or missing Git HEAD is `git-head-unavailable`. Never create a commit
-or install anything to make preflight pass.
+an unborn or missing Git HEAD is `git-head-unavailable`. Normal generation
+never installs or rewrites infrastructure. Setup may offer one exact remedy,
+but runs it only after approval and repeats the affected check. Never create a
+commit to make preflight pass.
 
 Node must be 22.13 or newer and the CLI must be 0.1.19 or newer. A newer
 version is not assumed trace-compatible: unknown combinations leave optional
@@ -64,16 +82,10 @@ hardcode Chromium or change repository configuration. A browser installation
 listing is supporting evidence, not proof that the selected local Playwright
 version can launch it; stop when readiness cannot be confirmed.
 
-`/setup` is planned but not shipped. Until it exists, Main offers only the
-relevant official remediation:
-
-- install or update the CLI: `npm install -g @playwright/cli@latest`
-- install the skill from the repository: `playwright-cli install --skills`
-
 Never run an installation without user approval. Author never installs or
 updates packages or skills. The official skill owns CLI command mechanics only.
-This skill owns criteria, orchestration, checkpoints, handoffs, and healing,
-and wins when the workflows differ.
+This skill owns setup/profile policy, criteria, orchestration, checkpoints,
+handoffs, and healing, and wins when the workflows differ.
 
 ## Core flow
 

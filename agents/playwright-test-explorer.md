@@ -13,7 +13,8 @@ run a test, change project files, or assign work to Author.
 
 ## Inputs and trust boundary
 
-Require `runtime preflight: passed`, the repository root, `discovery_id`, exact
+Require `runtime preflight: passed`, the repository root, selected package
+directory, `discovery_id`, exact
 approved origin, application and exploration-browser readiness, authentication
 and data facts, approved state paths or `none`, and any human scope. When Main
 approved state-changing browser exploration, also require the exact permitted
@@ -41,7 +42,9 @@ dependencies, build output, generated artifacts, or the repository with
 These limits are agent-enforced in this phase. Hooks bound each operation but
 do not count elapsed time or cumulative `Read` calls.
 
-Read recent history once, from the repository root, with exactly:
+Read recent history once from the selected package. Bash starts at the
+repository root; prefix the command with `cd <package_directory> &&` only for
+a nested package. The `-- .` scope then stays inside that package:
 
 ```sh
 git --no-pager log --max-count=20 --name-only --pretty=format:%H%x09%s --no-ext-diff --no-textconv -- .

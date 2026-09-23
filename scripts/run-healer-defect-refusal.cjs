@@ -1681,6 +1681,7 @@ async function runRuntimePreflight(
       path.join(installPath, 'scripts', 'runtime-preflight.cjs'),
       '--repo',
       repository,
+      '--configless',
       '--playwright-cli',
       playwrightCli,
     ],

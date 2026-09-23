@@ -55,6 +55,7 @@ function createTargetRepository() {
       allowed_state_paths: [],
       allowed_write_paths: [],
       format_version: 1,
+      package_directory: '.',
       run_id: runId,
       allowed_origins: ['http://127.0.0.1:3000'],
       trace_snapshot_option: '--name',
@@ -446,6 +447,7 @@ function writeDiscoveryPolicy(runDirectory, values = {}) {
       allowed_state_paths: [],
       discovery_id: runId,
       format_version: 1,
+      package_directory: '.',
       policy_kind: 'discovery',
       ...values,
     }),
@@ -507,6 +509,53 @@ test('governs Explorer reads and bounded searches with a discovery policy', () =
         'allow',
       );
     }
+  });
+});
+
+test('scopes Explorer evidence to the selected package', () => {
+  withDiscoveryRepository(({ runDirectory, targetRepository }) => {
+    const packageDirectory = path.join(targetRepository, 'apps', 'web');
+    mkdirSync(path.join(packageDirectory, 'src'), { recursive: true });
+    writeFileSync(path.join(packageDirectory, 'package.json'), '{}\n');
+    writeFileSync(
+      path.join(packageDirectory, 'src', 'orders.ts'),
+      'export const route = "/orders";\n',
+    );
+    writeDiscoveryPolicy(runDirectory, { package_directory: 'apps/web' });
+
+    assert.equal(
+      runToolHook(
+        targetRepository,
+        'Read',
+        { file_path: path.join(packageDirectory, 'src', 'orders.ts') },
+        'playwright-test-explorer',
+      ).permissionDecision,
+      'allow',
+    );
+    assert.equal(
+      runToolHook(
+        targetRepository,
+        'Read',
+        { file_path: path.join(targetRepository, 'src', 'orders.ts') },
+        'playwright-test-explorer',
+      ).permissionDecision,
+      'deny',
+    );
+    const history =
+      'git --no-pager log --max-count=20 --name-only --pretty=format:%H%x09%s --no-ext-diff --no-textconv -- .';
+    assert.equal(
+      runHook(
+        targetRepository,
+        `cd apps/web && ${history}`,
+        'playwright-test-explorer',
+      ).permissionDecision,
+      'allow',
+    );
+    assert.equal(
+      runHook(targetRepository, history, 'playwright-test-explorer')
+        .permissionDecision,
+      'deny',
+    );
   });
 });
 
@@ -1535,7 +1584,7 @@ test('keeps confirmation runners in the foreground', () => {
   });
 });
 
-test('requires Playwright runners to start at the repository root', () => {
+test('requires Playwright runners to start at the selected package root', () => {
   withTargetRepository(({ runDirectory, targetRepository }) => {
     const nestedDirectory = path.join(targetRepository, 'tests');
     const output = path
@@ -1548,7 +1597,123 @@ test('requires Playwright runners to start at the repository root', () => {
     );
 
     assert.equal(result.permissionDecision, 'deny');
-    assert.match(result.permissionDecisionReason, /repository root/iu);
+    assert.match(result.permissionDecisionReason, /selected package/iu);
+  });
+});
+
+test('binds collection and execution to the selected workspace package', () => {
+  withTargetRepository(({ runDirectory, targetRepository }) => {
+    const packageDirectory = path.join(targetRepository, 'apps', 'web');
+    const specRelative = 'apps/web/tests/account.spec.ts';
+    const specPath = path.join(targetRepository, specRelative);
+    mkdirSync(path.dirname(specPath), { recursive: true });
+    writeFileSync(
+      path.join(packageDirectory, 'package.json'),
+      JSON.stringify({ scripts: { lint: 'eslint .' } }),
+    );
+    writeFileSync(specPath, '');
+    updatePolicy(runDirectory, {
+      approved_spec: specRelative,
+      package_directory: 'apps/web',
+    });
+    const filter = exactSpecFilter(targetRepository, specRelative);
+
+    const collection = runHook(
+      targetRepository,
+      `cd apps/web && npx --no playwright test '${filter}' --list`,
+    );
+    assert.equal(collection.permissionDecision, 'allow');
+
+    const output = `../../.playwright-cli/testgen/${runId}/attempt-2/test-results`;
+    const execution = runToolHook(
+      targetRepository,
+      'Bash',
+      {
+        command:
+          `cd apps/web && PLAYWRIGHT_HTML_OPEN=never npx --no playwright test '${filter}' ` +
+          `--retries=0 --repeat-each=1 --output=${output}`,
+      },
+      'playwright-test-healer',
+    );
+    assert.equal(execution.permissionDecision, 'allow');
+
+    assert.equal(
+      runHook(targetRepository, `npx --no playwright test '${filter}' --list`)
+        .permissionDecision,
+      'deny',
+    );
+  });
+});
+
+test('rejects an escaping selected package directory in run policy', () => {
+  withTargetRepository(({ runDirectory, targetRepository }) => {
+    updatePolicy(runDirectory, { package_directory: '../outside' });
+    const result = runToolHook(targetRepository, 'Edit', {
+      file_path: path.join(targetRepository, 'package.json'),
+    });
+
+    assert.equal(result.permissionDecision, 'deny');
+    assert.match(result.permissionDecisionReason, /policy.*invalid/iu);
+  });
+});
+
+test('parent run policy cannot authorize a nested Git repository', () => {
+  withTargetRepository(({ runDirectory, targetRepository }) => {
+    const child = path.join(targetRepository, 'apps', 'independent');
+    const spec = path.join(child, 'tests', 'child.spec.ts');
+    mkdirSync(path.dirname(spec), { recursive: true });
+    writeFileSync(spec, '');
+    writeFileSync(path.join(child, 'package.json'), '{}');
+    const initialized = spawnSync('git', ['init', '--quiet'], {
+      cwd: child,
+      encoding: 'utf8',
+    });
+    assert.equal(initialized.status, 0, initialized.stderr);
+
+    const relativeSpec = 'apps/independent/tests/child.spec.ts';
+    updatePolicy(runDirectory, { approved_spec: relativeSpec });
+    assert.equal(
+      runToolHook(child, 'Write', { file_path: spec, content: '' })
+        .permissionDecision,
+      'deny',
+    );
+    assert.equal(
+      runToolHook(targetRepository, 'Write', {
+        file_path: spec,
+        content: '',
+      }).permissionDecision,
+      'deny',
+    );
+
+    updatePolicy(runDirectory, {
+      approved_spec: 'tests/account.spec.ts',
+      allowed_write_paths: [],
+    });
+    assert.equal(
+      runToolHook(child, 'Write', {
+        file_path: path.join(targetRepository, 'tests', 'account.spec.ts'),
+        content: '',
+      }).permissionDecision,
+      'deny',
+    );
+    updatePolicy(runDirectory, { allowed_write_paths: [relativeSpec] });
+    assert.equal(
+      runToolHook(targetRepository, 'Write', {
+        file_path: spec,
+        content: '',
+      }).permissionDecision,
+      'deny',
+    );
+
+    updatePolicy(runDirectory, {
+      allowed_write_paths: [],
+      package_directory: 'apps/independent',
+    });
+    assert.equal(
+      runToolHook(child, 'Write', { file_path: spec, content: '' })
+        .permissionDecision,
+      'deny',
+    );
   });
 });
 
@@ -2030,7 +2195,7 @@ test('keeps approved storage state opaque to governed agents', () => {
     assert.equal(outsideCwd.permissionDecision, 'deny');
     assert.match(
       outsideCwd.permissionDecisionReason,
-      /storage state is opaque/iu,
+      /No valid Testgen run policy/iu,
     );
 
     const linkedStatePath = path.join(targetRepository, 'tests', 'state.json');
@@ -2200,6 +2365,81 @@ test('keeps credential-like files out of Author and Healer reads and searches', 
       ).permissionDecision,
       'allow',
     );
+  });
+});
+
+test('keeps the Main-owned repository profile opaque and immutable to roles', () => {
+  withTargetRepository(({ runDirectory, targetRepository }) => {
+    const profileDirectory = path.join(targetRepository, '.playwright-testgen');
+    const profilePath = path.join(profileDirectory, 'profile.v1.json');
+    mkdirSync(profileDirectory);
+    writeFileSync(profilePath, '{"schema_version":"repository-profile.v1"}');
+    const aliasPath = path.join(
+      targetRepository,
+      'tests',
+      'profile-alias.json',
+    );
+    linkSync(profilePath, aliasPath);
+
+    for (const role of ['playwright-test-author', 'playwright-test-healer']) {
+      for (const [tool, input] of [
+        ['Read', { file_path: profilePath }],
+        ['Write', { file_path: profilePath, content: '{}' }],
+        ['Edit', { file_path: profilePath }],
+        ['Grep', { path: profilePath, pattern: 'test_id' }],
+      ]) {
+        const result = runToolHook(targetRepository, tool, input, role);
+        assert.equal(result.permissionDecision, 'deny', `${role}: ${tool}`);
+        assert.match(result.permissionDecisionReason, /profile.*Main-owned/iu);
+      }
+      for (const [tool, input] of [
+        ['Read', { file_path: aliasPath }],
+        ['Grep', { path: aliasPath, pattern: 'schema_version' }],
+        [
+          'Grep',
+          {
+            path: path.join(targetRepository, 'tests'),
+            pattern: 'schema_version',
+          },
+        ],
+      ]) {
+        assert.equal(
+          runToolHook(targetRepository, tool, input, role).permissionDecision,
+          'deny',
+          `${role}: ${tool} at a profile hardlink`,
+        );
+      }
+      for (const [tool, input] of [
+        ['Grep', { path: targetRepository, pattern: 'schema_version' }],
+        ['Grep', { path: profileDirectory, pattern: 'schema_version' }],
+        ['Glob', { path: targetRepository, pattern: '**/*.json' }],
+      ]) {
+        assert.equal(
+          runToolHook(targetRepository, tool, input, role).permissionDecision,
+          'deny',
+          `${role}: ${tool} at ${input.path}`,
+        );
+      }
+    }
+    writeDiscoveryPolicy(runDirectory);
+    for (const tool of ['Grep', 'Glob']) {
+      assert.equal(
+        runToolHook(
+          targetRepository,
+          tool,
+          tool === 'Grep'
+            ? {
+                path: profileDirectory,
+                pattern: 'schema_version',
+                head_limit: 5,
+                output_mode: 'content',
+              }
+            : { path: profileDirectory, pattern: '*.json' },
+          'playwright-test-explorer',
+        ).permissionDecision,
+        'deny',
+      );
+    }
   });
 });
 
@@ -2442,7 +2682,7 @@ test('denies validation scripts outside the repository root', () => {
       const result = runHook(cwd, 'npm run lint -- tests/account.spec.ts');
 
       assert.equal(result.permissionDecision, 'deny');
-      assert.match(result.permissionDecisionReason, /repository root/iu);
+      assert.match(result.permissionDecisionReason, /selected package/iu);
     }
   });
 });
@@ -2452,7 +2692,9 @@ test('keeps the shared runtime preflight Main-owned', () => {
     const documentedPreflight = readFileSync(
       path.join(repositoryRoot, 'skills', 'playwright-testgen', 'SKILL.md'),
       'utf8',
-    ).match(/^node ".*runtime-preflight\.cjs" --repo \.$/mu)?.[0];
+    ).match(
+      /^node ".*runtime-preflight\.cjs" --repo \. --package \. --configless$/mu,
+    )?.[0];
 
     assert.equal(typeof documentedPreflight, 'string');
     assert.equal(

@@ -20,6 +20,7 @@ const DISCOVERY_POLICY_KEYS = new Set([
   'allowed_state_paths',
   'discovery_id',
   'format_version',
+  'package_directory',
   'policy_kind',
 ]);
 
@@ -76,6 +77,20 @@ function isContained(root, candidate, allowRoot = false) {
   );
 }
 
+function isGitBoundary(directory) {
+  return existsSync(path.join(directory, '.git'));
+}
+
+function crossesGitBoundary(root, candidate) {
+  let directory = root;
+  for (const part of path.relative(root, candidate).split(path.sep)) {
+    if (part === '') continue;
+    directory = path.join(directory, part);
+    if (isGitBoundary(directory)) return true;
+  }
+  return false;
+}
+
 function resolveContainedPath(
   cwd,
   value,
@@ -104,6 +119,11 @@ function resolveContainedPath(
     path.relative(existingAncestor, candidate),
   );
   if (!isContained(canonicalRoot, canonicalCandidate, allowRoot)) return null;
+  if (
+    crossesGitBoundary(root, candidate) ||
+    crossesGitBoundary(canonicalRoot, canonicalCandidate)
+  )
+    return null;
 
   return { absolute: candidate, canonical: canonicalCandidate };
 }
@@ -123,6 +143,7 @@ function policyCandidates(cwd, runId) {
       ),
     );
 
+    if (isGitBoundary(directory)) break;
     const parent = path.dirname(directory);
     if (parent === directory) break;
     directory = parent;
@@ -175,9 +196,12 @@ function loadPolicy(cwd, runId) {
 
   const discovery = policy.policy_kind === 'discovery';
   if (discovery) {
+    const discoveryKeys = Object.keys(policy);
     if (
-      Object.keys(policy).length !== DISCOVERY_POLICY_KEYS.size ||
-      Object.keys(policy).some((key) => !DISCOVERY_POLICY_KEYS.has(key)) ||
+      ![DISCOVERY_POLICY_KEYS.size - 1, DISCOVERY_POLICY_KEYS.size].includes(
+        discoveryKeys.length,
+      ) ||
+      discoveryKeys.some((key) => !DISCOVERY_POLICY_KEYS.has(key)) ||
       policy.discovery_id !== runId ||
       [
         'approved_spec',
@@ -279,6 +303,30 @@ function loadPolicy(cwd, runId) {
     return null;
   }
 
+  const packageValue = policy.package_directory ?? '.';
+  if (typeof packageValue !== 'string' || path.isAbsolute(packageValue))
+    return null;
+  const packageDirectory = resolveContainedPath(
+    repositoryRoot,
+    packageValue,
+    repositoryRoot,
+    canonicalRepositoryRoot,
+    true,
+  );
+  if (packageDirectory == null) return null;
+  try {
+    if (
+      !statSync(packageDirectory.absolute).isDirectory() ||
+      (policy.package_directory != null &&
+        !statSync(
+          path.join(packageDirectory.absolute, 'package.json'),
+        ).isFile())
+    )
+      return null;
+  } catch {
+    return null;
+  }
+
   const allowedStatePaths = [];
   for (const value of policy.allowed_state_paths) {
     const resolved = resolveContainedPath(
@@ -301,6 +349,8 @@ function loadPolicy(cwd, runId) {
     allowedStatePaths,
     canonicalRepositoryRoot,
     canonicalRunDirectory,
+    canonicalPackageDirectory: packageDirectory.canonical,
+    packageDirectory: packageDirectory.absolute,
     policyPath,
     repositoryRoot,
     runDirectory,
@@ -355,7 +405,9 @@ function loadPolicy(cwd, runId) {
 module.exports = {
   RUN_ID,
   comparablePath,
+  crossesGitBoundary,
   exactPlaywrightFilter,
+  isGitBoundary,
   isContained,
   loadPolicy,
   normalizePath,
