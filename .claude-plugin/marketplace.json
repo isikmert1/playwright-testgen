@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
   "name": "playwright-testgen",
-  "description": "Claude Code plugin for grounded Playwright test generation and repair using the official Playwright CLI.",
+  "description": "Marketplace for Playwright Testgen, a Claude Code plugin for Playwright E2E tests.",
   "owner": {
     "name": "isikmert",
     "url": "https://github.com/isikmert1"
@@ -10,7 +10,7 @@
     {
       "name": "playwright-testgen",
       "version": "0.1.0",
-      "description": "Claude Code plugin for grounded Playwright test generation and repair using the official Playwright CLI.",
+      "description": "Claude Code plugin that discovers scenarios, writes Playwright E2E tests from source and live browser evidence, and repairs test defects after human-approved runs.",
       "source": "./"
     }
   ]
