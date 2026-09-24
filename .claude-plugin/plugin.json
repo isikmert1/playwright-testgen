@@ -3,7 +3,7 @@
   "name": "playwright-testgen",
   "version": "0.1.0",
   "displayName": "Playwright Testgen",
-  "description": "Claude Code plugin for grounded Playwright test generation and repair using the official Playwright CLI.",
+  "description": "Claude Code plugin that discovers scenarios, writes Playwright E2E tests from source and live browser evidence, and repairs test defects after human-approved runs.",
   "author": {
     "name": "isikmert"
   },
