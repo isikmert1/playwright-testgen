@@ -116,6 +116,32 @@ function withRepository(callback) {
   }
 }
 
+test('prints shared mutation-check help without a repository or run', () => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'testgen-help-'));
+  try {
+    const direct = run(directory, ['--help']);
+    const verifyHelp = run(directory, ['verify', '--help']);
+
+    for (const result of [direct, verifyHelp]) {
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(result.stderr, '');
+      assert.match(result.stdout, /^Usage:\n/u);
+      assert.match(
+        result.stdout,
+        /verify --repo \. --run-id <run_id> --criterion-id <criterion_id>/u,
+      );
+      assert.match(
+        result.stdout,
+        /verify --repo \. --run-id <run_id> --adapter <manifest> --mutation-id <mutation_id> --criterion-id <criterion_id> --approval-digest <sha256>/u,
+      );
+    }
+    assert.equal(direct.stdout, verifyHelp.stdout);
+    assert.equal(existsSync(path.join(directory, '.playwright-cli')), false);
+  } finally {
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
+
 function handoff() {
   return {
     schema_version: 'author-handoff.v1',
@@ -947,6 +973,26 @@ test('returns unavailable when the repository has no mutation adapter', () => {
       status: 'unavailable',
       criterion_id: 'criterion-1',
       reason: 'adapter-absent',
+    });
+  });
+});
+
+test('keeps the missing criterion error in verify JSON', () => {
+  withRepository(({ repository }) => {
+    const result = run(repository, [
+      'verify',
+      '--repo',
+      '.',
+      '--run-id',
+      runId,
+    ]);
+
+    assert.equal(result.status, 1);
+    assert.deepEqual(JSON.parse(result.stdout), {
+      ok: false,
+      operation: 'verify',
+      status: 'verification-error',
+      error: 'criterion-id-invalid',
     });
   });
 });
