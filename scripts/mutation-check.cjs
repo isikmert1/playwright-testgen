@@ -5,6 +5,17 @@ const { digestAdapter } = require('./mutation-adapter.cjs');
 const { MutationCheckError } = require('./mutation-check-error.cjs');
 const { verifyMutation } = require('./mutation-isolation.cjs');
 
+const HELP = `Usage:
+  No adapter:
+    node <plugin-root>/scripts/mutation-check.cjs verify --repo . --run-id <run_id> --criterion-id <criterion_id>
+  Approved adapter:
+    node <plugin-root>/scripts/mutation-check.cjs verify --repo . --run-id <run_id> --adapter <manifest> --mutation-id <mutation_id> --criterion-id <criterion_id> --approval-digest <sha256>
+  Capture:
+    node <plugin-root>/scripts/mutation-check.cjs capture --repo . --run-id <run_id> --boundary <pre-author|checkpoint|post-healer>
+  Digest:
+    node <plugin-root>/scripts/mutation-check.cjs digest --repo . --adapter <manifest> --mutation-id <mutation_id>
+`;
+
 function parseFlags(values, allowed) {
   const options = {};
   for (let index = 0; index < values.length; index += 2) {
@@ -65,6 +76,13 @@ function verify(values, signal) {
 }
 
 async function main(argv = process.argv.slice(2)) {
+  if (
+    (argv.length === 1 && argv[0] === '--help') ||
+    (argv.length === 2 && argv[0] === 'verify' && argv[1] === '--help')
+  ) {
+    process.stdout.write(HELP);
+    return;
+  }
   const operation = argv.shift() ?? null;
   const controller = operation === 'verify' ? new AbortController() : null;
   const cancel = () => controller.abort();
