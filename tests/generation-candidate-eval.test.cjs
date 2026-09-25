@@ -42,3 +42,9 @@ test('candidate grader distinguishes a passing spec from an assertion failure', 
     'error',
   );
 });
+
+test('counts a single unexpected Playwright timeout as a test failure', () => {
+  const timedOut = report('failed');
+  timedOut.suites[0].specs[0].tests[0].results[0].status = 'timedOut';
+  assert.equal(scorePlaywrightReport(timedOut), 'fail');
+});

@@ -1865,6 +1865,7 @@ async function evaluateInstalledHealer(signal) {
       state.repository,
       prerequisite.playwright_cli,
       signal,
+      'playwright.config.cjs',
     );
     runtime.playwright = compatibility.playwright.version;
     runtime.playwright_cli = compatibility.playwright_cli.version;

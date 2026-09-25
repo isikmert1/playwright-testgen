@@ -62,7 +62,7 @@ function scorePlaywrightReport(report) {
   )
     return 'pass';
   if (
-    status === 'failed' &&
+    ['failed', 'timedOut'].includes(status) &&
     tests[0].status === 'unexpected' &&
     stats.expected === 0 &&
     stats.unexpected === 1 &&

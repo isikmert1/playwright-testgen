@@ -251,12 +251,8 @@ async function evaluateRepair(definition, approvedDigest, signal) {
       state.repository,
       playwrightCli,
       descriptor.start.origin,
-      path.join(state.temporaryRoot, 'baseline.json'),
-      signal,
-    );
-    copyFileSync(
-      path.join(state.temporaryRoot, 'baseline.json'),
       path.join(resultDirectory, 'baseline.json'),
+      signal,
     );
     result.baseline = baseline.outcome;
     if (baseline.outcome !== 'pass') throw new Error('baseline-not-passing');
@@ -282,12 +278,8 @@ async function evaluateRepair(definition, approvedDigest, signal) {
       state.repository,
       playwrightCli,
       descriptor.start.origin,
-      path.join(state.temporaryRoot, 'precheck.json'),
-      signal,
-    );
-    copyFileSync(
-      path.join(state.temporaryRoot, 'precheck.json'),
       path.join(resultDirectory, 'precheck.json'),
+      signal,
     );
     result.variant_precheck = precheck.outcome;
     result.selector_failure = selectorFailure(precheck.report);
@@ -491,12 +483,8 @@ async function evaluateRepair(definition, approvedDigest, signal) {
       state.repository,
       playwrightCli,
       descriptor.start.origin,
-      path.join(state.temporaryRoot, 'confirmation.json'),
-      signal,
-    );
-    copyFileSync(
-      path.join(state.temporaryRoot, 'confirmation.json'),
       path.join(resultDirectory, 'confirmation.json'),
+      signal,
     );
     result.final_run = finalRun.outcome;
     const auditBytes = existsSync(auditPath)

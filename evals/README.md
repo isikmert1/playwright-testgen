@@ -108,7 +108,7 @@ prove the test useful. After a human reviews the exact spec and approves its
 SHA-256, run:
 
 ```sh
-npm run eval:candidate -- --trial-id <id> --approved-sha256 <digest>
+npm run eval:candidate -- -- --trial-id <id> --approved-sha256 <digest>
 ```
 
 That command runs the unchanged candidate in a fresh target copy.
@@ -134,7 +134,7 @@ sensitivity is unavailable for this no-adapter case.
 of the exact fixed spec digest, run:
 
 ```sh
-npm run eval:selector-repair -- --approved-spec-sha256 <digest>
+npm run eval:selector-repair -- -- --approved-spec-sha256 <digest>
 ```
 
 The evaluator proves the healthy baseline passes, the renamed
