@@ -62,7 +62,12 @@ const FORBIDDEN_PLUGIN_PATHS = [
   'tests',
   'benchmarks',
   'scripts/run-healer-defect-refusal.cjs',
+  'scripts/run-generation-eval.cjs',
+  'scripts/run-generation-candidate.cjs',
+  'scripts/run-selector-repair-eval.cjs',
   'scripts/score-healer-defect-refusal.cjs',
+  'scripts/score-outcomes.cjs',
+  'scripts/score-selector-repair.cjs',
   'scripts/windows-process-tree.cjs',
 ];
 const SAFE_ERROR_CODE = /^[a-z][a-z0-9-]{0,79}$/u;
@@ -624,6 +629,7 @@ function emptyRuntime() {
     npm: null,
     playwright: null,
     playwright_cli: null,
+    platform: process.platform,
     plugin_runtime_sha256: null,
     testgen_revision: null,
     total_cost_usd: null,
@@ -1170,10 +1176,11 @@ async function prepareTarget(definition, temporaryRoot, tooling, signal) {
     recursive: true,
   });
   mkdirSync(path.join(target, 'tests'), { recursive: true });
-  copyFileSync(
-    path.resolve(repositoryRoot, definition.spec_source),
-    path.join(target, definition.spec_path),
-  );
+  if (definition.spec_source != null)
+    copyFileSync(
+      path.resolve(repositoryRoot, definition.spec_source),
+      path.join(target, definition.spec_path),
+    );
 
   await command(process.execPath, [tooling.npm_cli, 'ci'], {
     cwd: target,
@@ -1615,10 +1622,16 @@ function installedHookPreflightTimeout(timeoutSeconds) {
   return Math.max(1, Math.floor(timeoutSeconds * 800));
 }
 
-async function verifyInstalledHook(installPath, repository, auditPath, signal) {
+async function verifyInstalledHook(
+  installPath,
+  repository,
+  auditPath,
+  signal,
+  agentType = 'playwright-test-healer',
+) {
   const toolUseId = `hook-preflight-${randomBytes(8).toString('hex')}`;
   const payload = {
-    agent_type: 'playwright-test-healer',
+    agent_type: agentType,
     cwd: repository,
     hook_event_name: 'PreToolUse',
     tool_name: 'Bash',
@@ -1656,7 +1669,8 @@ async function verifyInstalledHook(installPath, repository, auditPath, signal) {
     (entry) => entry.tool_use_id === toolUseId,
   );
   if (
-    record?.agent_type !== payload.agent_type ||
+    record?.agent_type !==
+      (agentType === 'playwright-test-healer' ? agentType : 'other') ||
     record.tool_name !== payload.tool_name ||
     record.decision !== 'allow' ||
     record.operation !== 'other' ||
@@ -1681,6 +1695,7 @@ async function runRuntimePreflight(
   repository,
   playwrightCli,
   signal,
+  configPath = null,
 ) {
   const result = await runBounded(
     process.execPath,
@@ -1688,7 +1703,7 @@ async function runRuntimePreflight(
       path.join(installPath, 'scripts', 'runtime-preflight.cjs'),
       '--repo',
       repository,
-      '--configless',
+      ...(configPath == null ? ['--configless'] : ['--config', configPath]),
       '--playwright-cli',
       playwrightCli,
     ],
@@ -1725,6 +1740,7 @@ async function runRuntimePreflight(
 }
 
 async function evaluateInstalledHealer(signal) {
+  const startedAt = Date.now();
   const runtime = emptyRuntime();
   const state = {
     marketplace_added: false,
@@ -1906,6 +1922,7 @@ async function evaluateInstalledHealer(signal) {
       run_id: runId,
       trace_snapshot_option: compatibility.trace_snapshot_option,
     });
+    runtime.setup_duration_ms = Date.now() - startedAt;
     const agent = await runBounded(
       executable('claude'),
       buildClaudeArguments(definition, prompt),
@@ -2102,7 +2119,9 @@ async function cleanupEvaluation(state) {
       if (
         relative.startsWith('..') ||
         path.isAbsolute(relative) ||
-        !path.basename(candidate).startsWith('testgen-healer-evaluation-')
+        !path
+          .basename(candidate)
+          .startsWith(state.temporaryPrefix ?? 'testgen-healer-evaluation-')
       )
         failures.push('temporary-path-invalid');
       else rmSync(candidate, { force: true, recursive: true });
@@ -2141,6 +2160,15 @@ function lifecycleCancellation() {
 }
 
 async function main() {
+  const argumentsReceived = process.argv.slice(2);
+  if (
+    argumentsReceived.length > 1 ||
+    (argumentsReceived.length === 1 &&
+      argumentsReceived[0] !== '--archive-results')
+  )
+    fail('evaluation-arguments-invalid');
+  const archiveResults = argumentsReceived.length === 1;
+  const startedAt = Date.now();
   const lifecycle = lifecycleCancellation();
   let evaluation;
   let cleanup = {
@@ -2162,6 +2190,24 @@ async function main() {
     lifecycle.dispose();
   }
   const result = combineResult(evaluation.primary, cleanup);
+  result.elapsed_ms = Date.now() - startedAt;
+  if (archiveResults) {
+    const trialId = `trial-${randomBytes(8).toString('hex')}`;
+    const directory = path.join(
+      repositoryRoot,
+      'evals',
+      'outcomes',
+      'results',
+      trialId,
+    );
+    mkdirSync(directory, { recursive: true });
+    result.case_id = 'semantic-order-not-inserted';
+    result.trial_id = trialId;
+    writeFileSync(
+      path.join(directory, 'result.json'),
+      `${JSON.stringify(result, null, 2)}\n`,
+    );
+  }
   process.stdout.write(`${JSON.stringify(result)}\n`);
   if (!result.ok) process.exitCode = 1;
 }
@@ -2173,16 +2219,28 @@ module.exports = {
   assertPluginBlind,
   buildClaudeArguments,
   buildHealerPrompt,
+  cleanupEvaluation,
   combineResult,
   command,
   emptyRuntime,
   evaluationFailure,
+  executable,
   findInstalledPlugin,
+  hashFile,
+  hashFiles,
   installedHookPreflightTimeout,
+  marketplaceList,
   matchesInstalledPlugin,
+  normalizedMarketplaceState,
+  normalizedPluginState,
   parseAgentStream,
+  pluginList,
+  preflight,
   preparePluginSource,
+  prepareTarget,
   runBounded,
+  runRuntimePreflight,
+  startServer,
   stateDifferenceCategories,
   stopProcessTree,
   traceFailureDiagnostics,

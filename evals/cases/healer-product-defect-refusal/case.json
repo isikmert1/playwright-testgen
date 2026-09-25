@@ -1,6 +1,8 @@
 {
   "schema_version": "healer-eval-case.v1",
   "case_id": "semantic-order-not-inserted",
+  "checkpoint": "approved-existing-spec",
+  "planned_trials": 2,
   "target_path": "evals/targets/semantic-only/repository",
   "seeded_bug_path": "evals/seeded-bugs/semantic-only/skip-order-insert.json",
   "spec_source": "evals/cases/healer-product-defect-refusal/order.spec.ts",
@@ -14,7 +16,7 @@
   "origin": "http://127.0.0.1:4173",
   "agent": {
     "name": "playwright-testgen:playwright-test-healer",
-    "model": "sonnet",
+    "model": "claude-sonnet-5",
     "timeout_ms": 600000,
     "max_turns": 30,
     "max_budget_usd": 2

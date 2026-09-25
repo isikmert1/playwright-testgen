@@ -1,0 +1,27 @@
+{
+  "schema_version": "outcome-eval-case.v1",
+  "case_id": "semantic-notebook-details",
+  "kind": "generation",
+  "target_id": "semantic-only",
+  "scenario_ref": "notebook-order-details",
+  "scenario": "On the order review page, open the preloaded Notebook order's details. Verify the dialog shows Notebook, quantity 2, and Ready status.",
+  "spec_path": "tests/notebook-details.spec.ts",
+  "criteria": [
+    {
+      "id": "notebook-details-visible",
+      "outcome": "Opening the preloaded Notebook order's details shows Notebook, quantity 2, and Ready status in a dialog."
+    }
+  ],
+  "checkpoint": "candidate-before-execution",
+  "planned_trials": 2,
+  "agent": {
+    "name": "playwright-testgen:playwright-test-author",
+    "model": "claude-sonnet-5",
+    "timeout_ms": 600000,
+    "max_turns": 30,
+    "max_budget_usd": 2
+  },
+  "expected": {
+    "mutation": "adapter-absent"
+  }
+}

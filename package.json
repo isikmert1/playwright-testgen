@@ -8,6 +8,9 @@
     "node": ">=22.13.0"
   },
   "scripts": {
+    "eval:generation": "node scripts/run-generation-eval.cjs",
+    "eval:candidate": "node scripts/run-generation-candidate.cjs",
+    "eval:selector-repair": "node scripts/run-selector-repair-eval.cjs",
     "eval:healer-defect-refusal": "node scripts/run-healer-defect-refusal.cjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

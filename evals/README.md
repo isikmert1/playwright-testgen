@@ -97,3 +97,58 @@ The semantic-only target exposes only its normal Playwright runner. Testgen's
 policy-bound local `playwright test <exact-spec> --list` fallback checks
 TypeScript loading and discovery without requiring a special package script or
 executing the test callback.
+
+## Outcome checks
+
+`cases/healthy-generation/` asks the installed Author for one Notebook details
+spec on the owned target without an adapter. `npm run eval:generation` stops at
+the candidate checkpoint and writes the spec, handoff, and bounded result to
+ignored `outcomes/results/trial-*/`. Collection does not approve execution or
+prove the test useful. After a human reviews the exact spec and approves its
+SHA-256, run:
+
+```sh
+npm run eval:candidate -- --trial-id <id> --approved-sha256 <digest>
+```
+
+That command runs the unchanged candidate in a fresh target copy.
+An independent reviewer then records whether its assertions prove
+`notebook-details-visible` in `review.json` beside the result:
+
+```json
+{
+  "status": "approved",
+  "candidate_sha256": "<approved digest>",
+  "criterion_id": "notebook-details-visible",
+  "reason": "<brief evidence from the spec and criterion>",
+  "locator_policy": true,
+  "assertion_specificity": true
+}
+```
+
+Use `rejected` and accurate boolean findings when the spec does not prove the
+criterion. A green execution alone does not satisfy this review. Mutation
+sensitivity is unavailable for this no-adapter case.
+
+`cases/selector-repair/` exercises a controlled button rename. After approval
+of the exact fixed spec digest, run:
+
+```sh
+npm run eval:selector-repair -- --approved-spec-sha256 <digest>
+```
+
+The evaluator proves the healthy baseline passes, the renamed
+control causes a selector failure, and the installed Healer repairs only the
+spec's locator. The scorer independently reruns the spec and checks its
+assertions, product bytes, hook decision, and trace. The existing
+`eval:healer-defect-refusal` remains the separate product-defect case.
+Use `npm run eval:healer-defect-refusal -- --archive-results` from a clean
+committed checkout to retain its bounded JSON beside the other outcome trials.
+
+Each case declares two planned trials. Keep every attempt, including incomplete
+ones, and diagnose failures before rerunning. `node scripts/score-outcomes.cjs`
+prints a bounded report and exits nonzero until all planned trials are complete.
+Once a complete run exists, compare it with a compatible sanitized baseline
+using `node scripts/score-outcomes.cjs --baseline evals/baselines/outcomes.json`.
+The dataset and execution profile must match; the Testgen revision may differ.
+Raw agent streams, app output, and Playwright reports remain outside Git.

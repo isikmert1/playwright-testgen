@@ -252,7 +252,12 @@ test('rejects an installed plugin with a stale access policy', () => {
     'node_modules',
     'tests',
     'scripts/run-healer-defect-refusal.cjs',
+    'scripts/run-generation-eval.cjs',
+    'scripts/run-generation-candidate.cjs',
+    'scripts/run-selector-repair-eval.cjs',
     'scripts/score-healer-defect-refusal.cjs',
+    'scripts/score-outcomes.cjs',
+    'scripts/score-selector-repair.cjs',
     'scripts/windows-process-tree.cjs',
   ]);
   try {
@@ -398,6 +403,16 @@ test('executes the installed hook and observes an explicit decision', async (t) 
     assert.equal(result.agent_type, 'playwright-test-healer');
     assert.equal(result.tool_name, 'Bash');
     assert.equal(result.operation, 'other');
+    const author = await verifyInstalledHook(
+      installPath,
+      repository,
+      auditPath,
+      undefined,
+      'playwright-test-author',
+    );
+    assert.equal(author.decision, 'allow');
+    assert.equal(author.agent_type, 'other');
+    assert.equal(author.operation, 'other');
     const filter = spawnSync(
       process.execPath,
       [

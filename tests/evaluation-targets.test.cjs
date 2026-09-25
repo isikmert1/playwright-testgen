@@ -227,6 +227,64 @@ test('semantic-only adapter and seeded bug share one approved mutation definitio
   );
 });
 
+test('outcome cases cover generation without an adapter and selector repair', () => {
+  const generation = readJson(
+    path.join(
+      repositoryRoot,
+      'evals',
+      'cases',
+      'healthy-generation',
+      'case.json',
+    ),
+  );
+  const repair = readJson(
+    path.join(repositoryRoot, 'evals', 'cases', 'selector-repair', 'case.json'),
+  );
+  const refusal = readJson(
+    path.join(
+      repositoryRoot,
+      'evals',
+      'cases',
+      'healer-product-defect-refusal',
+      'case.json',
+    ),
+  );
+  const targetRoot = path.join(targetsRoot, 'semantic-only', 'repository');
+  const adapter = readJson(
+    path.join(targetRoot, '.testgen', 'mutation-adapter.json'),
+  );
+
+  assert.equal(generation.schema_version, 'outcome-eval-case.v1');
+  assert.equal(generation.target_id, 'semantic-only');
+  assert.equal(generation.kind, 'generation');
+  assert.equal(generation.checkpoint, 'candidate-before-execution');
+  assert.equal(generation.expected.mutation, 'adapter-absent');
+  assert.equal(generation.criteria.length, 1);
+  assert.equal(
+    adapter.mutations.some(
+      (mutation) => mutation.criterion_id === generation.criteria[0].id,
+    ),
+    false,
+  );
+
+  assert.equal(repair.schema_version, 'outcome-eval-case.v1');
+  assert.equal(repair.target_id, 'semantic-only');
+  assert.equal(repair.kind, 'selector-repair');
+  assert.equal(repair.checkpoint, 'approved-existing-spec');
+  assert.equal(repair.expected.classification, 'selector-drift');
+  assert.equal(repair.expected.assertions_unchanged, true);
+  assert.equal(repair.criteria.length, 1);
+  assert.equal(existsSync(path.join(repositoryRoot, repair.spec_source)), true);
+  assert.equal(existsSync(path.join(targetRoot, repair.variant_path)), true);
+  assert.deepEqual(
+    [generation, repair, refusal].map(
+      (definition) => definition.planned_trials,
+    ),
+    [2, 2, 2],
+  );
+  assert.equal(refusal.checkpoint, 'approved-existing-spec');
+});
+
 test('mutation runner translates isolated Playwright results and removes its link', (t) => {
   const temporaryRoot = mkdtempSync(
     path.join(tmpdir(), 'testgen-target-runner-'),
