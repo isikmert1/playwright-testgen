@@ -4,6 +4,7 @@ const { tmpdir } = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const {
+  cohortRevision,
   compareOutcomeSummaries,
   readTrial,
   summarizeOutcomeTrials,
@@ -50,6 +51,17 @@ function trial(caseId, index, passed = true) {
   };
 }
 
+test('scores retained trials against their evaluated revision after a later commit', () => {
+  const attempts = [trial('generation', 1), trial('generation', 2)];
+  const revision = cohortRevision(attempts, 'later-revision');
+  assert.equal(revision, 'revision');
+  assert.equal(
+    summarizeOutcomeTrials(definitions, attempts, 'dataset', revision)
+      .testgen_revision,
+    'revision',
+  );
+});
+
 test('summarizes every declared attempt without turning unavailable metrics into zero', () => {
   const attempts = definitions.flatMap((definition) => [
     trial(definition.case_id, 1),
@@ -65,6 +77,10 @@ test('summarizes every declared attempt without turning unavailable metrics into
   assert.equal(summary.planned_trials, 6);
   assert.equal(summary.completed_trials, 6);
   assert.deepEqual(summary.metrics.usable_test, { passed: 2, eligible: 2 });
+  assert.deepEqual(summary.metrics.classification_correct, {
+    passed: 2,
+    eligible: 2,
+  });
   assert.deepEqual(summary.metrics.behavior_mutation_coverage, {
     covered: 0,
     submitted: 0,
@@ -112,6 +128,10 @@ test('refuses incompatible comparisons and catches a green candidate with weak a
     'dataset',
     'revision-b',
   );
+  assert.deepEqual(degraded.metrics.first_try_pass, {
+    passed: 2,
+    eligible: 2,
+  });
   assert.deepEqual(compareOutcomeSummaries(baseline, degraded), {
     status: 'regressed',
     regressions: ['assertion_specificity', 'case:generation', 'usable_test'],
@@ -152,6 +172,24 @@ test('requires independent execution and criterion review for a generated candid
       },
     ];
     assert.equal(readTrial(directory, definition).complete, false);
+    writeFileSync(
+      path.join(directory, 'execution.json'),
+      JSON.stringify({
+        trial_id: trialId,
+        status: 'incomplete',
+        candidate_sha256: 'abc',
+        error: 'playwright-report-invalid',
+        cleanup: { status: 'failed', reason: 'temporary-cleanup-failed' },
+      }),
+    );
+    const failed = readTrial(directory, definition);
+    assert.equal(failed.error, 'playwright-report-invalid');
+    assert.equal(failed.cleanup_error, 'temporary-cleanup-failed');
+    assert.equal(
+      summarizeOutcomeTrials(definitions, [failed], 'dataset', 'revision')
+        .metrics.verification_errors,
+      1,
+    );
     writeFileSync(
       path.join(directory, 'execution.json'),
       JSON.stringify({

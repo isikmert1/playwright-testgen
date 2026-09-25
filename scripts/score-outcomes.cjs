@@ -155,6 +155,13 @@ function readTrial(directory, caseDefinitions) {
       typeof review.assertion_specificity === 'boolean';
     return {
       ...common,
+      error:
+        common.error ?? execution?.error ?? execution?.cleanup?.reason ?? null,
+      cleanup_error:
+        common.cleanup_error ??
+        (execution?.cleanup?.status === 'failed'
+          ? (execution.cleanup.reason ?? execution.cleanup.error)
+          : null),
       complete:
         result.status === 'checkpoint' &&
         result.cleanup?.status === 'passed' &&
@@ -220,6 +227,10 @@ function totalMetric(attempts, key) {
       1e6,
     unavailable: attempts.length - known.length,
   };
+}
+
+function cohortRevision(attempts, currentRevision) {
+  return attempts[0]?.testgen_revision ?? currentRevision;
 }
 
 function summarizeOutcomeTrials(caseDefinitions, attempts, digest, revision) {
@@ -309,7 +320,7 @@ function summarizeOutcomeTrials(caseDefinitions, attempts, digest, revision) {
     ),
     classification_correct: metric(
       attempts,
-      (trial) => [repairCaseId, refusalCaseId].includes(trial.case_id),
+      (trial) => trial.case_id === refusalCaseId,
       (trial) => trial.passed,
     ),
     locator_policy: metric(
@@ -459,9 +470,15 @@ function main() {
           readTrial(path.join(results, entry.name), caseDefinitions),
         )
     : [];
-  const revision = require('node:child_process')
-    .execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' })
-    .trim();
+  const revision = cohortRevision(
+    attempts,
+    require('node:child_process')
+      .execFileSync('git', ['rev-parse', 'HEAD'], {
+        cwd: root,
+        encoding: 'utf8',
+      })
+      .trim(),
+  );
   const summary = summarizeOutcomeTrials(
     caseDefinitions,
     attempts,
@@ -483,6 +500,7 @@ function main() {
 if (require.main === module) main();
 
 module.exports = {
+  cohortRevision,
   compareOutcomeSummaries,
   datasetDigest,
   readTrial,

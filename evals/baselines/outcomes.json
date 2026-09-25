@@ -1,0 +1,254 @@
+{
+  "schema_version": "outcome-suite.v1",
+  "status": "complete",
+  "testgen_revision": "8bc3e8f87fcccf1b0582bbbb78625ee2ea63cac2",
+  "dataset_sha256": "8bd876b766168e0ae4f3b0421aa189f501688329a74d4f3e38dd81396def6982",
+  "profile_sha256": "0934dbfbc9a7afd4abc4b8e38f4baa6df1eabadd6af93fb2926490b1f2e0c7fd",
+  "profiles": {
+    "semantic-notebook-details": {
+      "runtime": {
+        "model": "claude-sonnet-5",
+        "claude_code": "2.1.278 (Claude Code)",
+        "node": "22.14.0",
+        "npm": "11.19.1",
+        "playwright": "1.62.1",
+        "playwright_cli": "0.1.19",
+        "platform": "win32"
+      },
+      "tool_grants": "Bash, Glob, Grep, Read, Edit, Write",
+      "permission_mode": "dontAsk",
+      "permission_prompts": "none",
+      "agent_limits": {
+        "name": "playwright-testgen:playwright-test-author",
+        "model": "claude-sonnet-5",
+        "timeout_ms": 600000,
+        "max_turns": 30,
+        "max_budget_usd": 2
+      },
+      "grading": "outcome-suite.v1"
+    },
+    "semantic-order-submit-selector-repair": {
+      "runtime": {
+        "model": "claude-sonnet-5",
+        "claude_code": "2.1.278 (Claude Code)",
+        "node": "22.14.0",
+        "npm": "11.19.1",
+        "playwright": "1.62.1",
+        "playwright_cli": "0.1.19",
+        "platform": "win32"
+      },
+      "tool_grants": "Bash, Glob, Grep, Read, Edit, Write, TaskStop",
+      "permission_mode": "dontAsk",
+      "permission_prompts": "none",
+      "agent_limits": {
+        "name": "playwright-testgen:playwright-test-healer",
+        "model": "claude-sonnet-5",
+        "timeout_ms": 600000,
+        "max_turns": 30,
+        "max_budget_usd": 2
+      },
+      "grading": "outcome-suite.v1"
+    },
+    "semantic-order-not-inserted": {
+      "runtime": {
+        "model": "claude-sonnet-5",
+        "claude_code": "2.1.278 (Claude Code)",
+        "node": "v22.14.0",
+        "npm": "11.19.1",
+        "playwright": "1.62.1",
+        "playwright_cli": "0.1.19",
+        "platform": "win32"
+      },
+      "tool_grants": "Bash, Glob, Grep, Read, Edit, Write, TaskStop",
+      "permission_mode": "dontAsk",
+      "permission_prompts": "none",
+      "agent_limits": {
+        "name": "playwright-testgen:playwright-test-healer",
+        "model": "claude-sonnet-5",
+        "timeout_ms": 600000,
+        "max_turns": 30,
+        "max_budget_usd": 2
+      },
+      "grading": "outcome-suite.v1"
+    }
+  },
+  "planned_trials": 6,
+  "completed_trials": 6,
+  "cases": {
+    "semantic-notebook-details": {
+      "planned": 2,
+      "attempts": [
+        {
+          "trial_id": "trial-a6d7c6085f7948b6",
+          "complete": true,
+          "passed": true,
+          "first_try": "pass",
+          "criterion_review": "approved",
+          "locator_policy": true,
+          "assertion_specificity": true,
+          "mutation_eligibility": "adapter-absent"
+        },
+        {
+          "trial_id": "trial-e5bb54678cf9f042",
+          "complete": true,
+          "passed": true,
+          "first_try": "pass",
+          "criterion_review": "approved",
+          "locator_policy": true,
+          "assertion_specificity": true,
+          "mutation_eligibility": "adapter-absent"
+        }
+      ]
+    },
+    "semantic-order-submit-selector-repair": {
+      "planned": 2,
+      "attempts": [
+        {
+          "trial_id": "trial-20e57373d7776785",
+          "complete": true,
+          "passed": true,
+          "classification": "selector-drift",
+          "healer_attempts": 2
+        },
+        {
+          "trial_id": "trial-249f5a38da2d2bd8",
+          "complete": true,
+          "passed": true,
+          "classification": "selector-drift",
+          "healer_attempts": 2
+        }
+      ]
+    },
+    "semantic-order-not-inserted": {
+      "planned": 2,
+      "attempts": [
+        {
+          "trial_id": "trial-6567877df1988ba3",
+          "complete": true,
+          "passed": true,
+          "classification": "product-behavior-wrong"
+        },
+        {
+          "trial_id": "trial-ab8929f9963b2f15",
+          "complete": true,
+          "passed": true,
+          "classification": "product-behavior-wrong"
+        }
+      ]
+    }
+  },
+  "metrics": {
+    "usable_test": {
+      "passed": 2,
+      "eligible": 2
+    },
+    "first_try_pass": {
+      "passed": 2,
+      "eligible": 2
+    },
+    "selector_repair_success": {
+      "passed": 2,
+      "eligible": 2
+    },
+    "product_defect_refusal": {
+      "passed": 2,
+      "eligible": 2
+    },
+    "classification_correct": {
+      "passed": 2,
+      "eligible": 2
+    },
+    "locator_policy": {
+      "passed": 2,
+      "eligible": 2
+    },
+    "assertion_specificity": {
+      "passed": 2,
+      "eligible": 2
+    },
+    "behavior_mutation_coverage": {
+      "covered": 0,
+      "submitted": 0,
+      "rate": null
+    },
+    "behavior_mutation_kill": {
+      "killed": 0,
+      "survived": 0,
+      "rate": null
+    },
+    "assertion_sensitivity_kill": {
+      "killed": 0,
+      "survived": 0,
+      "rate": null
+    },
+    "mutation_unavailable": {
+      "adapter-absent": 2
+    },
+    "unavailable_reasons": {},
+    "target_unavailable": 0,
+    "verification_errors": 0,
+    "pending": 0,
+    "healer_attempts": [
+      {
+        "trial_id": "trial-20e57373d7776785",
+        "count": 2
+      },
+      {
+        "trial_id": "trial-249f5a38da2d2bd8",
+        "count": 2
+      }
+    ],
+    "healer_attempts_unavailable": 0,
+    "cost_usd": {
+      "reported": 1.171247,
+      "unavailable": 0
+    },
+    "duration_ms": {
+      "reported": 337194,
+      "unavailable": 0
+    },
+    "setup_duration_ms": {
+      "reported": 315655,
+      "unavailable": 0
+    },
+    "elapsed_ms": {
+      "reported": 750546,
+      "unavailable": 0
+    },
+    "candidate_execution_ms": {
+      "reported": 17119,
+      "unavailable": 0
+    },
+    "human_interventions": {
+      "reported": 6,
+      "unavailable": 0
+    },
+    "tokens": {
+      "input_tokens": {
+        "reported": 146,
+        "unavailable": 0
+      },
+      "output_tokens": {
+        "reported": 25546,
+        "unavailable": 0
+      },
+      "cache_creation_input_tokens": {
+        "reported": 152801,
+        "unavailable": 0
+      },
+      "cache_read_input_tokens": {
+        "reported": 1521454,
+        "unavailable": 0
+      }
+    }
+  },
+  "thresholds": {
+    "usable_test": 0,
+    "first_try_pass": 0,
+    "selector_repair_success": 0,
+    "product_defect_refusal": 0,
+    "classification_correct": 0,
+    "locator_policy": 0,
+    "assertion_specificity": 0
+  }
+}

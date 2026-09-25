@@ -142,7 +142,7 @@ control causes a selector failure, and the installed Healer repairs only the
 spec's locator. The scorer independently reruns the spec and checks its
 assertions, product bytes, hook decision, and trace. The existing
 `eval:healer-defect-refusal` remains the separate product-defect case.
-Use `npm run eval:healer-defect-refusal -- --archive-results` from a clean
+Use `npm run eval:healer-defect-refusal -- -- --archive-results` from a clean
 committed checkout to retain its bounded JSON beside the other outcome trials.
 
 Each case declares two planned trials. Keep every attempt, including incomplete
@@ -152,3 +152,22 @@ Once a complete run exists, compare it with a compatible sanitized baseline
 using `node scripts/score-outcomes.cjs --baseline evals/baselines/outcomes.json`.
 The dataset and execution profile must match; the Testgen revision may differ.
 Raw agent streams, app output, and Playwright reports remain outside Git.
+
+On 2026-09-26, the initial baseline at Testgen revision `8bc3e8f` completed
+two trials per case on Windows with Claude Code 2.1.278 and `claude-sonnet-5`.
+Both independently reviewed generation candidates passed on their first run;
+both selector repairs passed with unchanged assertions after two Healer attempts;
+both installed Healer trials correctly refused the seeded product defect and
+verified hook governance. All six temporary targets were removed. Reported
+model cost for these six trials was USD 1.17; this excludes preparation effort
+and is not a reliability estimate. The generation case has no mutation adapter,
+so mutation sensitivity remains unavailable.
+
+Earlier diagnostic attempts remain in ignored `outcomes/results/diagnostics/`.
+One additional current-revision run passed without an archive because npm
+stripped its option; another reached the correct refusal but failed cleanup
+verification after an unrelated plugin changed. Neither contributes to the
+six-trial baseline. `baselines/outcomes.json` records the compatible execution
+profile, bounded outcomes, and zero-drop thresholds for the applicable behavior
+metrics. The CLI passes against this baseline and exits nonzero for a candidate
+whose first execution stays green but whose criterion review is rejected.
