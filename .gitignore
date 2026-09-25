@@ -2,6 +2,7 @@ node_modules/
 .cache/
 .eslintcache
 .prettiercache
+evals/native/results/
 .claude/settings.local.json
 *.log
 .env

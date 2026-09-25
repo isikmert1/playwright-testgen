@@ -11,12 +11,41 @@ real-app generation quality. Its `repository/` directory is the canonical
 source copied into a standalone disposable Git repository for installed smoke
 runs; generated specs and run artifacts do not belong in this source copy.
 
-`targets/cypress-realworld-app/` is a descriptor only. It identifies the
-upstream open-source project by URL and exact revision so future results are
-transparent and reproducible. Its source remains outside this repository;
-listing it does not imply affiliation or endorsement. Additional external
-targets stay deferred until the first installed workflow and independently
-graded case provide evidence that broader coverage is useful.
+`targets/cypress-realworld-app/` contains a pinned upstream descriptor and an
+approved sign-in mutation adapter. Its source remains outside this repository;
+listing it does not imply affiliation or endorsement. Add another external
+target only when installed and independently graded results show a specific
+coverage gap.
+
+`native/activation/` checks whether a Playwright request invokes this plugin's
+skill and unrelated Git and Cypress requests leave it alone. These cases start
+without an application and cannot establish test generation or repair quality.
+Claude Code 2.1.269 or later is required. From the plugin root, run:
+
+```sh
+claude plugin eval . --eval-dir evals/native --runs 1 --ablation none --concurrency 1 --model claude-sonnet-5 --max-cost-usd 1 --no-publish
+```
+
+This starts three sequential model sessions and no model judges. It consumes
+account usage; reported dollars are list-price estimates, and the cost ceiling
+is checked before each run rather than limiting an active one. Results are
+written to ignored `native/results/`. Inspect each Skill-call verdict, run
+error, and transcript before treating the result as valid. A matching Skill
+call followed by a run error records activation, but does not complete the
+check. One run per case is an integration observation, not a reliability rate.
+
+On 2026-09-25, Claude Code 2.1.278 ran these cases with `claude-sonnet-5`
+against plugin behavior at revision `75d186d` with these evaluation
+definitions. With one run per case, 10-turn and 180-second limits, and a USD 1
+scheduling ceiling, all three cases passed in 64 seconds at an estimated
+USD 0.25, with no judge calls, partial result or run errors. Trace review
+confirmed one Skill call for Playwright, none for Git or Cypress, successful
+SessionStart hooks, and normal completion of all three sessions. The Playwright
+session stopped because it had no application and no Bash grant. Cypress tried
+an unavailable Write tool; no file was written. An earlier authentication
+failure made no model call, and an earlier passing run (estimated USD 0.30)
+did not retain traces; neither adds evidence for an activation reliability
+rate.
 
 Descriptor expectations such as `locator_convention` are scoring metadata,
 not operational setup or `/setup` profile facts. They must not be disclosed to
