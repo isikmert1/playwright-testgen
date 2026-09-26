@@ -1701,6 +1701,41 @@ test('times out a bounded lifecycle command', async () => {
   );
 });
 
+test('reports an empty descendant response without terminating the test process', () => {
+  const temporaryRoot = mkdtempSync(path.join(tmpdir(), 'testgen-empty-pid-'));
+  const preload = path.join(temporaryRoot, 'preload.cjs');
+  try {
+    const env = { ...process.env };
+    delete env.NODE_TEST_CONTEXT;
+    writeFileSync(
+      preload,
+      `require(${JSON.stringify(require.resolve('../scripts/run-healer-defect-refusal.cjs'))}).runBounded = async () => ({ output: '', status: null });\n`,
+    );
+    const result = spawnSync(
+      process.execPath,
+      [
+        '--require',
+        preload,
+        '--test',
+        '--test-reporter=tap',
+        '--test-name-pattern=^cleans a descendant after its immediate parent exits$',
+        __filename,
+      ],
+      {
+        encoding: 'utf8',
+        env,
+        detached: true,
+        timeout: 10000,
+        windowsHide: true,
+      },
+    );
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stdout, /code: 'ERR_ASSERTION'/u);
+  } finally {
+    rmSync(temporaryRoot, { recursive: true, force: true });
+  }
+});
+
 test('cleans a descendant after its immediate parent exits', async () => {
   const { runBounded } = modules().runner;
   const script = [
@@ -1730,7 +1765,7 @@ test('cleans a descendant after its immediate parent exits', async () => {
       }
     } else assert.throws(() => process.kill(descendantPid, 0));
   } finally {
-    if (Number.isInteger(descendantPid)) {
+    if (Number.isInteger(descendantPid) && descendantPid > 0) {
       try {
         process.kill(descendantPid, 'SIGKILL');
       } catch {
@@ -1812,10 +1847,12 @@ test(
       assert.equal(await stopProcessTree({ pid: parent.pid, kill() {} }), true);
       assert.throws(() => process.kill(descendantPid, 0));
     } finally {
-      try {
-        process.kill(descendantPid, 'SIGKILL');
-      } catch {
-        // Expected when stopProcessTree cleaned the descendant.
+      if (Number.isInteger(descendantPid) && descendantPid > 0) {
+        try {
+          process.kill(descendantPid, 'SIGKILL');
+        } catch {
+          // Expected when stopProcessTree cleaned the descendant.
+        }
       }
     }
   },
@@ -1846,10 +1883,12 @@ test(
       assert.notEqual(tree, null);
       assert.ok(tree.descendants.includes(grandchildPid));
     } finally {
-      try {
-        process.kill(grandchildPid, 'SIGKILL');
-      } catch {
-        // Cleanup for the intentionally orphaned test process.
+      if (Number.isInteger(grandchildPid) && grandchildPid > 0) {
+        try {
+          process.kill(grandchildPid, 'SIGKILL');
+        } catch {
+          // Cleanup for the intentionally orphaned test process.
+        }
       }
     }
   },
