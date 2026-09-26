@@ -39,7 +39,8 @@ Never skip a stronger verified rung because a weaker selector is shorter.
 
 ## Convention detection
 
-A known convention comes only from an actual repository `/setup` profile.
+A profile-backed convention comes only from an actual repository `/setup`
+profile.
 Evaluation metadata and Main's source guess are not profile input. Without a
 profile, Author uses the native `Grep` tool for up to four count-only scans,
 one exact attribute spelling per call: `data-testid`, `data-test`, `data-cy`,
