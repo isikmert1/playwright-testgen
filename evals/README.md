@@ -1,170 +1,113 @@
 # Evaluations
 
-This directory holds repeatable evaluation inputs. It is not the evaluation
-runner or a collection of vendored applications.
+These checks cover plugin activation, setup, test generation, selector repair,
+and refusal to hide product defects.
 
-`targets/semantic-only/` is an intentionally small application owned by this
-project. It verifies the installed workflow, locator fallback when no test-id
-convention exists, Healer boundaries, and mutation handling under controlled
-conditions. Its pass rate is contract and smoke evidence, not evidence of
-real-app generation quality. Its `repository/` directory is the canonical
-source copied into a standalone disposable Git repository for installed smoke
-runs; generated specs and run artifacts do not belong in this source copy.
+## Targets and fixtures
 
-`targets/cypress-realworld-app/` contains a pinned upstream descriptor and an
-approved sign-in mutation adapter. Its source remains outside this repository;
-listing it does not imply affiliation or endorsement. Add another external
-target only when installed and independently graded results show a specific
-coverage gap.
+- **[Owned target](targets/semantic-only/repository/README.md):** A small order
+  application copied into a disposable Git repository. It exercises semantic
+  locators, workflow boundaries, and controlled mutations. Keep generated specs
+  and run artifacts out of the source fixture.
+- **[Cypress Real World App](targets/cypress-realworld-app/adapter/README.md):**
+  A pinned external target with a public sign-in mutation adapter. Application
+  source is kept outside this repository; inclusion implies no endorsement.
+- **`cases/` and `seeded-bugs/`:** Scenarios, grading criteria, and deliberate
+  defects. Each defect references one canonical patch. Keep expected verdicts
+  and descriptor scoring metadata out of the evaluated agent's context.
 
-`native/activation/` checks whether a Playwright request invokes this plugin's
-skill and unrelated Git and Cypress requests leave it alone. These cases start
-without an application and cannot establish test generation or repair quality.
-Claude Code 2.1.269 or later is required. From the plugin root, run:
+Add targets only when independently graded results expose a coverage gap.
+Mutation runners must execute only the approved spec, attribute failures to its
+approved criterion, and stop every server they start. The outer checker handles
+timeout and cancellation cleanup.
+
+## Before running
+
+Run commands from the plugin root. Installed workflow checks need an
+authenticated Claude Code installation and a clean, committed Testgen checkout.
+They install that exact revision in a disposable target and consume model usage.
+
+Runners remove their temporary targets and plugin registrations. Shared plugin
+and browser caches may remain; concurrent plugin-state changes are preserved
+and reported. Hooks, permission modes, and write checks do not provide an OS
+sandbox. Missing or uncorrelated hook evidence invalidates a governed run.
+
+In PowerShell, use `npm.cmd` when forwarding flags; the `npm.ps1` wrapper can
+consume them before they reach the evaluator.
+
+## Activation checks
+
+Requires Claude Code 2.1.269 or later. These three cases check that a Playwright
+request invokes the plugin skill, while Git and Cypress requests do not:
 
 ```sh
 claude plugin eval . --eval-dir evals/native --runs 1 --ablation none --concurrency 1 --model claude-sonnet-5 --max-cost-usd 1 --no-publish
 ```
 
-This starts three sequential model sessions and no model judges. It consumes
-account usage; reported dollars are list-price estimates, and the cost ceiling
-is checked before each run rather than limiting an active one. Results are
-written to ignored `native/results/`. Inspect each Skill-call verdict, run
-error, and transcript before treating the result as valid. A matching Skill
-call followed by a run error records activation, but does not complete the
-check. One run per case is an integration observation, not a reliability rate.
+This starts three sequential model sessions without model judges. Reported
+cost is a list-price estimate; the ceiling is checked before each session and
+does not cap an active session. Results go to ignored `native/results/`.
+Inspect Skill calls, run errors, and transcripts. A Skill call followed by a
+run error records activation but leaves the check incomplete.
 
-Claude Code 2.1.278 ran these cases with `claude-sonnet-5`
-against plugin behavior at revision `75d186d` with these evaluation
-definitions. With one run per case, 10-turn and 180-second limits, and a USD 1
-scheduling ceiling, all three cases passed in 64 seconds at an estimated
-USD 0.25, with no judge calls, partial result or run errors. Trace review
-confirmed one Skill call for Playwright, none for Git or Cypress, successful
-SessionStart hooks, and normal completion of all three sessions. The Playwright
-session stopped because it had no application and no Bash grant. Cypress tried
-an unavailable Write tool; no file was written. An earlier authentication
-failure made no model call, and an earlier passing run (estimated USD 0.30)
-did not retain traces; neither adds evidence for an activation reliability
-rate.
-
-Descriptor expectations such as `locator_convention` are scoring metadata,
-not operational setup or `/setup` profile facts. They must not be disclosed to
-the agent being evaluated.
-
-`seeded-bugs/` records deliberate product failures and their expected
-classifications. Each record points to one canonical, reviewable patch instead
-of duplicating the broken source.
-
-`cases/healer-product-defect-refusal/` is one independently graded agent trial.
-Its fixed spec passes on the healthy owned target, the canonical seeded bug is
-then proven to fail the linked criterion, and an installed Healer must refuse
-to weaken the test or repair the product. The scorer validates the Healer trace,
-reruns the mutated target, compares the spec and product bytes, and correlates
-the approved foreground spec execution and its tool result with an explicit
-decision from the installed hook.
-
-Run it only from a clean committed Testgen checkout:
-
-```sh
-npm run eval:healer-defect-refusal
-```
-
-The command uses the authenticated Claude Code installation and therefore
-consumes the configured model's budget. It provisions a disposable target,
-installs this exact Testgen revision at project-local scope, applies hard turn,
-cost, and time limits, emits bounded JSON, and removes the temporary target.
-Before the paid agent call, it executes the installed hook in a fresh child
-process and requires an explicit audited allow decision.
-That preflight reserves 20% of Claude Code's configured hook timeout as startup
-margin. Claude Code still owns the timeout: if it terminates a hook, the hook
-cannot emit a blocking decision, so evaluator results without correlated
-governance evidence are rejected. This is not an independent security sandbox.
-Evaluation cases, tests, and grading scripts are omitted from the installed
-plugin source, so the Healer does not receive the expected verdict.
-Claude's shared plugin cache and Playwright browser cache may retain downloaded
-content. The evaluator removes only registrations it created; if the final
-snapshot differs, it reports bounded owned/other change categories without
-overwriting concurrent changes.
-
-Owned target runners must execute the exact approved spec filter and attribute
-a mutant failure to the exact descriptive `step_title` supplied from the
-validated Healer input. A failing process without that evidence is an execution
-error, not a killed mutation. Runners must stop every server they start and must
-not detach child processes; the outer verifier owns timeout and cancellation
-teardown.
-
-The semantic-only target exposes only its normal Playwright runner. Testgen's
-policy-bound local `playwright test <exact-spec> --list` fallback checks
-TypeScript loading and discovery without requiring a special package script or
-executing the test callback.
+These cases have no application, so they cannot measure generated test quality.
 
 ## Setup check
 
-`npm run eval:setup` installs the committed plugin in a disposable copy of the
-owned target, invokes `/playwright-testgen:setup`, and checks the resulting
-ignored profile against the target and its original files. It then asks the
-installed Author for the Notebook details spec and stops at the candidate
-checkpoint. The setup agent may add only the exact profile ignore rule and
-profile; generated specs and bounded evidence are saved under ignored
-`setup/results/trial-*/`. One successful setup and candidate is an integration
-observation, not a reliability rate.
+```sh
+npm run eval:setup
+```
 
-Review the saved spec and its SHA-256 before running it. After approval, run
-`npm run eval:setup -- --candidate --trial-id <id> --approved-sha256 <digest>`.
-This executes the unchanged candidate in a fresh target. Independently review
-whether its assertions establish `notebook-details-visible`; a green run alone
-does not establish usefulness. This check is separate from the outcome baseline
-below.
+This installs the plugin in the owned target, invokes `/playwright-testgen:setup`,
+and checks the profile against the target's original files. Only the profile and
+its exact ignore rule may be added. Author then writes a Notebook details spec
+and stops for approval. The candidate and evidence go to ignored
+`setup/results/trial-*/`.
 
-It starts two model sessions, each limited to 30 turns, 600 seconds, and USD 2
-of reported model cost. Main uses Claude Code's `auto` permission mode; Author
-uses the existing governed `dontAsk` workflow. These controls and repository
-write checks are guardrails, not an OS sandbox. The setup snapshot includes
-dependencies and Git metadata, while ignoring only the Git index's stat cache
-and checking its staged entries separately.
+Main and Author each have limits of 30 turns, 600 seconds, and USD 2 reported
+model cost. Main uses Claude Code's `auto` permission mode; Author uses the
+governed `dontAsk` workflow. Setup checks dependencies, Git metadata, and staged
+entries for unauthorized changes.
 
-Record the independent criterion review in the same `review.json` format used
-below, then run `npm run eval:setup -- --score --trial-id <id>`. It exits nonzero
-for incomplete evidence, a rejected criterion, or changed inputs. A checkpoint
-and its candidate execution must use the same dataset digest.
+Review the saved spec and its SHA-256. After approving that exact candidate:
 
-In PowerShell, use `npm.cmd` when forwarding option flags; the `npm.ps1` wrapper
-can consume them before they reach the evaluator.
+```sh
+npm run eval:setup -- --candidate --trial-id <id> --approved-sha256 <digest>
+```
 
-The installed plugin at revision `d8835ce` completed this check
-with Claude Code 2.1.278, `claude-sonnet-5`, and setup input digest
-`d0681ac8d98931758849da9531d793c1f347f03b1de227cb6527e75977f0eb10`.
-Main selected the root package and `playwright.config.cjs`, validated a fresh
-profile, and changed only the approved profile and ignore rule. Author made
-no profile-access or execution attempts and produced a validated handoff.
-After human approval, the unchanged candidate passed its first execution;
-independent review confirmed the Notebook, quantity 2, and Ready assertions.
-A controlled rejected review made scoring exit nonzero despite that green run.
-The final approved score passed and both temporary targets were removed.
+The unchanged candidate runs in a fresh target. Independently review its
+assertions using the [review format below](#generation), save `review.json`
+beside the result, then score it:
 
-The completed Main/Author trial reported USD 0.28 and took 451 seconds before
-the checkpoint; candidate execution and cleanup took another 12 seconds.
-This excludes earlier diagnostic attempts, including one interrupted by API
-overload and an unrelated plugin-state change. Those attempts remain incomplete
-local evidence. This is one integration observation, not a reliability rate;
-mutation sensitivity is unavailable for this case.
+```sh
+npm run eval:setup -- --score --trial-id <id>
+```
+
+Scoring exits nonzero for incomplete evidence, a rejected criterion, or changed
+inputs. Setup and candidate execution must use the same evaluation inputs.
+This check is separate from the outcome baseline.
 
 ## Outcome checks
 
-`cases/healthy-generation/` asks the installed Author for one Notebook details
-spec on the owned target without an adapter. `npm run eval:generation` stops at
-the candidate checkpoint and writes the spec, handoff, and bounded result to
-ignored `outcomes/results/trial-*/`. Collection does not approve execution or
-prove the test useful. After a human reviews the exact spec and approves its
-SHA-256, run:
+### Generation
+
+```sh
+npm run eval:generation
+```
+
+Author writes one Notebook details spec without a mutation adapter and stops
+at the candidate checkpoint. The spec, handoff, and result go to ignored
+`outcomes/results/trial-*/`. Collection does not approve execution.
+
+Review the exact spec and approve its SHA-256 before running it:
 
 ```sh
 npm run eval:candidate -- --trial-id <id> --approved-sha256 <digest>
 ```
 
-That command runs the unchanged candidate in a fresh target copy.
-An independent reviewer then records whether its assertions prove
-`notebook-details-visible` in `review.json` beside the result:
+The unchanged candidate runs in a fresh target. An independent reviewer must
+check whether its assertions prove `notebook-details-visible` and record the
+verdict in `review.json` beside the result:
 
 ```json
 {
@@ -178,56 +121,84 @@ An independent reviewer then records whether its assertions prove
 ```
 
 Use `rejected` and accurate boolean findings when the spec does not prove the
-criterion. A green execution alone does not satisfy this review. Mutation
-sensitivity is unavailable for this no-adapter case.
+criterion. A green run alone does not establish usefulness. This case has no
+mutation sensitivity check.
 
-`cases/selector-repair/` exercises a controlled button rename. After approval
-of the exact fixed spec digest, run:
+### Selector repair
+
+After approving the fixed spec's digest:
 
 ```sh
 npm run eval:selector-repair -- --approved-spec-sha256 <digest>
 ```
 
-The evaluator proves the healthy baseline passes, the renamed
-control causes a selector failure, and the installed Healer repairs only the
-spec's locator. For this fixed fixture, only the submission locator's literal
-name may change from `Add order` to `Create order`. The scorer independently
-reruns the spec and checks its complete expected source, product bytes, hook
-decision, and trace. This narrow check does not grade alternative repairs.
-The existing `eval:healer-defect-refusal` remains the separate product-defect case.
-Use `npm run eval:healer-defect-refusal -- --archive-results` from a clean
-committed checkout to retain its bounded JSON beside the other outcome trials.
+The evaluator confirms a healthy pass, renames the submit button, and verifies
+the resulting selector failure. Healer may change only the locator name from
+`Add order` to `Create order`. Independent grading reruns the spec and checks
+its complete expected source, unchanged product, hook decision, and trace.
+Alternative repair strategies are outside this fixed case's scope.
 
-Each case declares two planned trials. Keep every attempt, including incomplete
-ones, and diagnose failures before rerunning. After all runners finish,
-`node scripts/score-outcomes.cjs` prints a bounded report and exits nonzero
-until all planned trials are complete.
-Once a complete run exists, compare it with a compatible sanitized baseline
-using `node scripts/score-outcomes.cjs --baseline evals/baselines/outcomes.json`.
-The dataset and execution profile must match; the Testgen revision may differ.
-Raw agent streams, app output, and Playwright reports remain outside Git.
+### Product defect refusal
 
-The initial baseline at revision `8bc3e8f` is historical. A later audit removed
-answer hints from copied target metadata, tightened selector-repair scope and
-mutation attribution, and added per-trial dataset binding. Its old trials have
-no input digest and cannot establish a current regression baseline. Historical
-results must not be relabeled with the current dataset digest.
+```sh
+npm run eval:healer-defect-refusal -- --archive-results
+```
 
-The audited inputs at Testgen revision `74e3f12` completed two
-trials per case on Windows with Claude Code 2.1.278 and `claude-sonnet-5`.
-Both independently reviewed generation candidates passed on their first run.
-Both selector repairs changed only the intended locator and passed with the
-original assertions after two Healer attempts. Both installed Healer trials
-refused the seeded product defect as `product-behavior-wrong` and verified hook
-governance. All six temporary targets were removed. The generation case has no
-mutation adapter, so mutation sensitivity remains unavailable.
+The fixed spec passes on the healthy target, then fails its order criterion
+when a seeded defect prevents insertion. Healer must refuse to weaken the test
+or repair the product. Independent grading checks the trace, continued failure,
+unchanged spec and product, and the installed hook decision for the actual
+approved execution. The hook is also checked before the paid agent call;
+evaluation answers are omitted from the installed plugin.
 
-These six completed trials reported USD 1.20 in model cost and 27 minutes of
-elapsed time; the two candidate executions added 28 seconds. This is a bounded
-integration observation, not a reliability estimate. Local diagnostic attempts
-remain in ignored `outcomes/results/diagnostics/` outside the completed baseline.
-`baselines/outcomes.json` records the matching dataset and execution profile,
-bounded outcomes, and zero-drop thresholds for applicable behavior metrics.
-The compatible comparison passed. Rejecting one candidate's criterion review
-made the CLI exit nonzero while its first browser execution remained green;
-restoring the approved review made the comparison pass again.
+`--archive-results` saves bounded JSON alongside the other outcome trials.
+Omit it for a standalone check.
+
+### Scoring and comparison
+
+Run two trials per outcome case. Keep every attempt, including incomplete ones,
+and diagnose failures before rerunning. After the runners finish:
+
+```sh
+node scripts/score-outcomes.cjs
+node scripts/score-outcomes.cjs --baseline evals/baselines/outcomes.json
+```
+
+The first command exits nonzero until every required trial is complete. The
+second compares with the [sanitized baseline](baselines/outcomes.json). Evaluation
+inputs and execution profiles must match; the Testgen revision may differ.
+Never relabel old trials with a new input digest. Applicable behavior metrics
+allow no drop from the baseline.
+
+Raw agent streams, application output, and Playwright reports stay outside Git.
+
+## Recorded results
+
+These checks used Claude Code 2.1.278 with `claude-sonnet-5`:
+
+- **Activation:** All three cases passed with reviewed traces, successful hooks,
+  and no run errors. One Skill call for Playwright; none for Git or Cypress.
+  Reported cost USD 0.25; elapsed time 64 seconds. Tested plugin revision
+  `75d186d`, with 10-turn and 180-second case limits.
+- **Setup:** Profile and write checks passed; Author produced a validated handoff
+  without reading the profile or executing tests. The approved candidate passed
+  first try and independent review confirmed Notebook, quantity 2, and Ready.
+  Both temporary targets were removed. Reported Main/Author cost USD 0.28;
+  451 seconds to the checkpoint and another 12 seconds for execution and cleanup.
+  Tested plugin revision `d8835ce`.
+- **Outcomes:** Two trials per case passed on Windows. Both generation candidates
+  passed first execution and independent review. Both repairs changed only the
+  intended locator and passed after two Healer attempts. Both refusal trials
+  reported `product-behavior-wrong` with verified hook governance. All six
+  temporary targets were removed. Reported cost USD 1.20; elapsed time 27 minutes,
+  plus 28 seconds for candidate executions. The baseline records the tested
+  revision and runtime profile.
+
+Setup scoring and the outcome comparison both rejected a deliberately failed
+criterion review despite a green browser test, then passed with the approved
+review restored. Reported costs cover the completed checks.
+
+These are bounded integration observations, not reliability estimates or proof
+of real-app generation quality. The generation and setup cases have no mutation
+adapter. Activation, assertion usefulness, repair, and defect refusal are
+separate measurements.
