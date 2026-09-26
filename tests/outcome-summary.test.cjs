@@ -25,6 +25,7 @@ function trial(caseId, index, passed = true) {
     cost_usd: 0.1,
     duration_ms: 1000,
     testgen_revision: 'revision',
+    dataset_sha256: 'dataset',
     profile: {
       model: 'claude-sonnet-5',
       claude_code: '2.1.278',
@@ -150,6 +151,23 @@ test('refuses incompatible comparisons and catches a green candidate with weak a
   );
 });
 
+test('does not relabel historical trials with the current dataset', () => {
+  const attempts = definitions.flatMap((definition) => [
+    trial(definition.case_id, 1),
+    trial(definition.case_id, 2),
+  ]);
+  const summary = summarizeOutcomeTrials(
+    definitions,
+    attempts,
+    'changed-dataset',
+    'revision',
+  );
+  assert.equal(summary.status, 'incomplete');
+  assert.equal(summary.completed_trials, 0);
+  assert.equal(summary.metrics.verification_errors, 6);
+  assert.deepEqual(summary.metrics.first_try_pass, { passed: 0, eligible: 0 });
+});
+
 test('requires independent execution and criterion review for a generated candidate', () => {
   const directory = mkdtempSync(path.join(tmpdir(), 'trial-generation-'));
   try {
@@ -160,6 +178,7 @@ test('requires independent execution and criterion review for a generated candid
         case_id: 'generation',
         trial_id: trialId,
         status: 'checkpoint',
+        dataset_sha256: 'dataset',
         candidate_sha256: 'abc',
         cleanup: { status: 'passed' },
       }),
@@ -177,6 +196,7 @@ test('requires independent execution and criterion review for a generated candid
       JSON.stringify({
         trial_id: trialId,
         status: 'incomplete',
+        dataset_sha256: 'dataset',
         candidate_sha256: 'abc',
         error: 'playwright-report-invalid',
         cleanup: { status: 'failed', reason: 'temporary-cleanup-failed' },
@@ -195,6 +215,7 @@ test('requires independent execution and criterion review for a generated candid
       JSON.stringify({
         trial_id: trialId,
         status: 'complete',
+        dataset_sha256: 'dataset',
         candidate_sha256: 'abc',
         first_try: 'pass',
       }),

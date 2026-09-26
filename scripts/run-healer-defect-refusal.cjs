@@ -354,7 +354,10 @@ function parseAgentStream(output, context = {}) {
       });
     }
     if (record.type === 'result') {
-      resultSubtype = record.subtype ?? null;
+      resultSubtype =
+        record.subtype === 'success' && record.is_error === true
+          ? 'error'
+          : (record.subtype ?? null);
       for (const key of ['duration_ms', 'total_cost_usd', 'usage']) {
         if (record[key] != null) runtime[key] = record[key];
       }
@@ -1766,6 +1769,7 @@ async function evaluateInstalledHealer(signal) {
       signal,
     );
     runtime.testgen_revision = revision;
+    runtime.dataset_sha256 = require('./score-outcomes.cjs').datasetDigest();
     if (!/^[a-f0-9]{40}$/u.test(revision)) fail('testgen-revision-unavailable');
     if (
       (await rootGit(

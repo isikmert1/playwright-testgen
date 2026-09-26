@@ -155,19 +155,81 @@ function testResults(suites) {
   ]);
 }
 
-function hasFailedCriterionStep(steps, stepTitle) {
-  return (steps ?? []).some(
-    (step) =>
-      (step.title === stepTitle && step.error != null) ||
-      hasFailedCriterionStep(step.steps, stepTitle),
+function failedSteps(steps) {
+  return (steps ?? []).flatMap((step) => [
+    ...(step.error == null ? [] : [step]),
+    ...failedSteps(step.steps),
+  ]);
+}
+
+function terminalErrorMatchesStep(stepError, terminalError) {
+  const location = terminalError?.location;
+  if (
+    typeof stepError?.message !== 'string' ||
+    typeof stepError.stack !== 'string' ||
+    typeof terminalError?.message !== 'string' ||
+    !terminalError.message.startsWith(stepError.message) ||
+    typeof location?.file !== 'string' ||
+    !Number.isInteger(location.line) ||
+    !Number.isInteger(location.column)
+  )
+    return false;
+  const frames = (value) =>
+    value
+      .split(/\r?\n/u)
+      .filter((line) => /^\s+at\s+\S/u.test(line))
+      .map((line) => line.trim().replaceAll('\\', '/'));
+  const stepFrames = frames(stepError.stack);
+  const terminalFrames = frames(terminalError.stack ?? terminalError.message);
+  return (
+    stepFrames.length >= 2 &&
+    stepFrames.length === terminalFrames.length &&
+    stepFrames.some((frame) =>
+      frame.includes(
+        `${location.file}:${location.line}:${location.column}`.replaceAll(
+          '\\',
+          '/',
+        ),
+      ),
+    ) &&
+    stepFrames.every((frame, index) => frame === terminalFrames[index])
   );
 }
 
-function hasRelevantFailure(report, stepTitle) {
-  return testResults(report.suites)
-    .filter((test) => test.status === 'unexpected')
-    .flatMap((test) => test.results ?? [])
-    .some((result) => hasFailedCriterionStep(result.steps, stepTitle));
+function classifyReport(report, stepTitle, criterionId, exitCode) {
+  const tests = testResults(report.suites);
+  if (tests.length === 0) throw new Error('no-tests-ran');
+  if (tests.length !== 1 || report.errors.length !== 0)
+    throw new Error('failure-unattributed');
+  const [test] = tests;
+  if (!Array.isArray(test.results) || test.results.length !== 1)
+    throw new Error('playwright-report-invalid');
+  const [result] = test.results;
+  if (!Array.isArray(result.errors))
+    throw new Error('playwright-report-invalid');
+  if (
+    exitCode === 0 &&
+    report.stats.expected === 1 &&
+    report.stats.unexpected === 0 &&
+    test.status === 'expected' &&
+    result.status === 'passed' &&
+    result.errors.length === 0
+  )
+    return { protocol_version: 1, outcome: 'pass', criterion_id: null };
+  const failures = failedSteps(result.steps);
+  if (
+    exitCode !== 0 &&
+    report.stats.expected === 0 &&
+    report.stats.unexpected === 1 &&
+    test.status === 'unexpected' &&
+    result.status === 'failed' &&
+    failures.length === 1 &&
+    failures[0].title === stepTitle &&
+    result.errors.length === 1 &&
+    terminalErrorMatchesStep(failures[0].error, result.errors[0])
+  )
+    return { protocol_version: 1, outcome: 'fail', criterion_id: criterionId };
+  throw new Error('failure-unattributed');
 }
 
 async function run() {
@@ -243,19 +305,11 @@ async function run() {
 
     const report = readReport(reportPath);
     if (report.errors.length > 0) throw new Error('playwright-run-failed');
-    if (result.status === 0 && report.stats.expected > 0)
-      return { protocol_version: 1, outcome: 'pass', criterion_id: null };
-    if (result.status !== 0 && report.stats.unexpected > 0) {
-      if (!hasRelevantFailure(report, options['--step-title']))
-        throw new Error('failure-unattributed');
-      return {
-        protocol_version: 1,
-        outcome: 'fail',
-        criterion_id: options['--criterion-id'],
-      };
-    }
-    throw new Error(
-      report.stats.expected === 0 ? 'no-tests-ran' : 'playwright-run-failed',
+    return classifyReport(
+      report,
+      options['--step-title'],
+      options['--criterion-id'],
+      result.status,
     );
   } finally {
     if (server != null) server.kill();
@@ -264,6 +318,9 @@ async function run() {
   }
 }
 
-run()
-  .catch((error) => protocolError(errorReason(error)))
-  .then((result) => process.stdout.write(`${JSON.stringify(result)}\n`));
+if (require.main === module)
+  run()
+    .catch((error) => protocolError(errorReason(error)))
+    .then((result) => process.stdout.write(`${JSON.stringify(result)}\n`));
+
+module.exports = { classifyReport };

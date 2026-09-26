@@ -5,6 +5,7 @@ const path = require('node:path');
 const test = require('node:test');
 const {
   authorExecutionAttempts,
+  authorProfileAccessAttempts,
   authorPrompt,
 } = require('../scripts/run-generation-eval.cjs');
 const {
@@ -39,6 +40,16 @@ test('generation prompt carries only scenario facts and stops at the checkpoint'
   );
   assert.match(prompt, /human has not approved running the candidate/u);
   assert.doesNotMatch(prompt, /adapter-absent|planned_trials|expected:/u);
+  const withSetup = authorPrompt(definition, {
+    run_id: 'tg-0123456789abcdef01234567',
+    repository: 'C:/disposable-target',
+    origin: 'http://127.0.0.1:4173',
+    approved_spec_filter: 'tests/notebook-details.spec.ts',
+    setup_facts: { package: '.', config: 'playwright.config.cjs' },
+  });
+  assert.match(withSetup, /Main validated its repository profile/u);
+  assert.match(withSetup, /profile is Main-owned/u);
+  assert.doesNotMatch(withSetup, /No setup profile exists/u);
 });
 
 test('generation evidence rejects spec execution but allows collection', () => {
@@ -63,6 +74,21 @@ test('generation evidence rejects spec execution but allows collection', () => {
     1,
   );
   assert.equal(authorExecutionAttempts(stream('npm run test:e2e')), 1);
+  assert.equal(
+    authorExecutionAttempts(
+      stream('npx playwright test tests/notebook-details.spec.ts').replace(
+        '"name":"Bash"',
+        '"name":"PowerShell"',
+      ),
+    ),
+    1,
+  );
+  assert.equal(
+    authorProfileAccessAttempts(
+      stream('cat .playwright-testgen/profile.v1.json'),
+    ),
+    1,
+  );
 });
 
 test('generation cleanup removes only its owned temporary directory', async (t) => {

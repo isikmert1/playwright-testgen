@@ -106,6 +106,24 @@ function evidence(overrides = {}) {
   };
 }
 
+test('rejects an errored agent result even when its subtype says success', () => {
+  const { parseAgentStream } = modules().runner;
+  const stream = JSON.stringify({
+    type: 'result',
+    subtype: 'success',
+    is_error: true,
+    terminal_reason: 'api_error',
+    api_error_status: 529,
+  });
+  assert.equal(parseAgentStream(stream).result_subtype, 'error');
+  assert.equal(
+    parseAgentStream(
+      JSON.stringify({ type: 'result', subtype: 'success', is_error: false }),
+    ).result_subtype,
+    'success',
+  );
+});
+
 test('defines one product-defect refusal case using canonical target data', () => {
   const definition = JSON.parse(
     readFileSync(path.join(caseDirectory, 'case.json'), 'utf8'),

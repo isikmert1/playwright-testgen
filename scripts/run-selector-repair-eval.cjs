@@ -76,12 +76,13 @@ async function repositoryState(repository, specPath, signal) {
     .join('\n');
 }
 
-function assertionBlock(spec) {
-  const marker =
-    "await test.step('Submitted order appears once with its quantity and Pending status'";
-  const start = spec.indexOf(marker);
-  if (start < 0) throw new Error('case-spec-invalid');
-  return spec.slice(start);
+function expectedSelectorRepair(spec) {
+  const oldLocator = "getByRole('button', { name: 'Add order' })";
+  if (spec.split(oldLocator).length !== 2) throw new Error('case-spec-invalid');
+  return spec.replace(
+    oldLocator,
+    "getByRole('button', { name: 'Create order' })",
+  );
 }
 
 function selectorFailure(report) {
@@ -191,6 +192,7 @@ async function evaluateRepair(definition, approvedDigest, signal) {
     approved_spec_sha256: approvedDigest,
   };
   try {
+    result.dataset_sha256 = require('./score-outcomes.cjs').datasetDigest();
     const revision = await command(executable('git'), ['rev-parse', 'HEAD'], {
       cwd: root,
       error: 'testgen-revision-unavailable',
@@ -396,7 +398,7 @@ async function evaluateRepair(definition, approvedDigest, signal) {
         (relative) => relative !== '' && relative !== definition.spec_path,
       );
     const before = {
-      assertions: digest(assertionBlock(original)),
+      expected_spec: digest(expectedSelectorRepair(original)),
       product: hashFiles(state.repository, trackedFiles),
       repository_state: await repositoryState(
         state.repository,
@@ -471,7 +473,7 @@ async function evaluateRepair(definition, approvedDigest, signal) {
       path.join(resultDirectory, 'repaired-order.spec.ts'),
     );
     const after = {
-      assertions: digest(assertionBlock(readFileSync(specPath, 'utf8'))),
+      spec: hashFile(specPath),
       product: hashFiles(state.repository, trackedFiles),
       repository_state: await repositoryState(
         state.repository,
@@ -561,7 +563,7 @@ if (require.main === module) void main();
 
 module.exports = {
   approvedSpec,
-  assertionBlock,
+  expectedSelectorRepair,
   evaluateRepair,
   selectorFailure,
 };

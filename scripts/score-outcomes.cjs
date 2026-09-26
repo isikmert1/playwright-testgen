@@ -38,7 +38,7 @@ function datasetDigest() {
     }
   }
   for (const directory of [
-    'evals/cases',
+    ...cases.map(([directory]) => `evals/cases/${directory}`),
     'evals/seeded-bugs',
     'evals/targets/semantic-only',
   ])
@@ -131,6 +131,9 @@ function readTrial(directory, caseDefinitions) {
     testgen_revision: refusal
       ? ((result.result?.runtime ?? result.runtime)?.testgen_revision ?? null)
       : (result.testgen_revision ?? null),
+    dataset_sha256: refusal
+      ? ((result.result?.runtime ?? result.runtime)?.dataset_sha256 ?? null)
+      : (result.dataset_sha256 ?? null),
     error: result.reason ?? result.error ?? result.cleanup?.reason ?? null,
     cleanup_error:
       result.cleanup?.status === 'failed'
@@ -143,6 +146,9 @@ function readTrial(directory, caseDefinitions) {
     const execution = existsSync(executionPath)
       ? readJson(executionPath)
       : null;
+    const executionDatasetValid =
+      execution?.dataset_sha256 === result.dataset_sha256 &&
+      result.dataset_sha256 != null;
     const review = existsSync(reviewPath) ? readJson(reviewPath) : null;
     const reviewValid =
       ['approved', 'rejected'].includes(review?.status) &&
@@ -156,13 +162,19 @@ function readTrial(directory, caseDefinitions) {
     return {
       ...common,
       error:
-        common.error ?? execution?.error ?? execution?.cleanup?.reason ?? null,
+        common.error ??
+        execution?.error ??
+        execution?.cleanup?.reason ??
+        (execution != null && !executionDatasetValid
+          ? 'execution-dataset-mismatch'
+          : null),
       cleanup_error:
         common.cleanup_error ??
         (execution?.cleanup?.status === 'failed'
           ? (execution.cleanup.reason ?? execution.cleanup.error)
           : null),
       complete:
+        executionDatasetValid &&
         result.status === 'checkpoint' &&
         result.cleanup?.status === 'passed' &&
         execution?.status === 'complete' &&
@@ -234,6 +246,20 @@ function cohortRevision(attempts, currentRevision) {
 }
 
 function summarizeOutcomeTrials(caseDefinitions, attempts, digest, revision) {
+  attempts = attempts.map((trial) =>
+    trial.dataset_sha256 === digest
+      ? trial
+      : {
+          ...trial,
+          complete: false,
+          passed: false,
+          error:
+            trial.error ??
+            (trial.dataset_sha256 == null
+              ? 'dataset-unverified'
+              : 'dataset-mismatch'),
+        },
+  );
   const repairCaseId = caseDefinitions.find(
     (item) => item.kind === 'selector-repair',
   ).case_id;

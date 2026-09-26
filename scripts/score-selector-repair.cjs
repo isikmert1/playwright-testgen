@@ -27,13 +27,16 @@ function scoreSelectorRepair(evidence) {
     )
   )
     fail('repair-verdict-mismatch');
-  if (evidence.before?.assertions !== evidence.after?.assertions)
-    fail('assertions-changed');
   if (evidence.before?.product !== evidence.after?.product)
     fail('product-changed');
   if (evidence.before?.repository_state !== evidence.after?.repository_state)
     fail('repository-state-changed');
   if (evidence.final_run !== 'pass') fail('repair-not-confirmed');
+  if (
+    evidence.before?.expected_spec == null ||
+    evidence.before.expected_spec !== evidence.after?.spec
+  )
+    fail('repair-scope-changed');
 
   const tools = new Map(
     (evidence.tool_uses ?? []).map((tool) => [tool.id, tool.name]),

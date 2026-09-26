@@ -85,13 +85,16 @@ function approvedTrial(args) {
   return { trialId: args[1], digest: args[3] };
 }
 
-async function executeCandidate(approval, signal) {
+async function executeCandidate(approval, signal, options = {}) {
   const startedAt = Date.now();
-  const definition = readJson(casePath);
+  const definition = readJson(options.casePath ?? casePath);
   const descriptor = readJson(
     path.join(root, 'evals', 'targets', definition.target_id, 'target.json'),
   );
-  const trialDirectory = path.join(resultsRoot, approval.trialId);
+  const trialDirectory = path.join(
+    options.resultsRoot ?? resultsRoot,
+    approval.trialId,
+  );
   const candidatePath = path.join(
     trialDirectory,
     path.basename(definition.spec_path),
@@ -101,6 +104,11 @@ async function executeCandidate(approval, signal) {
   if (
     candidateResult.case_id !== definition.case_id ||
     candidateResult.trial_id !== approval.trialId ||
+    candidateResult.status !== 'checkpoint' ||
+    candidateResult.cleanup?.status !== 'passed' ||
+    candidateResult.dataset_sha256 !==
+      (options.datasetDigest?.() ??
+        require('./score-outcomes.cjs').datasetDigest()) ||
     candidateResult.candidate_executed !== false ||
     handoff.run_id !== candidateResult.run_id ||
     handoff.spec_path !== definition.spec_path ||
@@ -127,6 +135,7 @@ async function executeCandidate(approval, signal) {
     case_id: definition.case_id,
     trial_id: approval.trialId,
     candidate_sha256: approval.digest,
+    dataset_sha256: candidateResult.dataset_sha256,
     status: 'incomplete',
     first_try: null,
     criterion_review: 'pending',
@@ -158,6 +167,8 @@ async function executeCandidate(approval, signal) {
       app: hashFile(path.join(repository, 'public', 'app.js')),
       page: hashFile(path.join(repository, 'public', 'index.html')),
     };
+    if (before.spec !== approval.digest)
+      throw new Error('candidate-approval-mismatch');
     const npmCli = process.env.npm_execpath;
     if (typeof npmCli !== 'string' || !existsSync(npmCli))
       throw new Error('npm-unavailable');

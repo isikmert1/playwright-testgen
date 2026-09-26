@@ -49,8 +49,8 @@ function readJson(filename) {
   return JSON.parse(readFileSync(filename, 'utf8'));
 }
 
-function authorExecutionAttempts(output) {
-  let attempts = 0;
+function assistantTools(output) {
+  const tools = [];
   for (const line of output.split(/\r?\n/u)) {
     let record;
     try {
@@ -59,20 +59,37 @@ function authorExecutionAttempts(output) {
       continue;
     }
     if (record.type !== 'assistant') continue;
-    for (const block of record.message?.content ?? []) {
-      const command = block.name === 'Bash' ? block.input?.command : null;
-      if (typeof command !== 'string') continue;
-      if (
-        (/\bplaywright\s+test\b/iu.test(command) &&
-          !/--list\b/u.test(command)) ||
+    tools.push(
+      ...(record.message?.content ?? []).filter(
+        (block) => block.type === 'tool_use',
+      ),
+    );
+  }
+  return tools;
+}
+
+function authorExecutionAttempts(output) {
+  return assistantTools(output).filter((block) => {
+    const command = ['Bash', 'PowerShell'].includes(block.name)
+      ? block.input?.command
+      : null;
+    return (
+      typeof command === 'string' &&
+      ((/\bplaywright\s+test\b/iu.test(command) &&
+        !/--list\b/u.test(command)) ||
         /\b(?:npm|yarn|pnpm|bun)\s+(?:run\s+)?test(?::[\w-]+)?\b/iu.test(
           command,
-        )
-      )
-        attempts += 1;
-    }
-  }
-  return attempts;
+        ))
+    );
+  }).length;
+}
+
+function authorProfileAccessAttempts(output) {
+  return assistantTools(output).filter(
+    (block) =>
+      ['Read', 'Grep', 'Glob', 'Bash', 'PowerShell'].includes(block.name) &&
+      JSON.stringify(block.input ?? {}).includes('profile.v1.json'),
+  ).length;
 }
 
 function authorPrompt(definition, runtime) {
@@ -92,7 +109,9 @@ function authorPrompt(definition, runtime) {
       (criterion) => `criterion ${criterion.id}: ${criterion.outcome}`,
     ),
     `origin: ${runtime.origin}`,
-    'The application, CLI browser, and runner browser are ready. No authentication is needed. No setup profile exists; discover locator conventions from the source as instructed. There are no existing Playwright tests in this target.',
+    runtime.setup_facts == null
+      ? 'The application, CLI browser, and runner browser are ready. No authentication is needed. No setup profile exists; discover locator conventions from the source as instructed. There are no existing Playwright tests in this target.'
+      : `The application, CLI browser, and runner browser are ready. No authentication is needed. Main validated its repository profile and supplied these navigation facts: ${JSON.stringify(runtime.setup_facts)}. The profile is Main-owned; use only the supplied facts.`,
     'Each Bash call starts at the repository root. Write and validate one candidate spec and its handoff, close your owned browser session, then stop before test execution. The human has not approved running the candidate.',
   ].join('\n');
 }
@@ -152,22 +171,27 @@ async function verifyBrowserReadiness(
   if (closeFailed) throw new Error('cli-browser-cleanup-failed');
 }
 
-async function collectCandidate(definition, signal) {
+async function collectCandidate(definition, signal, options = {}) {
   const startedAt = Date.now();
   const target = readJson(
     path.join(root, 'evals', 'targets', definition.target_id, 'target.json'),
   );
   if (
-    definition.kind !== 'generation' ||
+    !['generation', 'setup-generation'].includes(definition.kind) ||
     definition.checkpoint !== 'candidate-before-execution' ||
     target.target_id !== definition.target_id ||
     target.source.kind !== 'owned' ||
+    (definition.kind === 'setup-generation' &&
+      typeof options.setupBeforeAuthor !== 'function') ||
     !/^tests\/[a-z0-9-]+\.spec\.ts$/u.test(definition.spec_path)
   )
     throw new Error('case-invalid');
 
   const trialId = `trial-${randomBytes(8).toString('hex')}`;
-  const resultDirectory = path.join(resultsRoot, trialId);
+  const resultDirectory = path.join(
+    options.resultsRoot ?? resultsRoot,
+    trialId,
+  );
   mkdirSync(resultDirectory, { recursive: true });
   const state = {
     marketplace_added: false,
@@ -193,6 +217,9 @@ async function collectCandidate(definition, signal) {
   };
   let cleanup;
   try {
+    result.dataset_sha256 =
+      options.datasetDigest?.() ??
+      require('./score-outcomes.cjs').datasetDigest();
     const revision = await command(executable('git'), ['rev-parse', 'HEAD'], {
       cwd: root,
       error: 'testgen-revision-unavailable',
@@ -265,6 +292,15 @@ async function collectCandidate(definition, signal) {
     result.playwright = compatibility.playwright.version;
     result.playwright_cli = compatibility.playwright_cli.version;
 
+    if (options.setupBeforeAuthor != null)
+      result.setup = await options.setupBeforeAuthor({
+        definition,
+        installed,
+        repository: state.repository,
+        resultDirectory,
+        signal,
+      });
+
     const runId = `tg-${randomBytes(12).toString('hex')}`;
     const runDirectory = path.join(
       state.repository,
@@ -314,6 +350,7 @@ async function collectCandidate(definition, signal) {
       repository: state.repository,
       origin: target.start.origin,
       approved_spec_filter: approvedSpecFilter,
+      setup_facts: result.setup?.facts,
     });
     result.setup_duration_ms = Date.now() - startedAt;
     const agent = await runBounded(
@@ -336,6 +373,10 @@ async function collectCandidate(definition, signal) {
     writeFileSync(path.join(resultDirectory, 'agent.jsonl'), agent.output);
     const parsed = parseAgentStream(agent.output);
     result.execution_attempts = authorExecutionAttempts(agent.output);
+    if (options.setupBeforeAuthor != null)
+      result.profile_access_attempts = authorProfileAccessAttempts(
+        agent.output,
+      );
     result.candidate_executed = result.execution_attempts === 0 ? false : null;
     result.hook_events = parsed.hook_lifecycle.length;
     result.hook_errors = parsed.hook_lifecycle.filter(
@@ -354,6 +395,8 @@ async function collectCandidate(definition, signal) {
       agent.status !== 0 ||
       parsed.result_subtype !== 'success' ||
       result.execution_attempts !== 0 ||
+      (options.setupBeforeAuthor != null &&
+        result.profile_access_attempts !== 0) ||
       result.hook_errors !== 0
     )
       throw new Error('author-run-failed');
@@ -422,4 +465,9 @@ async function main() {
 
 if (require.main === module) void main();
 
-module.exports = { authorExecutionAttempts, authorPrompt, collectCandidate };
+module.exports = {
+  authorExecutionAttempts,
+  authorProfileAccessAttempts,
+  authorPrompt,
+  collectCandidate,
+};

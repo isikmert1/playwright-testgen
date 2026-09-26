@@ -1,8 +1,8 @@
 {
-  "name": "testgen-semantic-only-target",
+  "name": "order-entry-demo",
   "version": "1.0.0",
   "private": true,
-  "description": "Deterministic browser target without test IDs for Playwright Testgen validation.",
+  "description": "Small order-entry application for browser testing.",
   "license": "Apache-2.0",
   "engines": {
     "node": ">=20"

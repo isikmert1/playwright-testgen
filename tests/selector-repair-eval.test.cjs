@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const { scoreSelectorRepair } = require('../scripts/score-selector-repair.cjs');
 const {
-  assertionBlock,
+  expectedSelectorRepair,
   selectorFailure,
 } = require('../scripts/run-selector-repair-eval.cjs');
 
@@ -20,12 +20,12 @@ function evidence(overrides = {}) {
     },
     spec_path: 'tests/order.spec.ts',
     before: {
-      assertions: 'assertions',
+      expected_spec: 'allowed-spec',
       product: 'variant-product',
       repository_state: 'public/index.html modified',
     },
     after: {
-      assertions: 'assertions',
+      spec: 'allowed-spec',
       product: 'variant-product',
       repository_state: 'public/index.html modified',
     },
@@ -66,17 +66,23 @@ test('accepts an independently verified selector repair', () => {
 
 test('rejects weakened assertions, product changes, and ungoverned failures', () => {
   for (const changed of [
-    { after: { assertions: 'weakened', product: 'variant-product' } },
-    { after: { assertions: 'assertions', product: 'changed-product' } },
+    { after: { ...evidence().after, spec: 'weakened-assertions' } },
+    { after: { ...evidence().after, product: 'changed-product' } },
     {
       after: {
-        assertions: 'assertions',
+        spec: 'allowed-spec',
         product: 'variant-product',
         repository_state: 'unexpected file added',
       },
     },
     { hook_audit: [] },
     { final_run: 'fail' },
+    {
+      after: {
+        ...evidence().after,
+        spec: 'dom-relabel-instead-of-locator-repair',
+      },
+    },
   ]) {
     assert.throws(() => scoreSelectorRepair(evidence(changed)));
   }
@@ -112,9 +118,14 @@ test('recognizes the exact controlled selector failure', () => {
   assert.equal(selectorFailure(report), false);
 });
 
-test('isolates the intended assertion block from locator-only repairs', () => {
+test('allows only the fixed fixture locator change, preserving all other source', () => {
   const before =
     "getByRole('button', { name: 'Add order' });\nawait test.step('Submitted order appears once with its quantity and Pending status', async () => { await expect(row).toHaveCount(1); });";
   const after = before.replace('Add order', 'Create order');
-  assert.equal(assertionBlock(before), assertionBlock(after));
+  assert.equal(expectedSelectorRepair(before), after);
+  const relabeled = before.replace(
+    'getByRole',
+    "evaluate(() => document.querySelector('button').textContent = 'Add order'); getByRole",
+  );
+  assert.notEqual(expectedSelectorRepair(before), relabeled);
 });
