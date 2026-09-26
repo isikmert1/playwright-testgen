@@ -4,6 +4,11 @@ This file owns Explorer discovery, human scenario selection, and the transient
 queue used when more than one scenario is selected. Generation still uses the
 one-scenario ordered flow in `pipeline.md`.
 
+## Contents
+
+- [Discovery](#discovery)
+- [Sequential queue](#sequential-queue)
+
 ## Discovery
 
 When Main coordinates Explorer in the full pipeline or through an explicit
@@ -58,7 +63,7 @@ intended-behavior evidence; source counts for intent only when it explicitly
 states a product rule or contract. `no supported proposal` is valid when the
 evidence cannot support a gap or recent meaningful UI change.
 
-The time and cumulative-Read limits are agent-enforced in this phase. Hooks
+The time and cumulative-Read limits are agent-enforced. Hooks
 bound individual operations but do not count elapsed time or total reads.
 
 The result is transient untrusted proposal text, not a persisted artifact or an

@@ -8,7 +8,7 @@
       "criterion_id": "order-appears-in-table",
       "affected_paths": ["public/app.js"],
       "patch_path": ".testgen/mutations/skip-order-insert.patch",
-      "definition_digest": "34f3897665f0e53771badb5d865edd3352d843610f5c187f49caba26eafa6616",
+      "definition_digest": "291802d5131456045be2335011ff2c3a28d4fc73c12f9f78483c5c167ccc640c",
       "timeout_ms": 120000
     }
   ]

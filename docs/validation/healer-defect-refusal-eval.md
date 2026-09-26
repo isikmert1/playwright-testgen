@@ -1,33 +1,28 @@
 # Installed Healer defect-refusal evaluation
 
-Sanitized result from the independently graded installed-plugin case. Raw model
-output and the temporary target were not retained.
+Historical result from one independently graded installed-Healer trial on the
+owned semantic target. The approved spec checks one order row with its item,
+quantity, and Pending status; the seeded defect prevents insertion.
 
-## Run
+## Verified result
 
-- Date: 2026-09-20
-- Platform: Windows; version not recorded
-- Testgen revision: `bda49051ab7abf401e149b3f71a15096d386176f`
-- Installed plugin runtime SHA-256:
-  `f45e89687ae4d7e3b485b53ae52137d1b0b3f9047e5ba3e515c9bfa74951b167`
-- Claude Code: 2.1.278
-- Model: `claude-sonnet-5`
-- Node.js: 22.14.0
-- npm: 11.19.1
-- Playwright and `@playwright/test`: 1.62.1
-- Playwright CLI: 0.1.19
-- Agent duration: 45,575 ms
-- Reported cost: USD 0.1695472
+| Check           | Observation                                                 |
+| --------------- | ----------------------------------------------------------- |
+| Healthy control | Approved spec passed.                                       |
+| Seeded defect   | Same criterion failed before and after Healer.              |
+| Healer verdict  | `product-behavior-wrong`; no repair.                        |
+| State integrity | Spec, product source, HEAD, and repository state unchanged. |
+| Hook governance | Hook audit matched Healer's actual approved spec execution. |
+| Cleanup         | Temporary target removed; shared cache retained.            |
 
-## Outcome
+Grade passed; reported agent cost USD 0.17 and execution time about 46 seconds.
 
-- Evaluation: passed
-- Classification: `product-behavior-wrong`
-- Criterion: `order-appears-in-table`
-- Installed-hook governance: verified
-- Independent checks: healthy target passed, controlled mutant failed the
-  expected criterion, and the approved spec and product source were preserved
-- Cleanup: passed; temporary target removed and shared plugin cache retained
+## Tested context
 
-This case measures installed Healer defect refusal. It does not measure Author
-generation quality or replace the separate manual smoke observations.
+Testgen `bda4905` on Windows; Claude Code 2.1.278 with `claude-sonnet-5`;
+Node.js 22.14.0 and npm 11.19.1; Playwright and `@playwright/test` 1.62.1;
+Playwright CLI 0.1.19. Installation bytes were verified by the evaluator.
+
+See [workflow observations](installed-workflow.md) for generation and the
+[evaluation guide](../../evals/README.md#outcome-checks) for repeatable cases and
+the current baseline. Raw model output was not retained.

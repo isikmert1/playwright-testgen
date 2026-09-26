@@ -71,6 +71,19 @@ test('active external target descriptors pin reproducible sources without vendor
   );
 });
 
+test('agent-visible target metadata does not reveal setup or seeded-bug answers', () => {
+  const source = path.join(targetsRoot, 'semantic-only', 'repository');
+  const visible = [
+    readFileSync(path.join(source, 'README.md'), 'utf8'),
+    readFileSync(path.join(source, 'package.json'), 'utf8'),
+    readFileSync(path.join(source, 'package-lock.json'), 'utf8'),
+  ].join('\n');
+  assert.doesNotMatch(
+    visible,
+    /no existing tests|no test[- ]ids?|without test[- ]ids?|semantic.only.target|rename-order-submit|skip-order-insert|selector drift|product.behavior failure/iu,
+  );
+});
+
 test('owned semantic-only target serves controls without test IDs', async (t) => {
   const targetRoot = path.join(targetsRoot, 'semantic-only', 'repository');
   const { createServer } = require(path.join(targetRoot, 'server.cjs'));
@@ -227,6 +240,64 @@ test('semantic-only adapter and seeded bug share one approved mutation definitio
   );
 });
 
+test('outcome cases cover generation without an adapter and selector repair', () => {
+  const generation = readJson(
+    path.join(
+      repositoryRoot,
+      'evals',
+      'cases',
+      'healthy-generation',
+      'case.json',
+    ),
+  );
+  const repair = readJson(
+    path.join(repositoryRoot, 'evals', 'cases', 'selector-repair', 'case.json'),
+  );
+  const refusal = readJson(
+    path.join(
+      repositoryRoot,
+      'evals',
+      'cases',
+      'healer-product-defect-refusal',
+      'case.json',
+    ),
+  );
+  const targetRoot = path.join(targetsRoot, 'semantic-only', 'repository');
+  const adapter = readJson(
+    path.join(targetRoot, '.testgen', 'mutation-adapter.json'),
+  );
+
+  assert.equal(generation.schema_version, 'outcome-eval-case.v1');
+  assert.equal(generation.target_id, 'semantic-only');
+  assert.equal(generation.kind, 'generation');
+  assert.equal(generation.checkpoint, 'candidate-before-execution');
+  assert.equal(generation.expected.mutation, 'adapter-absent');
+  assert.equal(generation.criteria.length, 1);
+  assert.equal(
+    adapter.mutations.some(
+      (mutation) => mutation.criterion_id === generation.criteria[0].id,
+    ),
+    false,
+  );
+
+  assert.equal(repair.schema_version, 'outcome-eval-case.v1');
+  assert.equal(repair.target_id, 'semantic-only');
+  assert.equal(repair.kind, 'selector-repair');
+  assert.equal(repair.checkpoint, 'approved-existing-spec');
+  assert.equal(repair.expected.classification, 'selector-drift');
+  assert.equal(repair.expected.assertions_unchanged, true);
+  assert.equal(repair.criteria.length, 1);
+  assert.equal(existsSync(path.join(repositoryRoot, repair.spec_source)), true);
+  assert.equal(existsSync(path.join(targetRoot, repair.variant_path)), true);
+  assert.deepEqual(
+    [generation, repair, refusal].map(
+      (definition) => definition.planned_trials,
+    ),
+    [2, 2, 2],
+  );
+  assert.equal(refusal.checkpoint, 'approved-existing-spec');
+});
+
 test('mutation runner translates isolated Playwright results and removes its link', (t) => {
   const temporaryRoot = mkdtempSync(
     path.join(tmpdir(), 'testgen-target-runner-'),
@@ -257,7 +328,9 @@ test('mutation runner translates isolated Playwright results and removes its lin
       'fetch(`${process.env.TESTGEN_BASE_URL}/app.js`).then((response)=>response.text()).then((source)=>{',
       "const failed=!source.includes('orders.push(order);');",
       "const file='tests/order.spec.js';",
-      "const result=failed?{status:'failed',errorLocation:{file:path.resolve(file),line:108,column:1},steps:[{title:'verify the submitted order details',error:{message:'assertion failed'}}]}:{status:'passed'};",
+      'const location={file:path.resolve(file),line:108,column:1};',
+      "const error={message:'assertion failed',stack:`Error: assertion failed\\n    at ${location.file}:108:1\\n    at approvedStep (${location.file}:106:1)`};",
+      "const result=failed?{status:'failed',errors:[{...error,location}],steps:[{title:'verify the submitted order details',error}]}:{status:'passed',errors:[]};",
       "const report={errors:[],stats:{expected:failed?0:1,unexpected:failed?1:0},suites:[{title:file,file,specs:[{title:'order',file,line:1,column:1,tests:[{status:failed?'unexpected':'expected',results:[result]}]}]}]};",
       'writeFileSync(process.env.PLAYWRIGHT_JSON_OUTPUT_FILE,JSON.stringify(report));',
       'process.exitCode=failed?1:0;',
@@ -331,7 +404,7 @@ test('mutation runner translates isolated Playwright results and removes its lin
       "const {writeFileSync}=require('node:fs');",
       "const path=require('node:path');",
       "const file='tests/order.spec.js';",
-      "const report={errors:[],stats:{expected:0,unexpected:1},suites:[{title:file,file,specs:[{title:'order',file,line:1,column:1,tests:[{status:'unexpected',results:[{status:'failed',steps:[{title:'verify another outcome',error:{message:'assertion failed'}}]}]}]}]}]};",
+      "const report={errors:[],stats:{expected:0,unexpected:1},suites:[{title:file,file,specs:[{title:'order',file,line:1,column:1,tests:[{status:'unexpected',results:[{status:'failed',errors:[{message:'assertion failed'}],steps:[{title:'verify another outcome',error:{message:'assertion failed'}}]}]}]}]}]};",
       'writeFileSync(process.env.PLAYWRIGHT_JSON_OUTPUT_FILE,JSON.stringify(report));',
       'process.exitCode=1;',
       '',
@@ -345,6 +418,53 @@ test('mutation runner translates isolated Playwright results and removes its lin
     criterion_id: null,
     reason: 'failure-unattributed',
   });
+});
+
+test('mutation runner rejects unrelated terminal errors and extra tests', () => {
+  const { classifyReport } = require(
+    path.join(
+      targetsRoot,
+      'semantic-only',
+      'repository',
+      '.testgen',
+      'mutation-runner.cjs',
+    ),
+  );
+  const location = { file: '/target/tests/order.spec.ts', line: 7, column: 1 };
+  const stepError = {
+    message: 'assertion failed',
+    stack: `Error: assertion failed\n    at check (${location.file}:7:1)\n    at approved (${location.file}:5:1)`,
+  };
+  const result = {
+    status: 'failed',
+    errors: [{ ...stepError, location }],
+    steps: [{ title: 'approved', error: stepError }],
+  };
+  const report = {
+    errors: [],
+    stats: { expected: 0, unexpected: 1 },
+    suites: [
+      { specs: [{ tests: [{ status: 'unexpected', results: [result] }] }] },
+    ],
+  };
+  assert.equal(
+    classifyReport(report, 'approved', 'criterion-1', 1).outcome,
+    'fail',
+  );
+  result.errors.push({ message: 'unrelated failure' });
+  assert.throws(
+    () => classifyReport(report, 'approved', 'criterion-1', 1),
+    /failure-unattributed/u,
+  );
+  result.errors.pop();
+  report.suites[0].specs[0].tests.push({
+    status: 'expected',
+    results: [{ status: 'passed' }],
+  });
+  assert.throws(
+    () => classifyReport(report, 'approved', 'criterion-1', 1),
+    /failure-unattributed/u,
+  );
 });
 
 test('mutation runner stops its server after an invalid startup handshake', (t) => {

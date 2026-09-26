@@ -51,11 +51,14 @@ Offer only the remedy matching the bounded failure:
 
 - Missing `playwright` or `@playwright/test`: in an npm-owned package only, ask
   before installing the missing package at the exact existing counterpart
-  version. When neither version exists, offer the current tested pair
-  `playwright@1.62.1` and `@playwright/test@1.62.1`; do not substitute npm in a
-  Yarn/pnpm/Bun repository or install `latest`.
-- Missing/unsupported global CLI: ask before installing the tested baseline
-  `npm install -g @playwright/cli@0.1.19`.
+  version. When neither version exists, resolve the current stable release that
+  fits the project's constraints and offer that exact version for both packages.
+  Do not substitute npm in a Yarn/pnpm/Bun repository or upgrade existing
+  packages as part of missing-package remediation.
+- Missing/unsupported global CLI: resolve the current stable official release
+  and ask before installing `npm install -g @playwright/cli@<approved-version>`.
+  Resolve `latest` before approval so the approved command names an exact
+  version; rerun preflight afterward to check the installed capabilities.
 - Missing/outdated project-local official skill: ask before running
   `playwright-cli install --skills` from the Git root. A global skill alone is
   insufficient.

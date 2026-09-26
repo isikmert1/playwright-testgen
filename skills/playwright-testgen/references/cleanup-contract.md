@@ -3,6 +3,13 @@
 Cleanup covers both browser lifecycle and filesystem scratch. Track every
 resource when it is created so each exit can release only run-owned resources.
 
+## Contents
+
+- [Run-owned resources](#run-owned-resources)
+- [Browser and process cleanup](#browser-and-process-cleanup)
+- [Filesystem cleanup](#filesystem-cleanup)
+- [Exit behavior](#exit-behavior)
+
 ## Run-owned resources
 
 - Use a named Playwright CLI session derived from the supplied `run_id` when

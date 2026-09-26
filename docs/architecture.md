@@ -79,15 +79,3 @@ Testgen is not a generic test framework, CI replacement, package installer,
 credential manager, process sandbox, or license to repair application code.
 Evaluation runners measure Testgen separately and never run automatically
 during normal generation.
-
-## Versioning and releases
-
-Plugin, marketplace, package, and lockfile metadata share one semantic version.
-Git commit SHAs remain exact provenance between releases.
-
-For a release:
-
-1. Bump all four version locations together.
-2. Run `npm run check` and review the release diff and notes.
-3. Create the tag and publish deliberately; neither action is automated by a
-   normal commit.

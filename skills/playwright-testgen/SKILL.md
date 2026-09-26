@@ -19,9 +19,9 @@ not the repository being tested. This resource path does not replace the
 SessionStart environment variable used for Bash scripts below.
 
 Run generation only after the selected package provides its local `playwright`
-and `@playwright/test` runtime. The current
-official `@playwright/cli` must be installed globally so its documented
-`playwright-cli` command is available without depending on the repository's
+and `@playwright/test` runtime. The official `@playwright/cli` must be installed
+globally so its documented `playwright-cli` command is available without
+depending on the repository's
 `node_modules` layout. Never install or resolve these dependencies from this
 plugin repository. Testgen requires Node.js 22.13 or later.
 
@@ -60,15 +60,15 @@ another command, or append discovery probes. It resolves and records the
 selected package's local `playwright` and `@playwright/test`, the global
 `playwright-cli`, its installed project skill, required runner/CLI capabilities,
 Git HEAD, hook dependency readiness, and the supported trace snapshot spelling.
-It checks the skill file itself and does not rely on the obsolete `Agent skill:`
-help heading. `ok: false` stops before Author with the reported bounded reason;
+It checks the skill file itself. `ok: false` stops before Author with the
+reported bounded reason;
 an unborn or missing Git HEAD is `git-head-unavailable`. Normal generation
 never installs or rewrites infrastructure. Setup may offer one exact remedy,
 but runs it only after approval and repeats the affected check. Never create a
 commit to make preflight pass.
 
-Node must be 22.13 or newer and the CLI must be 0.1.19 or newer. A newer
-version is not assumed trace-compatible: unknown combinations leave optional
+The CLI must be 0.1.19 or newer. A newer version is not assumed trace-compatible:
+unknown combinations leave optional
 trace snapshot inspection unavailable while the required workflow can continue.
 Run the official install from the same Node/npm environment that launches the
 agent; a different global npm prefix does not satisfy this check.
@@ -116,12 +116,23 @@ infers missing intent, or silently starts another stage.
 Load references only when their condition applies. Do not bulk-read them or
 create a second routing layer.
 
-- [pipeline.md](references/pipeline.md) — Read this when starting this skill's generation workflow or its post-checkpoint run or repair path, to establish ordering, ownership, checkpoints, and handoffs.
-- [scenario-sourcing.md](references/scenario-sourcing.md) — Read whenever Main coordinates Explorer in the full pipeline or standalone mode, including a supplied discovery scope, or manages a multi-scenario queue. Do not load it for explicit single-scenario generation or standalone Author or Healer work.
-- [test-policy.md](references/test-policy.md) — Read this when planning, writing, or revising a spec or helper.
-- [locator-policy.md](references/locator-policy.md) — Read this when choosing, verifying, or changing any locator.
-- [failure-taxonomy.md](references/failure-taxonomy.md) — Read this when a run fails, before assigning its cause, remedy, or next owner.
-- [healing-protocol.md](references/healing-protocol.md) — Read this when Healer is authorized to run or debug a spec, and before repairing a failure.
-- [artifact-contract.md](references/artifact-contract.md) — Main reads this before starting Author and when validating or consuming an Author handoff, Healer input, or Healer trace.
-- [mutation-check.md](references/mutation-check.md) — Read this before approving any mutation adapter, and after a fixed Healer result to run the approved mutation or record that verification is unavailable.
-- [cleanup-contract.md](references/cleanup-contract.md) — Read this when browser sessions or scratch artifacts may be created, and before any exit path.
+- [pipeline.md](references/pipeline.md) — Read for the generation workflow and
+  post-checkpoint execution or repair: ordering, ownership, and handoffs.
+- [scenario-sourcing.md](references/scenario-sourcing.md) — Read when Main
+  coordinates Explorer in pipeline or standalone mode, including a supplied
+  discovery scope, or manages a multi-scenario queue. Do not load it for
+  explicit single-scenario generation or standalone Author or Healer work.
+- [test-policy.md](references/test-policy.md) — Read before planning, writing, or
+  revising a spec or helper.
+- [locator-policy.md](references/locator-policy.md) — Read before choosing,
+  verifying, or changing a locator.
+- [failure-taxonomy.md](references/failure-taxonomy.md) — Read after a failure,
+  before assigning its cause, remedy, or next owner.
+- [healing-protocol.md](references/healing-protocol.md) — Read when Healer is
+  authorized to run or debug a spec, and before repairing a failure.
+- [artifact-contract.md](references/artifact-contract.md) — Main reads before
+  starting Author or validating or consuming a handoff, Healer input, or trace.
+- [mutation-check.md](references/mutation-check.md) — Read before adapter approval
+  and after a fixed Healer result, including when verification is unavailable.
+- [cleanup-contract.md](references/cleanup-contract.md) — Read before creating
+  browser sessions or scratch artifacts, and before every exit.

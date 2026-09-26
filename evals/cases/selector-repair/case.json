@@ -1,0 +1,29 @@
+{
+  "schema_version": "outcome-eval-case.v1",
+  "case_id": "semantic-order-submit-selector-repair",
+  "kind": "selector-repair",
+  "target_id": "semantic-only",
+  "scenario_ref": "submitted-order-appears-in-table",
+  "spec_source": "evals/cases/healer-product-defect-refusal/order.spec.ts",
+  "spec_path": "tests/order.spec.ts",
+  "variant_path": ".testgen/variants/rename-order-submit.patch",
+  "criteria": [
+    {
+      "id": "order-appears-in-table",
+      "outcome": "Submitting an order adds exactly one table row with its item, quantity, and Pending status."
+    }
+  ],
+  "checkpoint": "approved-existing-spec",
+  "planned_trials": 2,
+  "agent": {
+    "name": "playwright-testgen:playwright-test-healer",
+    "model": "claude-sonnet-5",
+    "timeout_ms": 600000,
+    "max_turns": 30,
+    "max_budget_usd": 2
+  },
+  "expected": {
+    "classification": "selector-drift",
+    "assertions_unchanged": true
+  }
+}
