@@ -98,6 +98,57 @@ policy-bound local `playwright test <exact-spec> --list` fallback checks
 TypeScript loading and discovery without requiring a special package script or
 executing the test callback.
 
+## Setup check
+
+`npm run eval:setup` installs the committed plugin in a disposable copy of the
+owned target, invokes `/playwright-testgen:setup`, and checks the resulting
+ignored profile against the target and its original files. It then asks the
+installed Author for the Notebook details spec and stops at the candidate
+checkpoint. The setup agent may add only the exact profile ignore rule and
+profile; generated specs and bounded evidence are saved under ignored
+`setup/results/trial-*/`. One successful setup and candidate is an integration
+observation, not a reliability rate.
+
+Review the saved spec and its SHA-256 before running it. After approval, run
+`npm run eval:setup -- --candidate --trial-id <id> --approved-sha256 <digest>`.
+This executes the unchanged candidate in a fresh target. Independently review
+whether its assertions establish `notebook-details-visible`; a green run alone
+does not establish usefulness. This check is separate from the outcome baseline
+below.
+
+It starts two model sessions, each limited to 30 turns, 600 seconds, and USD 2
+of reported model cost. Main uses Claude Code's `auto` permission mode; Author
+uses the existing governed `dontAsk` workflow. These controls and repository
+write checks are guardrails, not an OS sandbox. The setup snapshot includes
+dependencies and Git metadata, while ignoring only the Git index's stat cache
+and checking its staged entries separately.
+
+Record the independent criterion review in the same `review.json` format used
+below, then run `npm run eval:setup -- --score --trial-id <id>`. It exits nonzero
+for incomplete evidence, a rejected criterion, or changed inputs. A checkpoint
+and its candidate execution must use the same dataset digest.
+
+In PowerShell, use `npm.cmd` when forwarding option flags; the `npm.ps1` wrapper
+can consume them before they reach the evaluator.
+
+On 2026-09-26, the installed plugin at revision `d8835ce` completed this check
+with Claude Code 2.1.278, `claude-sonnet-5`, and setup input digest
+`d0681ac8d98931758849da9531d793c1f347f03b1de227cb6527e75977f0eb10`.
+Main selected the root package and `playwright.config.cjs`, validated a fresh
+profile, and changed only the approved profile and ignore rule. Author made
+no profile-access or execution attempts and produced a validated handoff.
+After human approval, the unchanged candidate passed its first execution;
+independent review confirmed the Notebook, quantity 2, and Ready assertions.
+A controlled rejected review made scoring exit nonzero despite that green run.
+The final approved score passed and both temporary targets were removed.
+
+The completed Main/Author trial reported USD 0.28 and took 451 seconds before
+the checkpoint; candidate execution and cleanup took another 12 seconds.
+This excludes earlier diagnostic attempts, including one interrupted by API
+overload and an unrelated plugin-state change. Those attempts remain incomplete
+local evidence. This is one integration observation, not a reliability rate;
+mutation sensitivity is unavailable for this case.
+
 ## Outcome checks
 
 `cases/healthy-generation/` asks the installed Author for one Notebook details
@@ -108,7 +159,7 @@ prove the test useful. After a human reviews the exact spec and approves its
 SHA-256, run:
 
 ```sh
-npm run eval:candidate -- -- --trial-id <id> --approved-sha256 <digest>
+npm run eval:candidate -- --trial-id <id> --approved-sha256 <digest>
 ```
 
 That command runs the unchanged candidate in a fresh target copy.
@@ -134,15 +185,17 @@ sensitivity is unavailable for this no-adapter case.
 of the exact fixed spec digest, run:
 
 ```sh
-npm run eval:selector-repair -- -- --approved-spec-sha256 <digest>
+npm run eval:selector-repair -- --approved-spec-sha256 <digest>
 ```
 
 The evaluator proves the healthy baseline passes, the renamed
 control causes a selector failure, and the installed Healer repairs only the
-spec's locator. The scorer independently reruns the spec and checks its
-assertions, product bytes, hook decision, and trace. The existing
-`eval:healer-defect-refusal` remains the separate product-defect case.
-Use `npm run eval:healer-defect-refusal -- -- --archive-results` from a clean
+spec's locator. For this fixed fixture, only the submission locator's literal
+name may change from `Add order` to `Create order`. The scorer independently
+reruns the spec and checks its complete expected source, product bytes, hook
+decision, and trace. This narrow check does not grade alternative repairs.
+The existing `eval:healer-defect-refusal` remains the separate product-defect case.
+Use `npm run eval:healer-defect-refusal -- --archive-results` from a clean
 committed checkout to retain its bounded JSON beside the other outcome trials.
 
 Each case declares two planned trials. Keep every attempt, including incomplete
@@ -169,5 +222,12 @@ stripped its option; another reached the correct refusal but failed cleanup
 verification after an unrelated plugin changed. Neither contributes to the
 six-trial baseline. `baselines/outcomes.json` records the compatible execution
 profile, bounded outcomes, and zero-drop thresholds for the applicable behavior
-metrics. The CLI passes against this baseline and exits nonzero for a candidate
-whose first execution stays green but whose criterion review is rejected.
+metrics. At that revision, the CLI passed against this baseline and exited
+nonzero for a candidate whose first execution stayed green but whose criterion
+review was rejected.
+
+That baseline is historical. A later audit removed answer hints from copied
+target metadata, tightened selector-repair scope and mutation attribution, and
+added per-trial dataset binding. Its old trials have no input digest and cannot
+establish a current regression baseline. New complete trials are required;
+historical results must not be relabeled with the current dataset digest.

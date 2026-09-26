@@ -4,6 +4,7 @@ node_modules/
 .prettiercache
 evals/native/results/
 evals/outcomes/results/
+evals/setup/results/
 .claude/settings.local.json
 *.log
 .env
