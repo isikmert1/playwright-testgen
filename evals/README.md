@@ -34,7 +34,7 @@ error, and transcript before treating the result as valid. A matching Skill
 call followed by a run error records activation, but does not complete the
 check. One run per case is an integration observation, not a reliability rate.
 
-On 2026-09-25, Claude Code 2.1.278 ran these cases with `claude-sonnet-5`
+Claude Code 2.1.278 ran these cases with `claude-sonnet-5`
 against plugin behavior at revision `75d186d` with these evaluation
 definitions. With one run per case, 10-turn and 180-second limits, and a USD 1
 scheduling ceiling, all three cases passed in 64 seconds at an estimated
@@ -131,7 +131,7 @@ and its candidate execution must use the same dataset digest.
 In PowerShell, use `npm.cmd` when forwarding option flags; the `npm.ps1` wrapper
 can consume them before they reach the evaluator.
 
-On 2026-09-26, the installed plugin at revision `d8835ce` completed this check
+The installed plugin at revision `d8835ce` completed this check
 with Claude Code 2.1.278, `claude-sonnet-5`, and setup input digest
 `d0681ac8d98931758849da9531d793c1f347f03b1de227cb6527e75977f0eb10`.
 Main selected the root package and `playwright.config.cjs`, validated a fresh
@@ -199,35 +199,35 @@ Use `npm run eval:healer-defect-refusal -- --archive-results` from a clean
 committed checkout to retain its bounded JSON beside the other outcome trials.
 
 Each case declares two planned trials. Keep every attempt, including incomplete
-ones, and diagnose failures before rerunning. `node scripts/score-outcomes.cjs`
-prints a bounded report and exits nonzero until all planned trials are complete.
+ones, and diagnose failures before rerunning. After all runners finish,
+`node scripts/score-outcomes.cjs` prints a bounded report and exits nonzero
+until all planned trials are complete.
 Once a complete run exists, compare it with a compatible sanitized baseline
 using `node scripts/score-outcomes.cjs --baseline evals/baselines/outcomes.json`.
 The dataset and execution profile must match; the Testgen revision may differ.
 Raw agent streams, app output, and Playwright reports remain outside Git.
 
-On 2026-09-26, the initial baseline at Testgen revision `8bc3e8f` completed
-two trials per case on Windows with Claude Code 2.1.278 and `claude-sonnet-5`.
-Both independently reviewed generation candidates passed on their first run;
-both selector repairs passed with unchanged assertions after two Healer attempts;
-both installed Healer trials correctly refused the seeded product defect and
-verified hook governance. All six temporary targets were removed. Reported
-model cost for these six trials was USD 1.17; this excludes preparation effort
-and is not a reliability estimate. The generation case has no mutation adapter,
-so mutation sensitivity remains unavailable.
+The initial baseline at revision `8bc3e8f` is historical. A later audit removed
+answer hints from copied target metadata, tightened selector-repair scope and
+mutation attribution, and added per-trial dataset binding. Its old trials have
+no input digest and cannot establish a current regression baseline. Historical
+results must not be relabeled with the current dataset digest.
 
-Earlier diagnostic attempts remain in ignored `outcomes/results/diagnostics/`.
-One additional current-revision run passed without an archive because npm
-stripped its option; another reached the correct refusal but failed cleanup
-verification after an unrelated plugin changed. Neither contributes to the
-six-trial baseline. `baselines/outcomes.json` records the compatible execution
-profile, bounded outcomes, and zero-drop thresholds for the applicable behavior
-metrics. At that revision, the CLI passed against this baseline and exited
-nonzero for a candidate whose first execution stayed green but whose criterion
-review was rejected.
+The audited inputs at Testgen revision `74e3f12` completed two
+trials per case on Windows with Claude Code 2.1.278 and `claude-sonnet-5`.
+Both independently reviewed generation candidates passed on their first run.
+Both selector repairs changed only the intended locator and passed with the
+original assertions after two Healer attempts. Both installed Healer trials
+refused the seeded product defect as `product-behavior-wrong` and verified hook
+governance. All six temporary targets were removed. The generation case has no
+mutation adapter, so mutation sensitivity remains unavailable.
 
-That baseline is historical. A later audit removed answer hints from copied
-target metadata, tightened selector-repair scope and mutation attribution, and
-added per-trial dataset binding. Its old trials have no input digest and cannot
-establish a current regression baseline. New complete trials are required;
-historical results must not be relabeled with the current dataset digest.
+These six completed trials reported USD 1.20 in model cost and 27 minutes of
+elapsed time; the two candidate executions added 28 seconds. This is a bounded
+integration observation, not a reliability estimate. Local diagnostic attempts
+remain in ignored `outcomes/results/diagnostics/` outside the completed baseline.
+`baselines/outcomes.json` records the matching dataset and execution profile,
+bounded outcomes, and zero-drop thresholds for applicable behavior metrics.
+The compatible comparison passed. Rejecting one candidate's criterion review
+made the CLI exit nonzero while its first browser execution remained green;
+restoring the approved review made the comparison pass again.

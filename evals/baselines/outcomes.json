@@ -1,8 +1,8 @@
 {
   "schema_version": "outcome-suite.v1",
   "status": "complete",
-  "testgen_revision": "8bc3e8f87fcccf1b0582bbbb78625ee2ea63cac2",
-  "dataset_sha256": "8bd876b766168e0ae4f3b0421aa189f501688329a74d4f3e38dd81396def6982",
+  "testgen_revision": "74e3f1215846e84bc62460945a8b7bcee9865446",
+  "dataset_sha256": "d398bb079ae9d8a157f526c46a44734c4819c13c8c2e3d4884a7e812f5e7067f",
   "profile_sha256": "0934dbfbc9a7afd4abc4b8e38f4baa6df1eabadd6af93fb2926490b1f2e0c7fd",
   "profiles": {
     "semantic-notebook-details": {
@@ -79,7 +79,7 @@
       "planned": 2,
       "attempts": [
         {
-          "trial_id": "trial-a6d7c6085f7948b6",
+          "trial_id": "trial-94d3099ea982def5",
           "complete": true,
           "passed": true,
           "first_try": "pass",
@@ -89,7 +89,7 @@
           "mutation_eligibility": "adapter-absent"
         },
         {
-          "trial_id": "trial-e5bb54678cf9f042",
+          "trial_id": "trial-f39dd3626346bc32",
           "complete": true,
           "passed": true,
           "first_try": "pass",
@@ -104,14 +104,14 @@
       "planned": 2,
       "attempts": [
         {
-          "trial_id": "trial-20e57373d7776785",
+          "trial_id": "trial-3912e839d0485204",
           "complete": true,
           "passed": true,
           "classification": "selector-drift",
           "healer_attempts": 2
         },
         {
-          "trial_id": "trial-249f5a38da2d2bd8",
+          "trial_id": "trial-cd81de36619dbb9d",
           "complete": true,
           "passed": true,
           "classification": "selector-drift",
@@ -123,13 +123,13 @@
       "planned": 2,
       "attempts": [
         {
-          "trial_id": "trial-6567877df1988ba3",
+          "trial_id": "trial-bfc78d606d4a379d",
           "complete": true,
           "passed": true,
           "classification": "product-behavior-wrong"
         },
         {
-          "trial_id": "trial-ab8929f9963b2f15",
+          "trial_id": "trial-dc1109542e96975f",
           "complete": true,
           "passed": true,
           "classification": "product-behavior-wrong"
@@ -190,33 +190,33 @@
     "pending": 0,
     "healer_attempts": [
       {
-        "trial_id": "trial-20e57373d7776785",
+        "trial_id": "trial-3912e839d0485204",
         "count": 2
       },
       {
-        "trial_id": "trial-249f5a38da2d2bd8",
+        "trial_id": "trial-cd81de36619dbb9d",
         "count": 2
       }
     ],
     "healer_attempts_unavailable": 0,
     "cost_usd": {
-      "reported": 1.171247,
+      "reported": 1.203444,
       "unavailable": 0
     },
     "duration_ms": {
-      "reported": 337194,
+      "reported": 989295,
       "unavailable": 0
     },
     "setup_duration_ms": {
-      "reported": 315655,
+      "reported": 494317,
       "unavailable": 0
     },
     "elapsed_ms": {
-      "reported": 750546,
+      "reported": 1637955,
       "unavailable": 0
     },
     "candidate_execution_ms": {
-      "reported": 17119,
+      "reported": 27789,
       "unavailable": 0
     },
     "human_interventions": {
@@ -225,19 +225,19 @@
     },
     "tokens": {
       "input_tokens": {
-        "reported": 146,
+        "reported": 136,
         "unavailable": 0
       },
       "output_tokens": {
-        "reported": 25546,
+        "reported": 23590,
         "unavailable": 0
       },
       "cache_creation_input_tokens": {
-        "reported": 152801,
+        "reported": 128569,
         "unavailable": 0
       },
       "cache_read_input_tokens": {
-        "reported": 1521454,
+        "reported": 1443944,
         "unavailable": 0
       }
     }
