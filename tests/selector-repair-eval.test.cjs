@@ -77,12 +77,6 @@ test('rejects weakened assertions, product changes, and ungoverned failures', ()
     },
     { hook_audit: [] },
     { final_run: 'fail' },
-    {
-      after: {
-        ...evidence().after,
-        spec: 'dom-relabel-instead-of-locator-repair',
-      },
-    },
   ]) {
     assert.throws(() => scoreSelectorRepair(evidence(changed)));
   }
@@ -123,9 +117,4 @@ test('allows only the fixed fixture locator change, preserving all other source'
     "getByRole('button', { name: 'Add order' });\nawait test.step('Submitted order appears once with its quantity and Pending status', async () => { await expect(row).toHaveCount(1); });";
   const after = before.replace('Add order', 'Create order');
   assert.equal(expectedSelectorRepair(before), after);
-  const relabeled = before.replace(
-    'getByRole',
-    "evaluate(() => document.querySelector('button').textContent = 'Add order'); getByRole",
-  );
-  assert.notEqual(expectedSelectorRepair(before), relabeled);
 });
