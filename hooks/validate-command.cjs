@@ -192,13 +192,12 @@ function parseCommand(command, cwd) {
     validator == null ? null : path.dirname(path.dirname(validator));
   let tokens;
   try {
-    tokens = parse(command, (name) =>
-      name === 'PLAYWRIGHT_TESTGEN_ROOT' && pluginRoot != null
-        ? pluginRoot
-        : name === ''
-          ? '$'
-          : { expansion: name },
-    );
+    tokens = parse(command, (name) => {
+      if (name === 'PLAYWRIGHT_TESTGEN_ROOT' && pluginRoot != null)
+        return pluginRoot;
+      if (name === '') return '$';
+      return { expansion: name };
+    });
   } catch {
     return {
       result: deny(
@@ -252,13 +251,11 @@ function parseCommand(command, cwd) {
     };
   }
 
-  if (syntax.length !== 0) {
-    return {
-      result: deny(
-        'Shell operators, comments, globs, and expansions are not allowed. Run one allowlisted command at a time; cd && is allowed only for the exact selected package or run directory.',
-      ),
-    };
-  }
+  return {
+    result: deny(
+      'Shell operators, comments, globs, and expansions are not allowed. Run one allowlisted command at a time; cd && is allowed only for the exact selected package or run directory.',
+    ),
+  };
 }
 
 function splitExecutable(tokens) {

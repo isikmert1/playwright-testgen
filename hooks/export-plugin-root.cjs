@@ -18,5 +18,3 @@ function exportPluginRoot(environment = process.env) {
 }
 
 if (require.main === module) exportPluginRoot();
-
-module.exports = { exportPluginRoot, shellQuote };

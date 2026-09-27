@@ -61,6 +61,12 @@ function artifactSummary(type, artifact, trace) {
   };
 }
 
+function artifactMetadata(type, artifact, trace) {
+  if (type === 'handoff') return {};
+  if (type === 'input') return { mode: artifact.mode };
+  return { summary: artifactSummary(type, artifact, trace) };
+}
+
 function main() {
   let options;
   try {
@@ -205,11 +211,7 @@ function main() {
   report(true, options.type, [], {
     run_id: options.runId,
     artifact_path: portable(path.relative(repository, realArtifact)),
-    ...(options.type === 'handoff'
-      ? {}
-      : options.type === 'input'
-        ? { mode: artifact.mode }
-        : { summary: artifactSummary(options.type, artifact, trace) }),
+    ...artifactMetadata(options.type, artifact, trace),
   });
 }
 

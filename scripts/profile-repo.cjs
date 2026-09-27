@@ -327,14 +327,17 @@ function attributeCount(text, attribute) {
   return [...text.matchAll(regex)].length;
 }
 
-function configuredTestIds(text) {
-  const tokens = [
+function configurationTokens(text) {
+  return [
     ...text.matchAll(
       /\/\*[\s\S]*?\*\/|\/\/[^\n]*|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|`(?:\\.|[^`\\])*`|[A-Za-z_$][\w$]*|[{}:,.=()]/gu,
     ),
   ]
     .map((match) => match[0])
     .filter((token) => !token.startsWith('//') && !token.startsWith('/*'));
+}
+
+function exportedObjectStart(tokens) {
   let start = -1;
   for (let index = 0; index < tokens.length; index += 1) {
     if (tokens[index] === 'export' && tokens[index + 1] === 'default')
@@ -347,24 +350,32 @@ function configuredTestIds(text) {
     )
       start = index + 4;
   }
-  const open =
-    tokens[start] === '{'
-      ? start
-      : tokens[start] === 'defineConfig' &&
-          tokens[start + 1] === '(' &&
-          tokens[start + 2] === '{'
-        ? start + 2
-        : -1;
-  if (start < 0 || open < 0) return { values: new Set(), dynamic: false };
+  if (tokens[start] === '{') return start;
+  if (
+    tokens[start] === 'defineConfig' &&
+    tokens[start + 1] === '(' &&
+    tokens[start + 2] === '{'
+  )
+    return start + 2;
+  return -1;
+}
+
+function configurationObjectEnd(tokens, open) {
   let depth = 0;
-  let close = -1;
   for (let index = open; index < tokens.length; index += 1) {
     if (tokens[index] === '{') depth += 1;
     else if (tokens[index] === '}' && --depth === 0) {
-      close = index;
-      break;
+      return index;
     }
   }
+  return -1;
+}
+
+function configuredTestIds(text) {
+  const tokens = configurationTokens(text);
+  const open = exportedObjectStart(tokens);
+  if (open < 0) return { values: new Set(), dynamic: false };
+  const close = configurationObjectEnd(tokens, open);
   if (close < 0) return { values: new Set(), dynamic: true };
   const configuration = tokens.slice(open, close + 1);
   const values = new Set();
@@ -423,6 +434,75 @@ function configuredTestIds(text) {
     else dynamic = true;
   }
   return { values, dynamic };
+}
+
+function recordLayoutEvidence(layout, relative, isTest) {
+  const filename = path.posix.basename(relative);
+  const naming = filename.match(/\.(?:spec|test|cy)\.[cm]?[jt]sx?$/u)?.[0];
+  if (naming) layout.naming[naming] = (layout.naming[naming] ?? 0) + 1;
+  if (isTest && layout.tests.length < 8) layout.tests.push(relative);
+  if (
+    /(?:helpers?|page[-_]?objects?|support)(?:\/|\.)/iu.test(relative) &&
+    layout.helpers.length < 8
+  )
+    layout.helpers.push(relative);
+  if (/(?:fixtures?)(?:\/|\.)/iu.test(relative) && layout.fixtures.length < 8)
+    layout.fixtures.push(relative);
+}
+
+function recordTestIdEvidence(testId, text, relative, isTestCode) {
+  const codeCounts = isTestCode ? testId.test_counts : testId.source_counts;
+  for (const name of Object.keys(testId.counts)) {
+    const count = attributeCount(text, name);
+    testId.counts[name] += count;
+    codeCounts[name] += count;
+    if (count > 0 && testId.evidence.length < 8) testId.evidence.push(relative);
+  }
+}
+
+function recordLibraryEvidence(libraries, text, relative) {
+  for (const match of text.matchAll(/\bfrom\s+['"]([^'"]+)['"]/gu)) {
+    for (const name of LIBRARIES)
+      if (match[1] === name || match[1].startsWith(name + '/'))
+        libraries.set(name, libraries.get(name) ?? relative);
+    if (
+      /^(?:@\/|~\/|\.{1,2}\/)/u.test(match[1]) &&
+      /(?:^|\/)components\/ui\//u.test(match[1])
+    )
+      libraries.set(
+        'local-ui-components',
+        libraries.get('local-ui-components') ?? relative,
+      );
+  }
+}
+
+function testIdStatus(testId, configured, dynamicConfig, scanStatus) {
+  const used = Object.entries(testId.counts)
+    .filter(([, count]) => count > 0)
+    .map(([name]) => name);
+  const sourceUsed = Object.entries(testId.source_counts)
+    .filter(([, count]) => count > 0)
+    .map(([name]) => name);
+  if (
+    scanStatus === 'partial' ||
+    configured.size > 1 ||
+    dynamicConfig ||
+    (sourceUsed.length === 0 && used.length > 0)
+  )
+    return 'unknown';
+  if (
+    configured.size === 1 &&
+    sourceUsed.length > 0 &&
+    sourceUsed.some((name) => !configured.has(name))
+  )
+    return 'ambiguous';
+  if (used.length === 0) return 'none-found';
+  if (
+    used.length === 1 &&
+    (ATTRIBUTES.includes(used[0]) || configured.has(used[0]))
+  )
+    return 'detected';
+  return 'ambiguous';
 }
 
 function collectFacts(root, paths, record, config, packages, limits, scan) {
@@ -485,7 +565,6 @@ function collectFacts(root, paths, record, config, packages, limits, scan) {
       SOURCE.test(value) &&
       value !== config,
   )) {
-    const filename = path.posix.basename(relative);
     const isTest =
       /(?:^|\/)(?:tests?|__tests__)(?:\/|$)|(?:^|\/)cypress\/(?:e2e|tests?)\/|\.(?:spec|test|cy)\./iu.test(
         relative,
@@ -493,42 +572,9 @@ function collectFacts(root, paths, record, config, packages, limits, scan) {
     const isTestCode = isTest || /(?:^|\/)cypress\//iu.test(relative);
     const text = readText(root, relative, limits, scan);
     if (text == null) continue;
-    const naming = filename.match(/\.(?:spec|test|cy)\.[cm]?[jt]sx?$/u)?.[0];
-    if (naming)
-      facts.layout.naming[naming] = (facts.layout.naming[naming] ?? 0) + 1;
-    if (isTest && facts.layout.tests.length < 8)
-      facts.layout.tests.push(relative);
-    if (
-      /(?:helpers?|page[-_]?objects?|support)(?:\/|\.)/iu.test(relative) &&
-      facts.layout.helpers.length < 8
-    )
-      facts.layout.helpers.push(relative);
-    if (
-      /(?:fixtures?)(?:\/|\.)/iu.test(relative) &&
-      facts.layout.fixtures.length < 8
-    )
-      facts.layout.fixtures.push(relative);
-    for (const name of Object.keys(facts.test_id.counts)) {
-      const count = attributeCount(text, name);
-      facts.test_id.counts[name] += count;
-      facts.test_id[isTestCode ? 'test_counts' : 'source_counts'][name] +=
-        count;
-      if (count > 0 && facts.test_id.evidence.length < 8)
-        facts.test_id.evidence.push(relative);
-    }
-    for (const match of text.matchAll(/\bfrom\s+['"]([^'"]+)['"]/gu)) {
-      for (const name of LIBRARIES)
-        if (match[1] === name || match[1].startsWith(name + '/'))
-          libraries.set(name, libraries.get(name) ?? relative);
-      if (
-        /^(?:@\/|~\/|\.{1,2}\/)/u.test(match[1]) &&
-        /(?:^|\/)components\/ui\//u.test(match[1])
-      )
-        libraries.set(
-          'local-ui-components',
-          libraries.get('local-ui-components') ?? relative,
-        );
-    }
+    recordLayoutEvidence(facts.layout, relative, isTest);
+    recordTestIdEvidence(facts.test_id, text, relative, isTestCode);
+    recordLibraryEvidence(libraries, text, relative);
     if (/\bstorageState\s*[:=(]/u.test(text))
       auth.set('storage-state-use', auth.get('storage-state-use') ?? relative);
     if (/\btest\.extend\s*(?:<|\()/u.test(text) && /\bauth/u.test(text))
@@ -544,35 +590,30 @@ function collectFacts(root, paths, record, config, packages, limits, scan) {
     status: auth.size > 0 ? 'detected' : 'unknown',
     mechanisms: [...auth].map(([kind, evidence]) => ({ kind, evidence })),
   };
-  const used = Object.entries(facts.test_id.counts)
-    .filter(([, count]) => count > 0)
-    .map(([name]) => name);
-  const sourceUsed = Object.entries(facts.test_id.source_counts)
-    .filter(([, count]) => count > 0)
-    .map(([name]) => name);
   if (scan.status === 'partial') facts.authentication.status = 'unknown';
-  if (
-    scan.status === 'partial' ||
-    configured.size > 1 ||
-    dynamicConfig ||
-    (sourceUsed.length === 0 && used.length > 0)
-  )
-    facts.test_id.status = 'unknown';
-  else if (
-    configured.size === 1 &&
-    sourceUsed.length > 0 &&
-    sourceUsed.some((name) => !configured.has(name))
-  )
-    facts.test_id.status = 'ambiguous';
-  else if (used.length === 0) facts.test_id.status = 'none-found';
-  else if (
-    used.length === 1 &&
-    (ATTRIBUTES.includes(used[0]) || configured.has(used[0]))
-  ) {
-    facts.test_id.status = 'detected';
-    facts.test_id.attribute = used[0];
-  } else facts.test_id.status = 'ambiguous';
+  facts.test_id.status = testIdStatus(
+    facts.test_id,
+    configured,
+    dynamicConfig,
+    scan.status,
+  );
+  if (facts.test_id.status === 'detected')
+    facts.test_id.attribute = Object.keys(facts.test_id.counts).find(
+      (name) => facts.test_id.counts[name] > 0,
+    );
   return facts;
+}
+
+function selectCandidate(candidates, explicit, discoveryPartial) {
+  if (explicit != null) return candidates.includes(explicit) ? explicit : null;
+  if (!discoveryPartial && candidates.length === 1) return candidates[0];
+  return null;
+}
+
+function selectedConfigMode(packagePath, configless, config) {
+  if (packagePath == null) return null;
+  if (configless) return 'configless';
+  return config == null ? null : 'config';
 }
 
 function profileRepository({
@@ -631,14 +672,11 @@ function profileRepository({
     !discoveryPartial
   )
     fail('package-selection-invalid');
-  const packagePath =
-    selectedPackage != null
-      ? packages.includes(selectedPackage)
-        ? selectedPackage
-        : null
-      : !discoveryPartial && packages.length === 1
-        ? packages[0]
-        : null;
+  const packagePath = selectCandidate(
+    packages,
+    selectedPackage,
+    discoveryPartial,
+  );
   const configs =
     packagePath == null
       ? []
@@ -658,26 +696,13 @@ function profileRepository({
     fail('config-selection-invalid');
   const config = configless
     ? null
-    : selectedConfig != null
-      ? configs.includes(selectedConfig)
-        ? selectedConfig
-        : null
-      : !discoveryPartial && configs.length === 1
-        ? configs[0]
-        : null;
-  const status = discoveryPartial
-    ? 'unknown'
-    : packagePath == null
-      ? packages.length === 0
-        ? 'package-unavailable'
-        : 'package-required'
-      : configless
-        ? 'selected'
-        : configs.length > 1 && config == null
-          ? 'config-required'
-          : config == null
-            ? 'config-unavailable'
-            : 'selected';
+    : selectCandidate(configs, selectedConfig, discoveryPartial);
+  let status = 'selected';
+  if (discoveryPartial) status = 'unknown';
+  else if (packagePath == null)
+    status = packages.length === 0 ? 'package-unavailable' : 'package-required';
+  else if (!configless && config == null)
+    status = configs.length > 1 ? 'config-required' : 'config-unavailable';
   const record = records.find((item) => item.path === packagePath);
   const facts =
     status === 'selected' || status === 'config-unavailable'
@@ -691,14 +716,7 @@ function profileRepository({
     selection: {
       status,
       package: packagePath,
-      config_mode:
-        packagePath == null
-          ? null
-          : configless
-            ? 'configless'
-            : config == null
-              ? null
-              : 'config',
+      config_mode: selectedConfigMode(packagePath, configless, config),
       config,
       packages: packages.slice(0, 16),
       configs: configs.slice(0, 16),

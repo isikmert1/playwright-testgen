@@ -163,9 +163,105 @@ function validateNavigation(subcommand, args, policy) {
   return null;
 }
 
-function validateCli(cwd, assignments, args, agentType) {
+function validateCliArguments({
+  cwd,
+  subcommand,
+  args,
+  policy,
+  session,
+  healer,
+}) {
+  if (NAVIGATION_COMMANDS.has(subcommand)) {
+    const result = validateNavigation(subcommand, args, policy);
+    if (result != null) return result;
+  } else if (SIMPLE_COMMANDS.has(subcommand) && args.length !== 0) {
+    return deny(
+      `${subcommand} does not accept arguments in this workflow. Use the command without extra arguments.`,
+    );
+  } else if (
+    subcommand === 'console' &&
+    (args.length > 1 || (args.length === 1 && !CONSOLE_LEVELS.has(args[0])))
+  ) {
+    return deny(
+      'console accepts no argument or one minimum level: error, warning, info, or debug.',
+    );
+  } else if (TARGET_COMMANDS.has(subcommand) && args.length === 0) {
+    return deny(
+      `${subcommand} requires an explicit target or value. Use a ref or verified quoted locator from the current snapshot.`,
+    );
+  } else if (subcommand === 'attach') {
+    if (session !== '' || args.length !== 1 || !DEBUG_SESSION.test(args[0])) {
+      return deny(
+        'attach requires one tw-* identifier. Healer must use the exact identifier captured from its owned runner and invoke it from the run directory.',
+      );
+    }
+  } else if (subcommand === 'find' && args.length === 0) {
+    return deny(
+      'find requires a text or regular-expression query. Use a quoted query from the current scenario.',
+    );
+  } else if (subcommand === 'pause-at') {
+    const approvedSpec = normalizePath(
+      path.relative(policy.repositoryRoot, policy.approvedSpec),
+    );
+    const location =
+      args.length === 1 ? args[0].match(/^(.+):([1-9]\d*)$/u) : null;
+    if (
+      !healer ||
+      !DEBUG_SESSION.test(session) ||
+      location == null ||
+      location[1] !== approvedSpec
+    ) {
+      return deny(
+        `pause-at requires the approved spec and a positive line, for example ${approvedSpec}:42. Use the repository-relative approved spec, not a bare line or another file.`,
+      );
+    }
+  } else if (subcommand === 'snapshot') {
+    const refs = args.filter((value) => SNAPSHOT_REF.test(value));
+    const depths = args.filter((value) => SNAPSHOT_DEPTH.test(value));
+    if (
+      refs.length > 1 ||
+      depths.length > 1 ||
+      args.some(
+        (value) => !SNAPSHOT_REF.test(value) && !SNAPSHOT_DEPTH.test(value),
+      )
+    ) {
+      return deny(
+        'snapshot accepts no target or one current e<number> ref, plus optional --depth=<number>. Use find for text and generate-locator for locator expressions.',
+      );
+    }
+  } else if (subcommand === 'state-load') {
+    const statePath =
+      args.length === 1
+        ? resolveContainedPath(
+            cwd,
+            args[0],
+            policy.repositoryRoot,
+            policy.canonicalRepositoryRoot,
+          )
+        : null;
+    if (
+      statePath == null ||
+      !policy.allowedStatePaths.some(
+        (allowed) =>
+          samePath(allowed.absolute, statePath.absolute) &&
+          samePath(allowed.canonical, statePath.canonical),
+      )
+    ) {
+      return deny(
+        "state-load requires one exact Main-approved state path inside the repository. Ask Main to add the existing run-relative path to allowed_state_paths, or use the repository's normal unauthenticated setup.",
+      );
+    }
+  }
+
+  return null;
+}
+
+function validateCli(cwd, assignments, rawArgs, agentType) {
   const explorer = agentType.endsWith('playwright-test-explorer');
-  if (args.length === 1 && (args[0] === '--help' || args[0] === '--version')) {
+  if (
+    rawArgs.length === 1 &&
+    (rawArgs[0] === '--help' || rawArgs[0] === '--version')
+  ) {
     if (explorer) {
       return deny(
         "Explorer uses Main's passed runtime-preflight result and does not repeat CLI checks.",
@@ -173,7 +269,7 @@ function validateCli(cwd, assignments, args, agentType) {
     }
     if (assignments.length !== 0) {
       return deny(
-        `The read-only playwright-cli ${args[0].slice(2)} check does not accept environment assignments. Run playwright-cli ${args[0]}.`,
+        `The read-only playwright-cli ${rawArgs[0].slice(2)} check does not accept environment assignments. Run playwright-cli ${rawArgs[0]}.`,
       );
     }
     return decision(
@@ -182,8 +278,8 @@ function validateCli(cwd, assignments, args, agentType) {
     );
   }
 
-  const rawCount = args.filter((value) => value === '--raw').length;
-  args = args.filter((value) => value !== '--raw');
+  const rawCount = rawArgs.filter((value) => value === '--raw').length;
+  const args = rawArgs.filter((value) => value !== '--raw');
 
   let session = '';
   if (args[0]?.startsWith('-s=')) {
@@ -282,87 +378,15 @@ function validateCli(cwd, assignments, args, agentType) {
     );
   }
 
-  if (NAVIGATION_COMMANDS.has(subcommand)) {
-    const result = validateNavigation(subcommand, args, loaded.policy);
-    if (result != null) return result;
-  } else if (SIMPLE_COMMANDS.has(subcommand) && args.length !== 0) {
-    return deny(
-      `${subcommand} does not accept arguments in this workflow. Use the command without extra arguments.`,
-    );
-  } else if (
-    subcommand === 'console' &&
-    (args.length > 1 || (args.length === 1 && !CONSOLE_LEVELS.has(args[0])))
-  ) {
-    return deny(
-      'console accepts no argument or one minimum level: error, warning, info, or debug.',
-    );
-  } else if (TARGET_COMMANDS.has(subcommand) && args.length === 0) {
-    return deny(
-      `${subcommand} requires an explicit target or value. Use a ref or verified quoted locator from the current snapshot.`,
-    );
-  } else if (subcommand === 'attach') {
-    if (session !== '' || args.length !== 1 || !DEBUG_SESSION.test(args[0])) {
-      return deny(
-        'attach requires one tw-* identifier. Healer must use the exact identifier captured from its owned runner and invoke it from the run directory.',
-      );
-    }
-  } else if (subcommand === 'find' && args.length === 0) {
-    return deny(
-      'find requires a text or regular-expression query. Use a quoted query from the current scenario.',
-    );
-  } else if (subcommand === 'pause-at') {
-    const approvedSpec = normalizePath(
-      path.relative(loaded.policy.repositoryRoot, loaded.policy.approvedSpec),
-    );
-    const location =
-      args.length === 1 ? args[0].match(/^(.+):([1-9]\d*)$/u) : null;
-    if (
-      !healer ||
-      !DEBUG_SESSION.test(session) ||
-      location == null ||
-      location[1] !== approvedSpec
-    ) {
-      return deny(
-        `pause-at requires the approved spec and a positive line, for example ${approvedSpec}:42. Use the repository-relative approved spec, not a bare line or another file.`,
-      );
-    }
-  } else if (subcommand === 'snapshot') {
-    const refs = args.filter((value) => SNAPSHOT_REF.test(value));
-    const depths = args.filter((value) => SNAPSHOT_DEPTH.test(value));
-    if (
-      refs.length > 1 ||
-      depths.length > 1 ||
-      args.some(
-        (value) => !SNAPSHOT_REF.test(value) && !SNAPSHOT_DEPTH.test(value),
-      )
-    ) {
-      return deny(
-        'snapshot accepts no target or one current e<number> ref, plus optional --depth=<number>. Use find for text and generate-locator for locator expressions.',
-      );
-    }
-  } else if (subcommand === 'state-load') {
-    const statePath =
-      args.length === 1
-        ? resolveContainedPath(
-            cwd,
-            args[0],
-            loaded.policy.repositoryRoot,
-            loaded.policy.canonicalRepositoryRoot,
-          )
-        : null;
-    if (
-      statePath == null ||
-      !loaded.policy.allowedStatePaths.some(
-        (allowed) =>
-          samePath(allowed.absolute, statePath.absolute) &&
-          samePath(allowed.canonical, statePath.canonical),
-      )
-    ) {
-      return deny(
-        "state-load requires one exact Main-approved state path inside the repository. Ask Main to add the existing run-relative path to allowed_state_paths, or use the repository's normal unauthenticated setup.",
-      );
-    }
-  }
+  const argumentResult = validateCliArguments({
+    cwd,
+    subcommand,
+    args,
+    policy: loaded.policy,
+    session,
+    healer,
+  });
+  if (argumentResult != null) return argumentResult;
 
   return decision(
     'allow',
@@ -670,7 +694,6 @@ function validateCleanup(cwd, args, agentType = '') {
   if (
     target == null ||
     ![
-      '',
       '.playwright-cli',
       'attempt-1',
       'attempt-2',

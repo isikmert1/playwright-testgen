@@ -163,6 +163,97 @@ function policyCandidates(cwd, runId) {
   return [...new Set(candidates)];
 }
 
+function hasValidRelativePaths(values, maximum) {
+  return (
+    Array.isArray(values) &&
+    values.length <= maximum &&
+    values.every(
+      (value) =>
+        typeof value === 'string' &&
+        value.length > 0 &&
+        !path.isAbsolute(value),
+    ) &&
+    new Set(values).size === values.length
+  );
+}
+
+function hasValidCommonFields(policy) {
+  return (
+    policy?.format_version === 1 &&
+    hasValidRelativePaths(policy.allowed_state_paths, 4) &&
+    Array.isArray(policy.allowed_origins) &&
+    policy.allowed_origins.length > 0 &&
+    policy.allowed_origins.length <= 8
+  );
+}
+
+function hasValidDiscoveryFields(policy, runId) {
+  const keys = Object.keys(policy);
+  return (
+    [DISCOVERY_POLICY_KEYS.size - 1, DISCOVERY_POLICY_KEYS.size].includes(
+      keys.length,
+    ) &&
+    keys.every((key) => DISCOVERY_POLICY_KEYS.has(key)) &&
+    policy.discovery_id === runId &&
+    Array.isArray(policy.allowed_browser_actions) &&
+    policy.allowed_browser_actions.every((value) =>
+      EXPLORER_ACTIONS.has(value),
+    ) &&
+    new Set(policy.allowed_browser_actions).size ===
+      policy.allowed_browser_actions.length
+  );
+}
+
+function hasValidGenerationFields(policy, runId) {
+  return (
+    policy.policy_kind === undefined &&
+    policy.run_id === runId &&
+    typeof policy.approved_spec === 'string' &&
+    policy.approved_spec.length > 0 &&
+    !path.isAbsolute(policy.approved_spec) &&
+    Array.isArray(policy.allowed_runner_options) &&
+    policy.allowed_runner_options.length <= 2 &&
+    policy.allowed_runner_options.every(
+      (value) =>
+        typeof value === 'string' && /^--(?:config|project)=.+$/u.test(value),
+    ) &&
+    new Set(policy.allowed_runner_options).size ===
+      policy.allowed_runner_options.length &&
+    new Set(
+      policy.allowed_runner_options.map((value) => value.split('=', 1)[0]),
+    ).size === policy.allowed_runner_options.length &&
+    hasValidRelativePaths(policy.allowed_write_paths, 10) &&
+    [undefined, null, '--name', '--phase'].includes(
+      policy.trace_snapshot_option,
+    )
+  );
+}
+
+function resolveExistingFiles(
+  cwd,
+  values,
+  repositoryRoot,
+  canonicalRepositoryRoot,
+) {
+  const files = [];
+  for (const value of values) {
+    const resolved = resolveContainedPath(
+      cwd,
+      value,
+      repositoryRoot,
+      canonicalRepositoryRoot,
+    );
+    if (resolved == null || !existsSync(resolved.absolute)) return null;
+    try {
+      if (!statSync(resolved.absolute).isFile()) return null;
+    } catch {
+      return null;
+    }
+    files.push(resolved);
+  }
+  return files;
+}
+
 function loadPolicy(cwd, runId) {
   if (!RUN_ID.test(runId)) return null;
   const policyPath = policyCandidates(cwd, runId).find(existsSync);
@@ -175,83 +266,12 @@ function loadPolicy(cwd, runId) {
     return null;
   }
 
-  if (
-    policy?.format_version !== 1 ||
-    !Array.isArray(policy.allowed_state_paths) ||
-    policy.allowed_state_paths.length > 4 ||
-    policy.allowed_state_paths.some(
-      (value) =>
-        typeof value !== 'string' ||
-        value.length === 0 ||
-        path.isAbsolute(value),
-    ) ||
-    new Set(policy.allowed_state_paths).size !==
-      policy.allowed_state_paths.length ||
-    !Array.isArray(policy.allowed_origins) ||
-    policy.allowed_origins.length === 0 ||
-    policy.allowed_origins.length > 8
-  ) {
-    return null;
-  }
-
+  if (!hasValidCommonFields(policy)) return null;
   const discovery = policy.policy_kind === 'discovery';
-  if (discovery) {
-    const discoveryKeys = Object.keys(policy);
-    if (
-      ![DISCOVERY_POLICY_KEYS.size - 1, DISCOVERY_POLICY_KEYS.size].includes(
-        discoveryKeys.length,
-      ) ||
-      discoveryKeys.some((key) => !DISCOVERY_POLICY_KEYS.has(key)) ||
-      policy.discovery_id !== runId ||
-      [
-        'approved_spec',
-        'allowed_runner_options',
-        'allowed_write_paths',
-        'run_id',
-        'trace_snapshot_option',
-      ].some((key) => Object.hasOwn(policy, key)) ||
-      !Array.isArray(policy.allowed_browser_actions) ||
-      policy.allowed_browser_actions.some(
-        (value) => !EXPLORER_ACTIONS.has(value),
-      ) ||
-      new Set(policy.allowed_browser_actions).size !==
-        policy.allowed_browser_actions.length
-    ) {
-      return null;
-    }
-  } else if (
-    policy.policy_kind !== undefined ||
-    policy.run_id !== runId ||
-    typeof policy.approved_spec !== 'string' ||
-    policy.approved_spec.length === 0 ||
-    path.isAbsolute(policy.approved_spec) ||
-    !Array.isArray(policy.allowed_runner_options) ||
-    policy.allowed_runner_options.length > 2 ||
-    policy.allowed_runner_options.some(
-      (value) =>
-        typeof value !== 'string' || !/^--(?:config|project)=.+$/u.test(value),
-    ) ||
-    new Set(policy.allowed_runner_options).size !==
-      policy.allowed_runner_options.length ||
-    new Set(
-      policy.allowed_runner_options.map((value) => value.split('=', 1)[0]),
-    ).size !== policy.allowed_runner_options.length ||
-    !Array.isArray(policy.allowed_write_paths) ||
-    policy.allowed_write_paths.length > 10 ||
-    policy.allowed_write_paths.some(
-      (value) =>
-        typeof value !== 'string' ||
-        value.length === 0 ||
-        path.isAbsolute(value),
-    ) ||
-    new Set(policy.allowed_write_paths).size !==
-      policy.allowed_write_paths.length ||
-    ![undefined, null, '--name', '--phase'].includes(
-      policy.trace_snapshot_option,
-    )
-  ) {
-    return null;
-  }
+  const validFields = discovery
+    ? hasValidDiscoveryFields(policy, runId)
+    : hasValidGenerationFields(policy, runId);
+  if (!validFields) return null;
 
   const allowedOrigins = [];
   for (const value of policy.allowed_origins) {
@@ -327,22 +347,13 @@ function loadPolicy(cwd, runId) {
     return null;
   }
 
-  const allowedStatePaths = [];
-  for (const value of policy.allowed_state_paths) {
-    const resolved = resolveContainedPath(
-      runDirectory,
-      value,
-      repositoryRoot,
-      canonicalRepositoryRoot,
-    );
-    if (resolved == null || !existsSync(resolved.absolute)) return null;
-    try {
-      if (!statSync(resolved.absolute).isFile()) return null;
-    } catch {
-      return null;
-    }
-    allowedStatePaths.push(resolved);
-  }
+  const allowedStatePaths = resolveExistingFiles(
+    runDirectory,
+    policy.allowed_state_paths,
+    repositoryRoot,
+    canonicalRepositoryRoot,
+  );
+  if (allowedStatePaths == null) return null;
 
   const common = {
     allowedOrigins,
@@ -373,22 +384,13 @@ function loadPolicy(cwd, runId) {
   );
   if (approvedSpec == null) return null;
 
-  const allowedWritePaths = [];
-  for (const value of policy.allowed_write_paths) {
-    const resolved = resolveContainedPath(
-      repositoryRoot,
-      value,
-      repositoryRoot,
-      canonicalRepositoryRoot,
-    );
-    if (resolved == null || !existsSync(resolved.absolute)) return null;
-    try {
-      if (!statSync(resolved.absolute).isFile()) return null;
-    } catch {
-      return null;
-    }
-    allowedWritePaths.push(resolved);
-  }
+  const allowedWritePaths = resolveExistingFiles(
+    repositoryRoot,
+    policy.allowed_write_paths,
+    repositoryRoot,
+    canonicalRepositoryRoot,
+  );
+  if (allowedWritePaths == null) return null;
 
   return {
     ...common,
