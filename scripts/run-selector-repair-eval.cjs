@@ -12,29 +12,29 @@ const {
 const { tmpdir } = require('node:os');
 const path = require('node:path');
 const { exactPlaywrightFilter } = require('../hooks/run-policy.cjs');
+const { command, executable, runBounded } = require('./eval/process.cjs');
 const {
   buildClaudeArguments,
-  buildHealerPrompt,
+  parseAgentStream,
+} = require('./eval/agent-evidence.cjs');
+const {
   cleanupEvaluation,
-  command,
-  executable,
   findInstalledPlugin,
   hashFile,
   hashFiles,
   marketplaceList,
   normalizedMarketplaceState,
   normalizedPluginState,
-  parseAgentStream,
   pluginList,
   preflight,
   preparePluginSource,
   prepareTarget,
-  runBounded,
   runRuntimePreflight,
   startServer,
   validateArtifact,
   verifyInstalledHook,
-} = require('./run-healer-defect-refusal.cjs');
+} = require('./eval/runtime.cjs');
+const { buildHealerPrompt } = require('./run-healer-defect-refusal.cjs');
 const {
   allTests,
   scorePlaywrightReport,

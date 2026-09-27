@@ -120,13 +120,10 @@ async function windowsProcessTree(rootPid, known = [], onFailure) {
       );
     });
   } catch (error) {
-    onFailure?.(
-      error.killed || error.code === 'ETIMEDOUT'
-        ? 'snapshot-timeout'
-        : typeof error.code === 'number'
-          ? 'snapshot-command-failed'
-          : 'snapshot-spawn-failed',
-    );
+    let reason = 'snapshot-spawn-failed';
+    if (error.killed || error.code === 'ETIMEDOUT') reason = 'snapshot-timeout';
+    else if (typeof error.code === 'number') reason = 'snapshot-command-failed';
+    onFailure?.(reason);
     return null;
   }
   const [root, descendantsText, knownText] = stdout.trim().split('|');

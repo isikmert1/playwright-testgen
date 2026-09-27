@@ -12,28 +12,28 @@ const {
 const { tmpdir } = require('node:os');
 const path = require('node:path');
 const { exactPlaywrightFilter } = require('../hooks/run-policy.cjs');
+const { command, executable, runBounded } = require('./eval/process.cjs');
 const {
   buildClaudeArguments,
-  cleanupEvaluation,
-  command,
   evaluationFailure,
-  executable,
+  parseAgentStream,
+} = require('./eval/agent-evidence.cjs');
+const {
+  cleanupEvaluation,
   findInstalledPlugin,
   hashFile,
   marketplaceList,
   normalizedMarketplaceState,
   normalizedPluginState,
-  parseAgentStream,
   pluginList,
   preflight,
   preparePluginSource,
   prepareTarget,
-  runBounded,
   runRuntimePreflight,
   startServer,
   validateArtifact,
   verifyInstalledHook,
-} = require('./run-healer-defect-refusal.cjs');
+} = require('./eval/runtime.cjs');
 
 const root = path.resolve(__dirname, '..');
 const casePath = path.join(
@@ -70,15 +70,15 @@ function assistantTools(output) {
 
 function authorExecutionAttempts(output) {
   return assistantTools(output).filter((block) => {
-    const command = ['Bash', 'PowerShell'].includes(block.name)
+    const commandText = ['Bash', 'PowerShell'].includes(block.name)
       ? block.input?.command
       : null;
     return (
-      typeof command === 'string' &&
-      ((/\bplaywright\s+test\b/iu.test(command) &&
-        !/--list\b/u.test(command)) ||
+      typeof commandText === 'string' &&
+      ((/\bplaywright\s+test\b/iu.test(commandText) &&
+        !/--list\b/u.test(commandText)) ||
         /\b(?:npm|yarn|pnpm|bun)\s+(?:run\s+)?test(?::[\w-]+)?\b/iu.test(
-          command,
+          commandText,
         ))
     );
   }).length;

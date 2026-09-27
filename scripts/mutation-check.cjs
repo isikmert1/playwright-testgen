@@ -64,15 +64,28 @@ function verify(values, signal) {
       '--approval-digest',
     ]),
   );
-  return verifyMutation(
-    options['--repo'] ?? process.cwd(),
-    options['--run-id'],
-    options['--adapter'],
-    options['--mutation-id'],
-    options['--criterion-id'],
-    options['--approval-digest'],
+  return verifyMutation({
+    repository: options['--repo'] ?? process.cwd(),
+    runId: options['--run-id'],
+    adapter: options['--adapter'],
+    mutationId: options['--mutation-id'],
+    criterionId: options['--criterion-id'],
+    approvalDigest: options['--approval-digest'],
     signal,
-  );
+  });
+}
+
+function executeOperation(operation, values, signal) {
+  switch (operation) {
+    case 'capture':
+      return capture(values);
+    case 'digest':
+      return digest(values);
+    case 'verify':
+      return verify(values, signal);
+    default:
+      throw new MutationCheckError('invalid-operation');
+  }
 }
 
 async function main(argv = process.argv.slice(2)) {
@@ -91,15 +104,7 @@ async function main(argv = process.argv.slice(2)) {
     process.on('SIGTERM', cancel);
   }
   try {
-    const result = await (operation === 'capture'
-      ? capture(argv)
-      : operation === 'digest'
-        ? digest(argv)
-        : operation === 'verify'
-          ? verify(argv, controller.signal)
-          : (() => {
-              throw new MutationCheckError('invalid-operation');
-            })());
+    const result = await executeOperation(operation, argv, controller?.signal);
     const ok = result.status !== 'verification-error';
     process.stdout.write(`${JSON.stringify({ ok, operation, ...result })}\n`);
     if (!ok) process.exitCode = 1;

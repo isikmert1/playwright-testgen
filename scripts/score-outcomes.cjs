@@ -38,9 +38,10 @@ function datasetDigest() {
     }
   }
   for (const directory of [
-    ...cases.map(([directory]) => `evals/cases/${directory}`),
+    ...cases.map(([caseDirectory]) => `evals/cases/${caseDirectory}`),
     'evals/seeded-bugs',
     'evals/targets/semantic-only',
+    'scripts/eval',
   ])
     add(directory);
   files.push(
@@ -245,8 +246,13 @@ function cohortRevision(attempts, currentRevision) {
   return attempts[0]?.testgen_revision ?? currentRevision;
 }
 
-function summarizeOutcomeTrials(caseDefinitions, attempts, digest, revision) {
-  attempts = attempts.map((trial) =>
+function summarizeOutcomeTrials(
+  caseDefinitions,
+  rawAttempts,
+  digest,
+  revision,
+) {
+  const attempts = rawAttempts.map((trial) =>
     trial.dataset_sha256 === digest
       ? trial
       : {

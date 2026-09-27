@@ -12,13 +12,12 @@ const {
 const { tmpdir } = require('node:os');
 const path = require('node:path');
 const { exactPlaywrightFilter } = require('../hooks/run-policy.cjs');
+const { command, runBounded } = require('./eval/process.cjs');
 const {
   cleanupEvaluation,
-  command,
   hashFile,
-  runBounded,
   startServer,
-} = require('./run-healer-defect-refusal.cjs');
+} = require('./eval/runtime.cjs');
 
 const root = path.resolve(__dirname, '..');
 const casePath = path.join(
