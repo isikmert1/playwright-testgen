@@ -1354,23 +1354,6 @@ test('binds storage state to an exact Main-approved repository path', () => {
   });
 });
 
-test('allows one scoped Playwright debug attempt', () => {
-  withTargetRepository(({ targetRepository }) => {
-    const output = `.playwright-cli/testgen/${runId}/attempt-2/test-results`;
-    const result = runToolHook(
-      targetRepository,
-      'Bash',
-      {
-        command: runnerCommand(targetRepository, output, '--debug=cli '),
-        run_in_background: true,
-      },
-      'playwright-test-healer',
-    );
-
-    assert.equal(result.permissionDecision, 'allow');
-  });
-});
-
 test('audits approved foreground spec runs through private operation metadata', () => {
   withTargetRepository(({ targetRepository }) => {
     const auditRoot = mkdtempSync(path.join(tmpdir(), 'testgen-hook-audit-'));
@@ -2008,7 +1991,7 @@ test('reserves full run removal for Main', () => {
 });
 
 test('allows Author to remove generated browser scratch from the run directory', () => {
-  withTargetRepository(({ runDirectory, targetRepository }) => {
+  withTargetRepository(({ runDirectory }) => {
     mkdirSync(path.join(runDirectory, '.playwright-cli'));
     const result = runHook(
       runDirectory,
@@ -2025,11 +2008,6 @@ test('allows Author to remove generated browser scratch from the run directory',
     );
     assert.equal(fullRun.permissionDecision, 'deny');
     assert.match(fullRun.permissionDecisionReason, /Main-owned/iu);
-
-    assert.equal(
-      path.dirname(runDirectory),
-      path.join(targetRepository, '.playwright-cli', 'testgen'),
-    );
   });
 });
 

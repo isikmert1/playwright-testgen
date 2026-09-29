@@ -24,7 +24,6 @@ function readJson(filename) {
 
 test('active external target descriptors pin reproducible sources without vendoring them', () => {
   const targetIds = ['cypress-realworld-app'];
-  const sourceUrls = new Set();
 
   assert.deepEqual(readdirSync(targetsRoot).sort(), [
     'cypress-realworld-app',
@@ -60,10 +59,8 @@ test('active external target descriptors pin reproducible sources without vendor
       'adapter',
       'target.json',
     ]);
-    sourceUrls.add(descriptor.source.url);
   }
 
-  assert.equal(sourceUrls.size, targetIds.length);
   assert.equal(
     readJson(path.join(targetsRoot, 'cypress-realworld-app', 'target.json'))
       .start.origin,

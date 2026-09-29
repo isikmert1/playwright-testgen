@@ -17,36 +17,7 @@ const {
   validateStringArray,
 } = require('./artifact-validation-common.cjs');
 
-function validateHandoff(artifact, repository, errors) {
-  const required = [
-    'schema_version',
-    'run_id',
-    'scenario_ref',
-    'spec_path',
-    'criteria',
-    'locators',
-    'test_id_convention',
-    'test_id_additions',
-    'lint',
-    'test_data_strategy',
-    'touched_paths',
-    'assumptions',
-    'open_questions',
-  ];
-  const allowed = new Set(required);
-  requireFields(artifact, required, errors, 'handoff');
-  rejectUnknown(artifact, allowed, errors, 'handoff');
-  if (artifact.schema_version !== 'author-handoff.v1')
-    errors.push('handoff-schema-version');
-  if (!isText(artifact.scenario_ref, 160))
-    errors.push('handoff-invalid-scenario-ref');
-  validatePath(artifact.spec_path, repository, errors, 'handoff-spec');
-  if (
-    isRepoPath(artifact.spec_path) &&
-    !isFile(path.resolve(repository, artifact.spec_path))
-  ) {
-    errors.push('handoff-spec-unavailable');
-  }
+function validateCriteria(artifact, repository, errors) {
   if (
     !Array.isArray(artifact.criteria) ||
     artifact.criteria.length < 1 ||
@@ -120,6 +91,9 @@ function validateHandoff(artifact, repository, errors) {
         errors.push('handoff-invalid-outcome');
     }
   }
+}
+
+function validateLocators(artifact, errors) {
   if (!Array.isArray(artifact.locators) || artifact.locators.length > 40) {
     errors.push('handoff-invalid-locators');
   } else {
@@ -159,8 +133,9 @@ function validateHandoff(artifact, repository, errors) {
         errors.push('handoff-test-id-locator-without-convention');
     }
   }
-  if (!isAttributeName(artifact.test_id_convention))
-    errors.push('handoff-invalid-test-id-convention');
+}
+
+function validateTestIdAdditions(artifact, repository, errors) {
   if (
     !Array.isArray(artifact.test_id_additions) ||
     artifact.test_id_additions.length > 10
@@ -221,44 +196,38 @@ function validateHandoff(artifact, repository, errors) {
       additions.add(additionKey);
     }
   }
-  if (!isObject(artifact.lint)) {
+}
+
+function validateLint(lint, errors) {
+  if (!isObject(lint)) {
     errors.push('handoff-invalid-lint');
   } else {
-    requireFields(
-      artifact.lint,
-      ['command', 'status', 'diagnostics'],
-      errors,
-      'lint',
-    );
+    requireFields(lint, ['command', 'status', 'diagnostics'], errors, 'lint');
     rejectUnknown(
-      artifact.lint,
+      lint,
       new Set(['command', 'status', 'diagnostics']),
       errors,
       'lint',
     );
-    if (!isText(artifact.lint.command, 160))
-      errors.push('handoff-invalid-lint-command');
-    if (
-      !['pass', 'fixed', 'failed', 'command-failed'].includes(
-        artifact.lint.status,
-      )
-    )
+    if (!isText(lint.command, 160)) errors.push('handoff-invalid-lint-command');
+    if (!['pass', 'fixed', 'failed', 'command-failed'].includes(lint.status))
       errors.push('handoff-invalid-lint-status');
     validateStringArray(
-      artifact.lint.diagnostics,
+      lint.diagnostics,
       10,
       200,
       errors,
       'handoff-lint-diagnostics',
     );
     if (
-      ['failed', 'command-failed'].includes(artifact.lint.status) &&
-      artifact.lint.diagnostics?.length === 0
+      ['failed', 'command-failed'].includes(lint.status) &&
+      lint.diagnostics?.length === 0
     )
       errors.push('handoff-missing-lint-diagnostics');
   }
-  if (!isText(artifact.test_data_strategy, 160))
-    errors.push('handoff-invalid-test-data-strategy');
+}
+
+function validateTouchedPaths(artifact, repository, errors) {
   validateStringArray(
     artifact.touched_paths,
     20,
@@ -285,6 +254,47 @@ function validateHandoff(artifact, repository, errors) {
         errors.push('handoff-touched-not-file');
     }
   }
+}
+
+function validateHandoff(artifact, repository, errors) {
+  const required = [
+    'schema_version',
+    'run_id',
+    'scenario_ref',
+    'spec_path',
+    'criteria',
+    'locators',
+    'test_id_convention',
+    'test_id_additions',
+    'lint',
+    'test_data_strategy',
+    'touched_paths',
+    'assumptions',
+    'open_questions',
+  ];
+  const allowed = new Set(required);
+  requireFields(artifact, required, errors, 'handoff');
+  rejectUnknown(artifact, allowed, errors, 'handoff');
+  if (artifact.schema_version !== 'author-handoff.v1')
+    errors.push('handoff-schema-version');
+  if (!isText(artifact.scenario_ref, 160))
+    errors.push('handoff-invalid-scenario-ref');
+  validatePath(artifact.spec_path, repository, errors, 'handoff-spec');
+  if (
+    isRepoPath(artifact.spec_path) &&
+    !isFile(path.resolve(repository, artifact.spec_path))
+  ) {
+    errors.push('handoff-spec-unavailable');
+  }
+  validateCriteria(artifact, repository, errors);
+  validateLocators(artifact, errors);
+  if (!isAttributeName(artifact.test_id_convention))
+    errors.push('handoff-invalid-test-id-convention');
+  validateTestIdAdditions(artifact, repository, errors);
+  validateLint(artifact.lint, errors);
+  if (!isText(artifact.test_data_strategy, 160))
+    errors.push('handoff-invalid-test-data-strategy');
+  validateTouchedPaths(artifact, repository, errors);
   validateStringArray(
     artifact.assumptions,
     10,

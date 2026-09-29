@@ -25,7 +25,12 @@ const caseDirectory = path.join(
 
 function modules() {
   return {
-    runner: require('../scripts/run-healer-defect-refusal.cjs'),
+    runner: {
+      ...require('../scripts/eval/process.cjs'),
+      ...require('../scripts/eval/agent-evidence.cjs'),
+      ...require('../scripts/eval/runtime.cjs'),
+      ...require('../scripts/run-healer-defect-refusal.cjs'),
+    },
     scorer: require('../scripts/score-healer-defect-refusal.cjs'),
   };
 }
@@ -243,11 +248,19 @@ test('prepares an exact-revision plugin source without evaluation answers', asyn
       'benchmarks',
       'scripts/run-healer-defect-refusal.cjs',
       'scripts/score-healer-defect-refusal.cjs',
+      'scripts/eval',
     ])
       assert.equal(existsSync(path.join(source, relative)), false, relative);
     assert.doesNotThrow(() => assertPluginBlind(source));
 
     mkdirSync(path.join(source, 'evals'));
+    assert.throws(
+      () => assertPluginBlind(source),
+      /installed-evaluation-material/u,
+    );
+    rmSync(path.join(source, 'evals'), { recursive: true });
+    mkdirSync(path.join(source, 'scripts', 'eval'));
+    writeFileSync(path.join(source, 'scripts', 'eval', 'runtime.cjs'), '');
     assert.throws(
       () => assertPluginBlind(source),
       /installed-evaluation-material/u,
@@ -277,6 +290,7 @@ test('rejects an installed plugin with a stale access policy', () => {
     'scripts/score-outcomes.cjs',
     'scripts/score-selector-repair.cjs',
     'scripts/windows-process-tree.cjs',
+    'scripts/eval',
   ]);
   try {
     cpSync(repositoryRoot, source, {
@@ -1509,7 +1523,7 @@ test(
       "childProcess.spawnSync=(name,args,options)=>name==='powershell.exe'?(Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,6500),{status:0,stdout:'1||'}):spawnSync(name,args,options);",
       'const execFile=childProcess.execFile;',
       "childProcess.execFile=(name,args,options,callback)=>name==='powershell.exe'?undefined:execFile(name,args,options,callback);",
-      "const {runBounded}=require('./scripts/run-healer-defect-refusal.cjs');",
+      "const {runBounded}=require('./scripts/eval/process.cjs');",
       'const started=Date.now();',
       "runBounded(process.execPath,['-e','setInterval(()=>{},1000)'],{cwd:process.cwd(),env:process.env,timeout_ms:50}).then(result=>{let childAlive;try{process.kill(childPid,0);childAlive=true}catch{childAlive=false}process.stdout.write(JSON.stringify({elapsed:Date.now()-started,timed_out:result.timed_out,tree_cleanup_failed:result.tree_cleanup_failed,child_alive:childAlive}))});",
     ].join('');
@@ -1560,7 +1574,7 @@ test(
       "const childProcess=require('node:child_process');",
       'const execFile=childProcess.execFile;',
       "childProcess.execFile=(name,args,options,callback)=>name==='powershell.exe'?setTimeout(()=>callback(null,'0||',''),2500):execFile(name,args,options,callback);",
-      "const {command}=require('./scripts/run-healer-defect-refusal.cjs');",
+      "const {command}=require('./scripts/eval/process.cjs');",
       "command(process.execPath,['-e',''],{cwd:process.cwd(),timeout_ms:1500}).then(()=>process.stdout.write('passed'),error=>process.stdout.write(error.code));",
     ].join('');
     const result = spawnSync(process.execPath, ['-e', script], {
@@ -1581,7 +1595,7 @@ test(
     const script = [
       "const childProcess=require('node:child_process');",
       "childProcess.execFile=(name,args,options,callback)=>name==='powershell.exe'?callback(Object.assign(new Error('private process output'),{code:'ETIMEDOUT'}),'',''):undefined;",
-      "const {command}=require('./scripts/run-healer-defect-refusal.cjs');",
+      "const {command}=require('./scripts/eval/process.cjs');",
       "command(process.execPath,['-e',''],{timeout_ms:1000}).then(()=>process.exit(2),error=>process.stdout.write(JSON.stringify({code:error.code,details:error.details})));",
     ].join('');
     const result = spawnSync(process.execPath, ['-e', script], {
@@ -1606,7 +1620,7 @@ test(
       "const tree=require('./scripts/windows-process-tree.cjs');",
       'let calls=0;',
       'tree.windowsProcessTree=()=>({root_exists:++calls===1,descendants:[],known_running:[]});',
-      "const {stopProcessTree}=require('./scripts/run-healer-defect-refusal.cjs');",
+      "const {stopProcessTree}=require('./scripts/eval/process.cjs');",
       'const diagnostics={};',
       'stopProcessTree({pid:2147483647,kill(){}},diagnostics).then(stopped=>process.stdout.write(JSON.stringify({stopped,reason:diagnostics.reason??null})));',
     ].join('');
@@ -1632,7 +1646,7 @@ test(
       "const tree=require('./scripts/windows-process-tree.cjs');",
       'let calls=0;',
       "tree.windowsProcessTree=()=>{if(++calls>1)throw new Error('redundant snapshot');return {root_exists:false,descendants:[],known_running:[]}};",
-      "const {stopProcessTree}=require('./scripts/run-healer-defect-refusal.cjs');",
+      "const {stopProcessTree}=require('./scripts/eval/process.cjs');",
       'stopProcessTree({pid:2147483647,kill(){}},{}).then(stopped=>process.stdout.write(JSON.stringify({stopped,calls})));',
     ].join('');
     const result = spawnSync(process.execPath, ['-e', script], {
@@ -1709,7 +1723,7 @@ test('reports an empty descendant response without terminating the test process'
     delete env.NODE_TEST_CONTEXT;
     writeFileSync(
       preload,
-      `require(${JSON.stringify(require.resolve('../scripts/run-healer-defect-refusal.cjs'))}).runBounded = async () => ({ output: '', status: null });\n`,
+      `require(${JSON.stringify(require.resolve('../scripts/eval/process.cjs'))}).runBounded = async () => ({ output: '', status: null });\n`,
     );
     const result = spawnSync(
       process.execPath,

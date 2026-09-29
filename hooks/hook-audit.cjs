@@ -34,14 +34,17 @@ function auditDecision(payload, result, hookPath, operation = 'other') {
     const temporaryRoot = realpathSync(tmpdir());
     const parent = realpathSync(path.dirname(path.resolve(filename)));
     if (!isInside(temporaryRoot, parent)) return false;
-    const agentType = [
-      'playwright-test-healer',
-      'playwright-testgen:playwright-test-healer',
-    ].includes(payload.agent_type)
-      ? payload.agent_type
-      : typeof payload.agent_type === 'string'
-        ? 'other'
-        : null;
+    let agentType = null;
+    if (
+      [
+        'playwright-test-healer',
+        'playwright-testgen:playwright-test-healer',
+      ].includes(payload.agent_type)
+    ) {
+      agentType = payload.agent_type;
+    } else if (typeof payload.agent_type === 'string') {
+      agentType = 'other';
+    }
     const record = {
       schema_version: 'testgen-hook-audit.v1',
       agent_type: agentType,

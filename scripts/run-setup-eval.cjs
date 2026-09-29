@@ -18,12 +18,11 @@ const {
   approvedTrial,
   executeCandidate,
 } = require('./run-generation-candidate.cjs');
+const { executable, runBounded } = require('./eval/process.cjs');
 const {
   buildClaudeArguments,
-  executable,
   parseAgentStream,
-  runBounded,
-} = require('./run-healer-defect-refusal.cjs');
+} = require('./eval/agent-evidence.cjs');
 const { validateProfile } = require('./setup-profile.cjs');
 const { readTrial } = require('./score-outcomes.cjs');
 
@@ -63,15 +62,13 @@ function scoreSetupTrial(trialId) {
     },
   ]);
   const inputValid = trial.dataset_sha256 === setupDatasetDigest();
+  let status = 'incomplete';
+  if (inputValid && result.setup != null && trial.complete)
+    status = trial.passed ? 'passed' : 'failed';
   return {
     case_id: definition.case_id,
     trial_id: trialId,
-    status:
-      inputValid && result.setup != null && trial.complete
-        ? trial.passed
-          ? 'passed'
-          : 'failed'
-        : 'incomplete',
+    status,
     first_try: trial.first_try,
     criterion_review: trial.criterion_review,
     setup_facts: result.setup?.facts ?? null,

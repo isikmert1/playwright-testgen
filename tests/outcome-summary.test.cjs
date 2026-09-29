@@ -16,12 +16,23 @@ const definitions = [
   { case_id: 'refusal', kind: 'product-defect-refusal', planned_trials: 2 },
 ];
 
-function trial(caseId, index, passed = true) {
+function trial(caseId, index) {
+  const caseMetrics = {
+    generation: {
+      first_try: 'pass',
+      criterion_review: 'approved',
+      locator_policy: true,
+      assertion_specificity: true,
+      mutation_eligibility: 'adapter-absent',
+    },
+    repair: { healer_attempts: 2, classification: 'selector-drift' },
+    refusal: { classification: 'product-behavior-wrong' },
+  };
   return {
     case_id: caseId,
     trial_id: `trial-${caseId}-${index}`,
     complete: true,
-    passed,
+    passed: true,
     cost_usd: 0.1,
     duration_ms: 1000,
     testgen_revision: 'revision',
@@ -35,20 +46,7 @@ function trial(caseId, index, passed = true) {
       playwright_cli: '0.1.19',
       platform: 'win32',
     },
-    ...(caseId === 'generation'
-      ? {
-          first_try: passed ? 'pass' : 'fail',
-          criterion_review: passed ? 'approved' : 'rejected',
-          locator_policy: passed,
-          assertion_specificity: passed,
-          mutation_eligibility: 'adapter-absent',
-        }
-      : caseId === 'repair'
-        ? {
-            healer_attempts: 2,
-            classification: passed ? 'selector-drift' : null,
-          }
-        : { classification: passed ? 'product-behavior-wrong' : null }),
+    ...caseMetrics[caseId],
   };
 }
 

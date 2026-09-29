@@ -5,7 +5,7 @@
   "mutation_id": "skip-order-insert",
   "criterion_id": "order-appears-in-table",
   "patch_path": "evals/targets/semantic-only/repository/.testgen/mutations/skip-order-insert.patch",
-  "definition_digest": "291802d5131456045be2335011ff2c3a28d4fc73c12f9f78483c5c167ccc640c",
+  "definition_digest": "82d86c07bb8337c6e17ec6859b2f2a7be9cc491435feab543d0c91217fdd76c2",
   "behavior": "Submitting an order adds its item and quantity to the orders table.",
   "triggering_check": "The generated spec submits an order and asserts its row values.",
   "expected_classification": "product-behavior-wrong"

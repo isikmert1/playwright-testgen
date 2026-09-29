@@ -281,7 +281,7 @@ function runAdapterProcess(runner, args, options) {
   });
 }
 
-async function runAdapter(
+async function runAdapter({
   worktree,
   parsed,
   mutation,
@@ -289,7 +289,7 @@ async function runAdapter(
   spec,
   phase,
   signal,
-) {
+}) {
   const runner = path.join(worktree, parsed.runner.relative);
   const result = await runAdapterProcess(
     runner,
@@ -408,15 +408,15 @@ function resultBase(parsed, mutation, digest) {
   };
 }
 
-async function verifyMutation(
-  repositoryInput,
+async function verifyMutation({
+  repository: repositoryInput,
   runId,
-  adapterInput,
+  adapter: adapterInput,
   mutationId,
   criterionId,
   approvalDigest,
   signal,
-) {
+}) {
   const { policy, repository } = resolveRun(repositoryInput, runId);
   if (existsSync(recoveryRecordPath(policy)))
     fail('isolation-recovery-pending');
@@ -514,15 +514,15 @@ async function verifyMutation(
     ]);
     copyOverlay(repository, worktree, overlay.entries);
     const beforeBaseline = captureSnapshot(worktree, runId);
-    const baseline = await runAdapter(
+    const baseline = await runAdapter({
       worktree,
       parsed,
       mutation,
-      criterion.step_title,
-      overlay.approvedSpec,
-      'baseline',
+      stepTitle: criterion.step_title,
+      spec: overlay.approvedSpec,
+      phase: 'baseline',
       signal,
-    );
+    });
     baselineOutcome = baseline.outcome;
     diagnostics = runnerDiagnostics(baseline);
     if (
@@ -550,15 +550,15 @@ async function verifyMutation(
       fail('mutation-path-mismatch');
 
     const beforeMutant = captureSnapshot(worktree, runId);
-    const mutant = await runAdapter(
+    const mutant = await runAdapter({
       worktree,
       parsed,
       mutation,
-      criterion.step_title,
-      overlay.approvedSpec,
-      'mutant',
+      stepTitle: criterion.step_title,
+      spec: overlay.approvedSpec,
+      phase: 'mutant',
       signal,
-    );
+    });
     mutantOutcome = mutant.outcome;
     diagnostics = runnerDiagnostics(mutant);
     if (

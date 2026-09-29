@@ -341,7 +341,7 @@ function writeApprovedCandidate(repository, runDirectory) {
 }
 
 function commitAdapter(repository, adapterPath) {
-  const digest = run(repository, [
+  const digestResult = run(repository, [
     'digest',
     '--repo',
     '.',
@@ -350,8 +350,8 @@ function commitAdapter(repository, adapterPath) {
     '--mutation-id',
     'disable-save',
   ]);
-  assert.equal(digest.status, 0, digest.stderr);
-  const definitionDigest = JSON.parse(digest.stdout).definition_digest;
+  assert.equal(digestResult.status, 0, digestResult.stderr);
+  const definitionDigest = JSON.parse(digestResult.stdout).definition_digest;
   const adapter = JSON.parse(readFileSync(adapterPath, 'utf8'));
   adapter.mutations[0].definition_digest = definitionDigest;
   writeFileSync(adapterPath, JSON.stringify(adapter));
@@ -496,7 +496,7 @@ test('attributes approved Author and Healer changes at each boundary', () => {
 test('binds adapter metadata, runner, and patch content to one digest', () => {
   withRepository(({ repository }) => {
     const adapterPath = writeAdapter(repository);
-    const digest = run(repository, [
+    const digestResult = run(repository, [
       'digest',
       '--repo',
       '.',
@@ -506,8 +506,8 @@ test('binds adapter metadata, runner, and patch content to one digest', () => {
       'disable-save',
     ]);
 
-    assert.equal(digest.status, 0, digest.stderr);
-    const first = JSON.parse(digest.stdout);
+    assert.equal(digestResult.status, 0, digestResult.stderr);
+    const first = JSON.parse(digestResult.stdout);
     assert.equal(first.adapter_id, 'account-fixture');
     assert.equal(first.mutation_id, 'disable-save');
     assert.equal(first.criterion_id, 'criterion-1');
@@ -1494,15 +1494,15 @@ test('cancels an active runner and removes its isolation', async () => {
     const definitionDigest = commitAdapter(repository, adapterPath);
     capturePassingRun(repository, runDirectory);
     const controller = new AbortController();
-    const verification = verifyMutation(
+    const verification = verifyMutation({
       repository,
       runId,
-      path.relative(repository, adapterPath),
-      'disable-save',
-      'criterion-1',
-      definitionDigest,
-      controller.signal,
-    );
+      adapter: path.relative(repository, adapterPath),
+      mutationId: 'disable-save',
+      criterionId: 'criterion-1',
+      approvalDigest: definitionDigest,
+      signal: controller.signal,
+    });
     for (let attempt = 0; attempt < 40 && !existsSync(pidFile); attempt += 1)
       await delay(50);
     assert.equal(existsSync(pidFile), true);

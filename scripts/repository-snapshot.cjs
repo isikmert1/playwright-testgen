@@ -44,7 +44,9 @@ function isRunScratch(relativePath, runId) {
 function comparePaths(left, right) {
   const first = comparablePath(left);
   const second = comparablePath(right);
-  return first < second ? -1 : first > second ? 1 : 0;
+  if (first < second) return -1;
+  if (first > second) return 1;
+  return 0;
 }
 
 function hashRegularFile(filename, prefix) {

@@ -289,6 +289,68 @@ function searchMayReachExcludedPath(policy, root, excludesPath) {
   return false;
 }
 
+function validateRoleArtifactWrite(payload, policies, absolute, canonical) {
+  for (const policy of policies) {
+    for (const [filename, owner] of [
+      ['handoff.json', 'playwright-test-author'],
+      ['healer-trace.json', 'playwright-test-healer'],
+    ]) {
+      const expected = path.join(policy.runDirectory, filename);
+      const canonicalExpected = path.join(
+        policy.canonicalRunDirectory,
+        filename,
+      );
+      const exact =
+        samePath(absolute, expected) &&
+        (!existsSync(absolute) || samePath(canonical, canonicalExpected));
+      const aliasesArtifact =
+        exact || sameFile(expected, absolute) || sameFile(expected, canonical);
+      if (!aliasesArtifact) continue;
+      if (!exact || !payload.agent_type.endsWith(owner)) {
+        return deny(
+          'This run artifact belongs to the other role or an aliased path. Mutate only the exact role-owned artifact: Author owns handoff.json and Healer owns healer-trace.json.',
+        );
+      }
+      if (filename === 'healer-trace.json') {
+        let traceStats;
+        try {
+          traceStats = statSync(absolute);
+        } catch {
+          return deny(
+            'The declared healer-trace.json draft is unavailable. Return to Main instead of creating another trace path.',
+          );
+        }
+        if (!traceStats.isFile() || traceStats.size > 64 * 1024) {
+          return deny(
+            'The declared healer-trace.json draft must be a regular file no larger than 64 KiB. Return to Main instead of reading or replacing it.',
+          );
+        }
+        if (payload.tool_name !== 'Write') {
+          return deny(
+            'Replace the declared healer-trace.json with one whole-file Write containing the complete artifact; do not patch it with Edit.',
+          );
+        }
+        const content = payload.tool_input.content;
+        if (
+          typeof content !== 'string' ||
+          content.length === 0 ||
+          Buffer.byteLength(content, 'utf8') > 64 * 1024
+        ) {
+          return deny(
+            'Healer trace writes must contain one complete artifact no larger than 64 KiB.',
+          );
+        }
+      }
+      return decision(
+        'allow',
+        'Mutation is bound to the exact role-owned Testgen artifact.',
+      );
+    }
+  }
+
+  return null;
+}
+
 function validateFileAccess(payload) {
   const filePath = payload?.tool_input?.file_path;
   if (typeof filePath !== 'string' || filePath.length === 0) {
@@ -430,63 +492,13 @@ function validateFileAccess(payload) {
 
   if (payload.tool_name === 'Read') return {};
 
-  for (const policy of generationPolicies) {
-    for (const [filename, owner] of [
-      ['handoff.json', 'playwright-test-author'],
-      ['healer-trace.json', 'playwright-test-healer'],
-    ]) {
-      const expected = path.join(policy.runDirectory, filename);
-      const canonicalExpected = path.join(
-        policy.canonicalRunDirectory,
-        filename,
-      );
-      const exact =
-        samePath(absolute, expected) &&
-        (!existsSync(absolute) || samePath(canonical, canonicalExpected));
-      const aliasesArtifact =
-        exact || sameFile(expected, absolute) || sameFile(expected, canonical);
-      if (!aliasesArtifact) continue;
-      if (!exact || !payload.agent_type.endsWith(owner)) {
-        return deny(
-          'This run artifact belongs to the other role or an aliased path. Mutate only the exact role-owned artifact: Author owns handoff.json and Healer owns healer-trace.json.',
-        );
-      }
-      if (filename === 'healer-trace.json') {
-        let traceStats;
-        try {
-          traceStats = statSync(absolute);
-        } catch {
-          return deny(
-            'The declared healer-trace.json draft is unavailable. Return to Main instead of creating another trace path.',
-          );
-        }
-        if (!traceStats.isFile() || traceStats.size > 64 * 1024) {
-          return deny(
-            'The declared healer-trace.json draft must be a regular file no larger than 64 KiB. Return to Main instead of reading or replacing it.',
-          );
-        }
-        if (payload.tool_name !== 'Write') {
-          return deny(
-            'Replace the declared healer-trace.json with one whole-file Write containing the complete artifact; do not patch it with Edit.',
-          );
-        }
-        const content = payload.tool_input.content;
-        if (
-          typeof content !== 'string' ||
-          content.length === 0 ||
-          Buffer.byteLength(content, 'utf8') > 64 * 1024
-        ) {
-          return deny(
-            'Healer trace writes must contain one complete artifact no larger than 64 KiB.',
-          );
-        }
-      }
-      return decision(
-        'allow',
-        'Mutation is bound to the exact role-owned Testgen artifact.',
-      );
-    }
-  }
+  const artifactWrite = validateRoleArtifactWrite(
+    payload,
+    generationPolicies,
+    absolute,
+    canonical,
+  );
+  if (artifactWrite != null) return artifactWrite;
 
   if (
     (runIdFromOwnedPath(lexical) != null &&

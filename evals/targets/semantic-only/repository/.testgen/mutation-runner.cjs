@@ -98,7 +98,6 @@ function startServer(repository) {
     windowsHide: true,
   });
   return new Promise((resolve, reject) => {
-    let timer;
     const removeListeners = () => {
       clearTimeout(timer);
       child.removeAllListeners('error');
@@ -114,7 +113,7 @@ function startServer(repository) {
       }
       reject(new Error('server-unavailable'));
     };
-    timer = setTimeout(unavailable, 5000);
+    const timer = setTimeout(unavailable, 5000);
     child.once('error', unavailable);
     child.once('exit', unavailable);
     child.once('message', (message) => {

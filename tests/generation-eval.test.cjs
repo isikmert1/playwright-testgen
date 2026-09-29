@@ -8,9 +8,7 @@ const {
   authorProfileAccessAttempts,
   authorPrompt,
 } = require('../scripts/run-generation-eval.cjs');
-const {
-  cleanupEvaluation,
-} = require('../scripts/run-healer-defect-refusal.cjs');
+const { cleanupEvaluation } = require('../scripts/eval/runtime.cjs');
 
 test('generation prompt carries only scenario facts and stops at the checkpoint', () => {
   const definition = JSON.parse(

@@ -46,132 +46,96 @@ function validateProductEvidence(value, criteria, errors) {
   }
 }
 
-function validateTrace(artifact, repository, healerInput, errors) {
-  const criteria = Array.isArray(healerInput?.criteria)
-    ? new Map(
-        healerInput.criteria.map((criterion) => [
-          criterion.id,
-          criterion.outcome,
-        ]),
-      )
-    : null;
-  const required = [
-    'schema_version',
-    'run_id',
-    'spec_path',
-    'healer_input_read',
-    'attempts',
-    'repairs',
-    'final_classification',
-    'disposition',
-    'next_owner',
-    'escalation',
-    'cleanup',
-  ];
-  requireFields(artifact, required, errors, 'trace');
-  rejectUnknown(artifact, new Set(required), errors, 'trace');
-  if (artifact.schema_version !== 'healer-trace.v2')
-    errors.push('trace-schema-version');
-  validatePath(artifact.spec_path, repository, errors, 'trace-spec');
-  if (
-    isRepoPath(artifact.spec_path) &&
-    !isFile(path.resolve(repository, artifact.spec_path))
-  ) {
-    errors.push('trace-spec-unavailable');
+function validateAttempt(attempt, index, criteria, errors) {
+  if (!isObject(attempt)) {
+    errors.push('trace-invalid-attempt');
+    return;
   }
-  if (artifact.healer_input_read !== true)
-    errors.push('trace-healer-input-not-read');
+  const fields = [
+    'number',
+    'kind',
+    'hypothesis',
+    'failure_signature',
+    'evidence_summary',
+    'classification',
+    'action',
+    'outcome',
+  ];
+  requireFields(attempt, fields, errors, 'attempt');
+  rejectUnknown(
+    attempt,
+    new Set([...fields, 'product_behavior_evidence']),
+    errors,
+    'attempt',
+  );
+  if (attempt.number !== index + 1) errors.push('trace-nonsequential-attempt');
   if (
-    !Array.isArray(artifact.attempts) ||
-    artifact.attempts.length < 1 ||
-    artifact.attempts.length > 5
+    !['verification-run', 'debug-run', 'confirmation-run'].includes(
+      attempt.kind,
+    )
+  )
+    errors.push('trace-invalid-attempt-kind');
+  if (index === 0 && attempt.kind !== 'verification-run')
+    errors.push('trace-first-attempt-not-verification');
+  if (index > 0 && attempt.kind === 'verification-run')
+    errors.push('trace-verification-run-not-first');
+  if (
+    !isText(attempt.hypothesis, 200) ||
+    !isText(attempt.evidence_summary, 240)
+  )
+    errors.push('trace-invalid-attempt-summary');
+  if (
+    attempt.failure_signature !== null &&
+    !isText(attempt.failure_signature, 160)
+  )
+    errors.push('trace-invalid-failure-signature');
+  if (
+    attempt.classification !== null &&
+    !CLASSIFICATIONS.has(attempt.classification)
+  )
+    errors.push('trace-invalid-attempt-classification');
+  if (!['pass', 'fail', 'blocked'].includes(attempt.outcome))
+    errors.push('trace-invalid-attempt-outcome');
+  if (attempt.action !== null && !isText(attempt.action, 200))
+    errors.push('trace-invalid-action');
+  if (
+    attempt.outcome === 'pass' &&
+    (attempt.failure_signature !== null || attempt.classification !== null)
+  )
+    errors.push('trace-passing-attempt-has-failure');
+  if (
+    ['fail', 'blocked'].includes(attempt.outcome) &&
+    (attempt.classification == null || !isText(attempt.action, 200))
+  )
+    errors.push('trace-failed-attempt-missing-decision');
+  if (attempt.classification === 'product-behavior-wrong') {
+    validateProductEvidence(
+      attempt.product_behavior_evidence,
+      criteria,
+      errors,
+    );
+  } else if (
+    attempt.product_behavior_evidence !== null &&
+    attempt.product_behavior_evidence !== undefined
   ) {
+    errors.push('trace-unexpected-product-behavior-evidence');
+  }
+}
+
+function validateAttempts(attempts, criteria, errors) {
+  if (!Array.isArray(attempts) || attempts.length < 1 || attempts.length > 5) {
     errors.push('trace-invalid-attempts');
   } else {
-    for (const [index, attempt] of artifact.attempts.entries()) {
-      if (!isObject(attempt)) {
-        errors.push('trace-invalid-attempt');
-        continue;
-      }
-      const fields = [
-        'number',
-        'kind',
-        'hypothesis',
-        'failure_signature',
-        'evidence_summary',
-        'classification',
-        'action',
-        'outcome',
-      ];
-      requireFields(attempt, fields, errors, 'attempt');
-      rejectUnknown(
-        attempt,
-        new Set([...fields, 'product_behavior_evidence']),
-        errors,
-        'attempt',
-      );
-      if (attempt.number !== index + 1)
-        errors.push('trace-nonsequential-attempt');
-      if (
-        !['verification-run', 'debug-run', 'confirmation-run'].includes(
-          attempt.kind,
-        )
-      )
-        errors.push('trace-invalid-attempt-kind');
-      if (index === 0 && attempt.kind !== 'verification-run')
-        errors.push('trace-first-attempt-not-verification');
-      if (index > 0 && attempt.kind === 'verification-run')
-        errors.push('trace-verification-run-not-first');
-      if (
-        !isText(attempt.hypothesis, 200) ||
-        !isText(attempt.evidence_summary, 240)
-      )
-        errors.push('trace-invalid-attempt-summary');
-      if (
-        attempt.failure_signature !== null &&
-        !isText(attempt.failure_signature, 160)
-      )
-        errors.push('trace-invalid-failure-signature');
-      if (
-        attempt.classification !== null &&
-        !CLASSIFICATIONS.has(attempt.classification)
-      )
-        errors.push('trace-invalid-attempt-classification');
-      if (!['pass', 'fail', 'blocked'].includes(attempt.outcome))
-        errors.push('trace-invalid-attempt-outcome');
-      if (attempt.action !== null && !isText(attempt.action, 200))
-        errors.push('trace-invalid-action');
-      if (
-        attempt.outcome === 'pass' &&
-        (attempt.failure_signature !== null || attempt.classification !== null)
-      )
-        errors.push('trace-passing-attempt-has-failure');
-      if (
-        ['fail', 'blocked'].includes(attempt.outcome) &&
-        (attempt.classification == null || !isText(attempt.action, 200))
-      )
-        errors.push('trace-failed-attempt-missing-decision');
-      if (attempt.classification === 'product-behavior-wrong') {
-        validateProductEvidence(
-          attempt.product_behavior_evidence,
-          criteria,
-          errors,
-        );
-      } else if (
-        attempt.product_behavior_evidence !== null &&
-        attempt.product_behavior_evidence !== undefined
-      ) {
-        errors.push('trace-unexpected-product-behavior-evidence');
-      }
-    }
-    const terminalIndex = artifact.attempts.findIndex(
+    for (const [index, attempt] of attempts.entries())
+      validateAttempt(attempt, index, criteria, errors);
+    const terminalIndex = attempts.findIndex(
       (attempt) =>
         isObject(attempt) &&
         TERMINAL_CLASSIFICATIONS.has(attempt.classification),
     );
-    if (terminalIndex >= 0 && terminalIndex !== artifact.attempts.length - 1)
+    if (terminalIndex >= 0 && terminalIndex !== attempts.length - 1)
       errors.push('trace-attempt-after-terminal-classification');
-    const passingNonDebugIndex = artifact.attempts.findIndex(
+    const passingNonDebugIndex = attempts.findIndex(
       (attempt) =>
         isObject(attempt) &&
         ['verification-run', 'confirmation-run'].includes(attempt.kind) &&
@@ -179,14 +143,17 @@ function validateTrace(artifact, repository, healerInput, errors) {
     );
     if (
       passingNonDebugIndex >= 0 &&
-      passingNonDebugIndex !== artifact.attempts.length - 1
+      passingNonDebugIndex !== attempts.length - 1
     )
       errors.push('trace-attempt-after-terminal-pass');
   }
-  if (!Array.isArray(artifact.repairs) || artifact.repairs.length > 10) {
+}
+
+function validateRepairs(repairs, attempts, repository, errors) {
+  if (!Array.isArray(repairs) || repairs.length > 10) {
     errors.push('trace-invalid-repairs');
   } else {
-    for (const repair of artifact.repairs) {
+    for (const repair of repairs) {
       if (!isObject(repair)) {
         errors.push('trace-invalid-repair');
         continue;
@@ -200,8 +167,8 @@ function validateTrace(artifact, repository, healerInput, errors) {
         repair.attempt_number > 5
       )
         errors.push('trace-invalid-repair-attempt');
-      const repairedAttempt = Array.isArray(artifact.attempts)
-        ? artifact.attempts[repair.attempt_number - 1]
+      const repairedAttempt = Array.isArray(attempts)
+        ? attempts[repair.attempt_number - 1]
         : null;
       if (
         !isObject(repairedAttempt) ||
@@ -231,44 +198,9 @@ function validateTrace(artifact, repository, healerInput, errors) {
         errors.push('trace-invalid-repair-reason');
     }
   }
-  if (
-    artifact.disposition === 'product-behavior-wrong' &&
-    typeof healerInput?.spec_path === 'string'
-  ) {
-    try {
-      const currentDigest = createHash('sha256')
-        .update(readFileSync(path.resolve(repository, healerInput.spec_path)))
-        .digest('hex');
-      const specRepairDeclared = artifact.repairs?.some((repair) =>
-        repair?.paths?.some(
-          (item) =>
-            typeof item === 'string' &&
-            comparableRepoPath(item) ===
-              comparableRepoPath(healerInput.spec_path),
-        ),
-      );
-      if (
-        currentDigest !== healerInput.starting_spec_sha256 &&
-        !specRepairDeclared
-      )
-        errors.push('trace-unreported-spec-change');
-    } catch {
-      // Existing path validation reports the unavailable spec.
-    }
-  }
-  if (
-    artifact.final_classification !== null &&
-    !CLASSIFICATIONS.has(artifact.final_classification)
-  )
-    errors.push('trace-invalid-final-classification');
-  if (!DISPOSITIONS.has(artifact.disposition))
-    errors.push('trace-invalid-disposition');
-  if (
-    !['main', 'human', 'author', 'product-owner'].includes(artifact.next_owner)
-  )
-    errors.push('trace-invalid-next-owner');
-  if (artifact.escalation !== null && !isText(artifact.escalation, 200))
-    errors.push('trace-invalid-escalation');
+}
+
+function validateCleanup(artifact, errors) {
   if (!isObject(artifact.cleanup)) {
     errors.push('trace-invalid-cleanup');
   } else {
@@ -312,6 +244,9 @@ function validateTrace(artifact, repository, healerInput, errors) {
     if (artifact.cleanup?.browser_session !== 'not-opened')
       errors.push('trace-foreground-browser-cleanup-invalid');
   }
+}
+
+function validateDisposition(artifact, healerInput, errors) {
   const finalAttempt = Array.isArray(artifact.attempts)
     ? artifact.attempts.at(-1)
     : null;
@@ -398,6 +333,85 @@ function validateTrace(artifact, repository, healerInput, errors) {
     )
   )
     errors.push('trace-disposition-classification-mismatch');
+}
+
+function validateTrace(artifact, repository, healerInput, errors) {
+  const criteria = Array.isArray(healerInput?.criteria)
+    ? new Map(
+        healerInput.criteria.map((criterion) => [
+          criterion.id,
+          criterion.outcome,
+        ]),
+      )
+    : null;
+  const required = [
+    'schema_version',
+    'run_id',
+    'spec_path',
+    'healer_input_read',
+    'attempts',
+    'repairs',
+    'final_classification',
+    'disposition',
+    'next_owner',
+    'escalation',
+    'cleanup',
+  ];
+  requireFields(artifact, required, errors, 'trace');
+  rejectUnknown(artifact, new Set(required), errors, 'trace');
+  if (artifact.schema_version !== 'healer-trace.v2')
+    errors.push('trace-schema-version');
+  validatePath(artifact.spec_path, repository, errors, 'trace-spec');
+  if (
+    isRepoPath(artifact.spec_path) &&
+    !isFile(path.resolve(repository, artifact.spec_path))
+  ) {
+    errors.push('trace-spec-unavailable');
+  }
+  if (artifact.healer_input_read !== true)
+    errors.push('trace-healer-input-not-read');
+  validateAttempts(artifact.attempts, criteria, errors);
+  validateRepairs(artifact.repairs, artifact.attempts, repository, errors);
+  if (
+    artifact.disposition === 'product-behavior-wrong' &&
+    typeof healerInput?.spec_path === 'string'
+  ) {
+    try {
+      const currentDigest = createHash('sha256')
+        .update(readFileSync(path.resolve(repository, healerInput.spec_path)))
+        .digest('hex');
+      const specRepairDeclared = artifact.repairs?.some((repair) =>
+        repair?.paths?.some(
+          (item) =>
+            typeof item === 'string' &&
+            comparableRepoPath(item) ===
+              comparableRepoPath(healerInput.spec_path),
+        ),
+      );
+      if (
+        currentDigest !== healerInput.starting_spec_sha256 &&
+        !specRepairDeclared
+      )
+        errors.push('trace-unreported-spec-change');
+    } catch {
+      // Existing path validation reports the unavailable spec.
+    }
+  }
+  if (
+    artifact.final_classification !== null &&
+    !CLASSIFICATIONS.has(artifact.final_classification)
+  )
+    errors.push('trace-invalid-final-classification');
+  if (!DISPOSITIONS.has(artifact.disposition))
+    errors.push('trace-invalid-disposition');
+  if (
+    !['main', 'human', 'author', 'product-owner'].includes(artifact.next_owner)
+  )
+    errors.push('trace-invalid-next-owner');
+  if (artifact.escalation !== null && !isText(artifact.escalation, 200))
+    errors.push('trace-invalid-escalation');
+  validateCleanup(artifact, errors);
+  validateDisposition(artifact, healerInput, errors);
 }
 
 module.exports = { validateTrace };

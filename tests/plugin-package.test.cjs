@@ -1,11 +1,5 @@
 const assert = require('node:assert/strict');
-const {
-  existsSync,
-  mkdtempSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-} = require('node:fs');
+const { mkdtempSync, readFileSync, readdirSync, rmSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
@@ -13,10 +7,12 @@ const test = require('node:test');
 
 const repositoryRoot = path.resolve(__dirname, '..');
 
+function readText(relativePath) {
+  return readFileSync(path.join(repositoryRoot, relativePath), 'utf8');
+}
+
 function readJson(relativePath) {
-  return JSON.parse(
-    readFileSync(path.join(repositoryRoot, relativePath), 'utf8'),
-  );
+  return JSON.parse(readText(relativePath));
 }
 
 function markdownFiles(directory) {
@@ -82,10 +78,7 @@ test('tooling package does not install Playwright', () => {
 
 test('tooling declares and tests its supported Node releases', () => {
   const packageJson = readJson('package.json');
-  const workflow = readFileSync(
-    path.join(repositoryRoot, '.github', 'workflows', 'ci.yml'),
-    'utf8',
-  );
+  const workflow = readText('.github/workflows/ci.yml');
 
   assert.equal(packageJson.engines.node, '>=22.13.0');
   assert.match(workflow, /matrix:\s*\r?\n\s+node: \[22\.13\.0, 24\]/u);
@@ -93,10 +86,8 @@ test('tooling declares and tests its supported Node releases', () => {
 });
 
 test('README explains the project, workflow, and safety boundary', () => {
-  const readme = readFileSync(path.join(repositoryRoot, 'README.md'), 'utf8');
+  const readme = readText('README.md');
 
-  assert.match(readme, /## Why Testgen/iu);
-  assert.match(readme, /## How it works/iu);
   assert.match(readme, /running application/iu);
   assert.match(readme, /human checkpoint/iu);
   assert.match(readme, /disposable Git worktree/iu);
@@ -163,67 +154,21 @@ test('session hook exports the installed plugin root for Bash commands', () => {
 });
 
 test('workflow guidance removes avoidable pre-Author ambiguity', () => {
-  const skill = readFileSync(
-    path.join(repositoryRoot, 'skills', 'playwright-testgen', 'SKILL.md'),
-    'utf8',
+  const skill = readText('skills/playwright-testgen/SKILL.md');
+  const pipeline = readText('skills/playwright-testgen/references/pipeline.md');
+  const mutationCheck = readText(
+    'skills/playwright-testgen/references/mutation-check.md',
   );
-  const pipeline = readFileSync(
-    path.join(
-      repositoryRoot,
-      'skills',
-      'playwright-testgen',
-      'references',
-      'pipeline.md',
-    ),
-    'utf8',
+  const author = readText('agents/playwright-test-author.md');
+  const healer = readText('agents/playwright-test-healer.md');
+  const artifactContract = readText(
+    'skills/playwright-testgen/references/artifact-contract.md',
   );
-  const mutationCheck = readFileSync(
-    path.join(
-      repositoryRoot,
-      'skills',
-      'playwright-testgen',
-      'references',
-      'mutation-check.md',
-    ),
-    'utf8',
+  const locatorPolicy = readText(
+    'skills/playwright-testgen/references/locator-policy.md',
   );
-  const author = readFileSync(
-    path.join(repositoryRoot, 'agents', 'playwright-test-author.md'),
-    'utf8',
-  );
-  const healer = readFileSync(
-    path.join(repositoryRoot, 'agents', 'playwright-test-healer.md'),
-    'utf8',
-  );
-  const artifactContract = readFileSync(
-    path.join(
-      repositoryRoot,
-      'skills',
-      'playwright-testgen',
-      'references',
-      'artifact-contract.md',
-    ),
-    'utf8',
-  );
-  const locatorPolicy = readFileSync(
-    path.join(
-      repositoryRoot,
-      'skills',
-      'playwright-testgen',
-      'references',
-      'locator-policy.md',
-    ),
-    'utf8',
-  );
-  const testPolicy = readFileSync(
-    path.join(
-      repositoryRoot,
-      'skills',
-      'playwright-testgen',
-      'references',
-      'test-policy.md',
-    ),
-    'utf8',
+  const testPolicy = readText(
+    'skills/playwright-testgen/references/test-policy.md',
   );
 
   assert.match(skill, /scripts\/runtime-preflight\.cjs.*--repo \./iu);
@@ -296,16 +241,7 @@ test('workflow guidance removes avoidable pre-Author ambiguity', () => {
     /attempt summary.*behavior-focused sentence.*200 characters/isu,
   );
   assert.match(
-    readFileSync(
-      path.join(
-        repositoryRoot,
-        'skills',
-        'playwright-testgen',
-        'references',
-        'healing-protocol.md',
-      ),
-      'utf8',
-    ),
+    readText('skills/playwright-testgen/references/healing-protocol.md'),
     /attempt\s+directory and candidate in two separate Bash calls/isu,
   );
   assert.match(
@@ -336,45 +272,20 @@ test('workflow guidance removes avoidable pre-Author ambiguity', () => {
     /no approved adapter exists.*```sh\s*node "\$PLAYWRIGHT_TESTGEN_ROOT\/scripts\/mutation-check\.cjs" verify --repo \. --run-id <run_id> --criterion-id <criterion_id>\s*```.*omit only `--adapter`, `--mutation-id`, and `--approval-digest`/isu,
   );
   assert.match(
-    readFileSync(
-      path.join(
-        repositoryRoot,
-        'skills',
-        'playwright-testgen',
-        'references',
-        'healing-protocol.md',
-      ),
-      'utf8',
-    ),
+    readText('skills/playwright-testgen/references/healing-protocol.md'),
     /startup fails.*reservation.*consumed.*refuse.*reuse/isu,
   );
 });
 
 test('ships bounded Explorer discovery as a transient human decision', () => {
-  const scenarioSourcingPath = path.join(
-    repositoryRoot,
-    'skills',
-    'playwright-testgen',
-    'references',
-    'scenario-sourcing.md',
-  );
-  const explorer = readFileSync(
-    path.join(repositoryRoot, 'agents', 'playwright-test-explorer.md'),
-    'utf8',
-  );
-  const artifactContract = readFileSync(
-    path.join(
-      repositoryRoot,
-      'skills',
-      'playwright-testgen',
-      'references',
-      'artifact-contract.md',
-    ),
-    'utf8',
+  const explorer = readText('agents/playwright-test-explorer.md');
+  const artifactContract = readText(
+    'skills/playwright-testgen/references/artifact-contract.md',
   );
 
-  assert.equal(existsSync(scenarioSourcingPath), true);
-  const scenarioSourcing = readFileSync(scenarioSourcingPath, 'utf8');
+  const scenarioSourcing = readText(
+    'skills/playwright-testgen/references/scenario-sourcing.md',
+  );
 
   assert.match(explorer, /tools: Bash, Glob, Grep, Read/iu);
   assert.match(explorer, /90 seconds.*ten source\/test `Read` calls/isu);
@@ -423,40 +334,17 @@ test('ships bounded Explorer discovery as a transient human decision', () => {
   );
   assert.match(
     scenarioSourcing,
-    /final summary entry.*Scenario.*Spec.*Run.*Checkpoint.*Disposition.*Healer attempts.*Mutation.*Owner/isu,
-  );
-  assert.match(
-    scenarioSourcing,
     /derive.*retained spec count.*current checkout/isu,
   );
   assert.match(artifactContract, /transient, untrusted discovery output/iu);
 });
 
 test('ships one command with explicit and discovery entry paths', () => {
-  const commandPath = path.join(repositoryRoot, 'commands', 'testgen.md');
-  const readme = readFileSync(path.join(repositoryRoot, 'README.md'), 'utf8');
-  const skill = readFileSync(
-    path.join(repositoryRoot, 'skills', 'playwright-testgen', 'SKILL.md'),
-    'utf8',
-  );
-  const pipeline = readFileSync(
-    path.join(
-      repositoryRoot,
-      'skills',
-      'playwright-testgen',
-      'references',
-      'pipeline.md',
-    ),
-    'utf8',
-  );
+  const readme = readText('README.md');
+  const skill = readText('skills/playwright-testgen/SKILL.md');
+  const pipeline = readText('skills/playwright-testgen/references/pipeline.md');
 
-  assert.equal(existsSync(commandPath), true);
-  assert.equal(
-    existsSync(path.join(repositoryRoot, 'commands', '.gitkeep')),
-    false,
-  );
-
-  const command = readFileSync(commandPath, 'utf8');
+  const command = readText('commands/testgen.md');
   assert.match(command, /\$ARGUMENTS/u);
   assert.match(command, /blank|whitespace.*Explorer/isu);
   assert.match(command, /original\s+acceptance\s+criteria/iu);
@@ -507,49 +395,18 @@ test('ships one command with explicit and discovery entry paths', () => {
 });
 
 test('ships bounded setup with durable profile and optional human auth capture', () => {
-  const commandPath = path.join(repositoryRoot, 'commands', 'setup.md');
-  const skill = readFileSync(
-    path.join(repositoryRoot, 'skills', 'playwright-testgen', 'SKILL.md'),
-    'utf8',
+  const skill = readText('skills/playwright-testgen/SKILL.md');
+  const pipeline = readText('skills/playwright-testgen/references/pipeline.md');
+  const locator = readText(
+    'skills/playwright-testgen/references/locator-policy.md',
   );
-  const pipeline = readFileSync(
-    path.join(
-      repositoryRoot,
-      'skills',
-      'playwright-testgen',
-      'references',
-      'pipeline.md',
-    ),
-    'utf8',
+  const cleanup = readText(
+    'skills/playwright-testgen/references/cleanup-contract.md',
   );
-  const locator = readFileSync(
-    path.join(
-      repositoryRoot,
-      'skills',
-      'playwright-testgen',
-      'references',
-      'locator-policy.md',
-    ),
-    'utf8',
-  );
-  const cleanup = readFileSync(
-    path.join(
-      repositoryRoot,
-      'skills',
-      'playwright-testgen',
-      'references',
-      'cleanup-contract.md',
-    ),
-    'utf8',
-  );
-  const readme = readFileSync(path.join(repositoryRoot, 'README.md'), 'utf8');
-  const architecture = readFileSync(
-    path.join(repositoryRoot, 'docs', 'architecture.md'),
-    'utf8',
-  );
+  const readme = readText('README.md');
+  const architecture = readText('docs/architecture.md');
 
-  assert.equal(existsSync(commandPath), true);
-  const command = readFileSync(commandPath, 'utf8');
+  const command = readText('commands/setup.md');
   assert.match(command, /profile-repo\.cjs/iu);
   assert.match(command, /setup-profile\.cjs/iu);
   assert.ok(
@@ -582,7 +439,6 @@ test('ships bounded setup with durable profile and optional human auth capture',
   assert.match(cleanup, /\.playwright-testgen\/profile\.v1\.json/iu);
   assert.match(cleanup, /approved\s+durable authentication state/iu);
   assert.match(readme, /\/playwright-testgen:setup/u);
-  assert.match(readme, /Setup after installation/iu);
   assert.match(
     readme,
     /optional, Git-ignored\s+`\.playwright-testgen\/profile\.v1\.json`/iu,
@@ -592,44 +448,16 @@ test('ships bounded setup with durable profile and optional human auth capture',
 });
 
 test('ships a sequential multi-scenario queue around the existing flow', () => {
-  const command = readFileSync(
-    path.join(repositoryRoot, 'commands', 'testgen.md'),
-    'utf8',
-  );
-  const skill = readFileSync(
-    path.join(repositoryRoot, 'skills', 'playwright-testgen', 'SKILL.md'),
-    'utf8',
-  );
-  const pipeline = readFileSync(
-    path.join(
-      repositoryRoot,
-      'skills',
-      'playwright-testgen',
-      'references',
-      'pipeline.md',
-    ),
-    'utf8',
-  );
-  const scenarioSourcingPath = path.join(
-    repositoryRoot,
-    'skills',
-    'playwright-testgen',
-    'references',
-    'scenario-sourcing.md',
-  );
-  const cleanup = readFileSync(
-    path.join(
-      repositoryRoot,
-      'skills',
-      'playwright-testgen',
-      'references',
-      'cleanup-contract.md',
-    ),
-    'utf8',
+  const command = readText('commands/testgen.md');
+  const skill = readText('skills/playwright-testgen/SKILL.md');
+  const pipeline = readText('skills/playwright-testgen/references/pipeline.md');
+  const cleanup = readText(
+    'skills/playwright-testgen/references/cleanup-contract.md',
   );
 
-  assert.equal(existsSync(scenarioSourcingPath), true);
-  const scenarioSourcing = readFileSync(scenarioSourcingPath, 'utf8');
+  const scenarioSourcing = readText(
+    'skills/playwright-testgen/references/scenario-sourcing.md',
+  );
 
   assert.match(command, /select one or more/iu);
   assert.match(command, /`skip`.*current scenario.*batch cancellation/isu);

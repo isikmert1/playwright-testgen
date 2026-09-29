@@ -263,23 +263,8 @@ function validateProfileShape(profile) {
     Object.keys(profile ?? {}).some((key) => !allowedTopLevel.has(key)) ||
     profile?.schema_version !== 'repository-profile.v1' ||
     typeof profile.repository_root !== 'string' ||
-    profile.selection == null ||
-    !['config', 'configless'].includes(profile.selection.config_mode) ||
-    typeof profile.selection.package !== 'string' ||
-    (profile.selection.config_mode === 'config' &&
-      typeof profile.selection.config !== 'string') ||
-    (profile.selection.config_mode === 'configless' &&
-      profile.selection.config !== null) ||
-    profile.freshness == null ||
-    !/^[a-f0-9]{40}$/u.test(profile.freshness.head) ||
-    !/^[a-f0-9]{64}$/u.test(profile.freshness.membership_sha256) ||
-    !/^[a-f0-9]{64}$/u.test(profile.freshness.status_sha256) ||
-    profile.freshness.sources == null ||
-    Array.isArray(profile.freshness.sources) ||
-    Object.keys(profile.freshness.sources).length > MAX_FINGERPRINT_PATHS ||
-    Object.values(profile.freshness.sources).some(
-      (value) => typeof value !== 'string' || !/^[a-f0-9]{64}$/u.test(value),
-    ) ||
+    !validProfileSelection(profile.selection) ||
+    !validProfileFreshness(profile.freshness) ||
     !validProfileFacts(profile) ||
     (profile.authentication != null &&
       (!['fixture', 'storage-state'].includes(
@@ -289,6 +274,32 @@ function validateProfileShape(profile) {
         Object.keys(profile.authentication).length !== 2))
   )
     fail('profile-invalid');
+}
+
+function validProfileSelection(selection) {
+  return (
+    selection != null &&
+    ['config', 'configless'].includes(selection.config_mode) &&
+    typeof selection.package === 'string' &&
+    (selection.config_mode !== 'config' ||
+      typeof selection.config === 'string') &&
+    (selection.config_mode !== 'configless' || selection.config === null)
+  );
+}
+
+function validProfileFreshness(freshness) {
+  return (
+    freshness != null &&
+    /^[a-f0-9]{40}$/u.test(freshness.head) &&
+    /^[a-f0-9]{64}$/u.test(freshness.membership_sha256) &&
+    /^[a-f0-9]{64}$/u.test(freshness.status_sha256) &&
+    freshness.sources != null &&
+    !Array.isArray(freshness.sources) &&
+    Object.keys(freshness.sources).length <= MAX_FINGERPRINT_PATHS &&
+    Object.values(freshness.sources).every(
+      (value) => typeof value === 'string' && /^[a-f0-9]{64}$/u.test(value),
+    )
+  );
 }
 
 function exactObject(value, keys) {
@@ -301,7 +312,7 @@ function exactObject(value, keys) {
   );
 }
 
-function validProfileFacts(profile) {
+function validProfileScan(profile) {
   const scan = profile.scan;
   if (
     !exactObject(scan, ['status', 'stop_reason', 'inspected_paths']) ||
@@ -317,11 +328,12 @@ function validProfileFacts(profile) {
       JSON.stringify(Object.keys(profile.freshness.sources).sort())
   )
     return false;
-  if (scan.status === 'partial' && profile.facts === null) return true;
+  return true;
+}
 
-  const facts = profile.facts;
-  if (
-    !exactObject(facts, [
+function validFactsShape(facts) {
+  return (
+    exactObject(facts, [
       'frameworks',
       'framework_status',
       'scripts',
@@ -330,10 +342,10 @@ function validProfileFacts(profile) {
       'component_library_status',
       'test_id',
       'authentication',
-    ]) ||
-    !exactObject(facts.scripts, ['lint', 'format']) ||
-    !exactObject(facts.layout, ['tests', 'helpers', 'fixtures', 'naming']) ||
-    !exactObject(facts.test_id, [
+    ]) &&
+    exactObject(facts.scripts, ['lint', 'format']) &&
+    exactObject(facts.layout, ['tests', 'helpers', 'fixtures', 'naming']) &&
+    exactObject(facts.test_id, [
       'status',
       'attribute',
       'config_attribute',
@@ -341,32 +353,98 @@ function validProfileFacts(profile) {
       'source_counts',
       'test_counts',
       'evidence',
-    ]) ||
-    !exactObject(facts.authentication, ['status', 'mechanisms'])
-  )
-    return false;
+    ]) &&
+    exactObject(facts.authentication, ['status', 'mechanisms'])
+  );
+}
 
-  const evidence = (value) =>
-    typeof value === 'string' &&
-    value.length <= 240 &&
-    scan.inspected_paths.includes(value) &&
-    Object.hasOwn(profile.freshness.sources, value);
-  const names = (values, max) =>
+function validNames(values, maximum) {
+  return (
     Array.isArray(values) &&
-    values.length <= max &&
+    values.length <= maximum &&
     values.every(
       (value) =>
         typeof value === 'string' && value.length > 0 && value.length <= 100,
-    );
-  const entries = (values, allowed, max, key = 'name') =>
+    )
+  );
+}
+
+function validEvidenceEntries(
+  values,
+  allowed,
+  maximum,
+  evidence,
+  key = 'name',
+) {
+  return (
     Array.isArray(values) &&
-    values.length <= max &&
+    values.length <= maximum &&
     values.every(
       (value) =>
         exactObject(value, [key, 'evidence']) &&
         allowed.includes(value[key]) &&
         evidence(value.evidence),
-    );
+    )
+  );
+}
+
+function validLayout(layout, evidence) {
+  return (
+    validNames(layout.tests, 8) &&
+    layout.tests.every(evidence) &&
+    validNames(layout.helpers, 8) &&
+    layout.helpers.every(evidence) &&
+    validNames(layout.fixtures, 8) &&
+    layout.fixtures.every(evidence) &&
+    layout.naming != null &&
+    typeof layout.naming === 'object' &&
+    !Array.isArray(layout.naming) &&
+    Object.keys(layout.naming).length <= 16 &&
+    Object.entries(layout.naming).every(
+      ([name, count]) =>
+        /^\.(?:spec|test|cy)\.[cm]?[jt]sx?$/u.test(name) &&
+        Number.isSafeInteger(count) &&
+        count >= 0 &&
+        count <= 512,
+    )
+  );
+}
+
+function validDetectedEntries(values, status, allowed, evidence) {
+  return (
+    validEvidenceEntries(values, allowed, allowed.length, evidence) &&
+    ['detected', 'unknown'].includes(status) &&
+    status === (values.length > 0 ? 'detected' : 'unknown')
+  );
+}
+
+function validAuthenticationFacts(authentication, scanStatus, evidence) {
+  return (
+    validEvidenceEntries(
+      authentication.mechanisms,
+      ['auth-dependency', 'storage-state-use', 'test-fixture-use'],
+      3,
+      evidence,
+      'kind',
+    ) &&
+    ['detected', 'unknown'].includes(authentication.status) &&
+    (scanStatus !== 'complete' ||
+      authentication.status ===
+        (authentication.mechanisms.length > 0 ? 'detected' : 'unknown'))
+  );
+}
+
+function validProfileFacts(profile) {
+  if (!validProfileScan(profile)) return false;
+  const scan = profile.scan;
+  if (scan.status === 'partial' && profile.facts === null) return true;
+  const facts = profile.facts;
+  if (!validFactsShape(facts)) return false;
+  const evidence = (value) =>
+    typeof value === 'string' &&
+    value.length <= 240 &&
+    scan.inspected_paths.includes(value) &&
+    Object.hasOwn(profile.freshness.sources, value);
   const frameworks = [
     'react',
     'next',
@@ -386,54 +464,36 @@ function validProfileFacts(profile) {
     'local-ui-components',
   ];
   if (
-    !entries(facts.frameworks, frameworks, frameworks.length) ||
-    !['detected', 'unknown'].includes(facts.framework_status) ||
-    facts.framework_status !==
-      (facts.frameworks.length > 0 ? 'detected' : 'unknown') ||
-    !names(facts.scripts.lint, 32) ||
-    !names(facts.scripts.format, 32) ||
-    !names(facts.layout.tests, 8) ||
-    !facts.layout.tests.every(evidence) ||
-    !names(facts.layout.helpers, 8) ||
-    !facts.layout.helpers.every(evidence) ||
-    !names(facts.layout.fixtures, 8) ||
-    !facts.layout.fixtures.every(evidence) ||
-    facts.layout.naming == null ||
-    typeof facts.layout.naming !== 'object' ||
-    Array.isArray(facts.layout.naming) ||
-    Object.keys(facts.layout.naming).length > 16 ||
-    Object.entries(facts.layout.naming).some(
-      ([name, count]) =>
-        !/^\.(?:spec|test|cy)\.[cm]?[jt]sx?$/u.test(name) ||
-        !Number.isSafeInteger(count) ||
-        count < 0 ||
-        count > 512,
+    !validDetectedEntries(
+      facts.frameworks,
+      facts.framework_status,
+      frameworks,
+      evidence,
     ) ||
-    !entries(facts.component_libraries, libraries, libraries.length) ||
-    !['detected', 'unknown'].includes(facts.component_library_status) ||
-    facts.component_library_status !==
-      (facts.component_libraries.length > 0 ? 'detected' : 'unknown') ||
-    !entries(
-      facts.authentication.mechanisms,
-      ['auth-dependency', 'storage-state-use', 'test-fixture-use'],
-      3,
-      'kind',
+    !validNames(facts.scripts.lint, 32) ||
+    !validNames(facts.scripts.format, 32) ||
+    !validLayout(facts.layout, evidence) ||
+    !validDetectedEntries(
+      facts.component_libraries,
+      facts.component_library_status,
+      libraries,
+      evidence,
     ) ||
-    !['detected', 'unknown'].includes(facts.authentication.status) ||
-    (scan.status === 'complete' &&
-      facts.authentication.status !==
-        (facts.authentication.mechanisms.length > 0
-          ? 'detected'
-          : 'unknown')) ||
-    !['detected', 'ambiguous', 'none-found', 'unknown'].includes(
-      facts.test_id.status,
-    ) ||
-    !names(facts.test_id.evidence, 8) ||
-    !facts.test_id.evidence.every(evidence)
+    !validAuthenticationFacts(facts.authentication, scan.status, evidence)
   )
     return false;
+  return validTestIdFacts(facts.test_id, evidence);
+}
 
-  const testId = facts.test_id;
+function validTestIdFacts(testId, evidence) {
+  if (
+    !['detected', 'ambiguous', 'none-found', 'unknown'].includes(
+      testId.status,
+    ) ||
+    !validNames(testId.evidence, 8) ||
+    !testId.evidence.every(evidence)
+  )
+    return false;
   if (
     (testId.config_attribute !== null &&
       (typeof testId.config_attribute !== 'string' ||
@@ -748,18 +808,21 @@ function main() {
       `${JSON.stringify(execute(parseArguments(process.argv.slice(2))))}\n`,
     );
   } catch (error) {
-    const code =
-      error instanceof SetupError && SAFE_ERROR.test(error.code)
-        ? error.code
-        : error instanceof Error && SAFE_ERROR.test(error.message)
-          ? error.message
-          : 'setup-profile-failed';
+    const code = errorCode(error);
     const report = { ok: false, error: code };
     if (error instanceof SetupError && error.reason != null)
       report.reason = error.reason;
     process.stdout.write(`${JSON.stringify(report)}\n`);
     process.exitCode = 1;
   }
+}
+
+function errorCode(error) {
+  if (error instanceof SetupError && SAFE_ERROR.test(error.code))
+    return error.code;
+  if (error instanceof Error && SAFE_ERROR.test(error.message))
+    return error.message;
+  return 'setup-profile-failed';
 }
 
 if (require.main === module) main();
