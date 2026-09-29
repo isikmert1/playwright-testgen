@@ -1,5 +1,6 @@
 const {
   existsSync,
+  lstatSync,
   opendirSync,
   readdirSync,
   realpathSync,
@@ -311,16 +312,33 @@ function validateRoleArtifactWrite(payload, policies, absolute, canonical) {
           'This run artifact belongs to the other role or an aliased path. Mutate only the exact role-owned artifact: Author owns handoff.json and Healer owns healer-trace.json.',
         );
       }
+      let artifactStats;
+      try {
+        artifactStats = lstatSync(absolute);
+      } catch (error) {
+        if (error.code !== 'ENOENT') {
+          return deny(
+            'The declared role-owned artifact could not be inspected. Return to Main to repair its draft.',
+          );
+        }
+      }
+      if (
+        artifactStats != null &&
+        (!artifactStats.isFile() || artifactStats.nlink !== 1)
+      ) {
+        return deny(
+          filename === 'healer-trace.json'
+            ? 'The declared healer-trace.json draft must be a regular file no larger than 64 KiB without symlinks or hardlinks. Return to Main to replace its invalid draft.'
+            : 'The declared handoff.json draft must be a regular file without symlinks or hardlinks. Return to Main to replace its invalid draft.',
+        );
+      }
       if (filename === 'healer-trace.json') {
-        let traceStats;
-        try {
-          traceStats = statSync(absolute);
-        } catch {
+        if (artifactStats == null) {
           return deny(
             'The declared healer-trace.json draft is unavailable. Return to Main instead of creating another trace path.',
           );
         }
-        if (!traceStats.isFile() || traceStats.size > 64 * 1024) {
+        if (artifactStats.size > 64 * 1024) {
           return deny(
             'The declared healer-trace.json draft must be a regular file no larger than 64 KiB. Return to Main instead of reading or replacing it.',
           );

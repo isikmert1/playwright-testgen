@@ -1464,6 +1464,69 @@ test('audits private approved-run metadata despite a revised reason', () => {
   }
 });
 
+for (const [kind, createLink] of [
+  ['hardlinked', linkSync],
+  ['symlinked', (target, link) => symlinkSync(target, link, 'file')],
+]) {
+  test(`rejects ${kind} hook audit targets`, () => {
+    withTargetRepository(({ targetRepository }) => {
+      const auditRoot = mkdtempSync(path.join(tmpdir(), 'testgen-hook-audit-'));
+      const target = path.join(auditRoot, 'sentinel.txt');
+      const auditPath = path.join(auditRoot, 'hook-audit.jsonl');
+      writeFileSync(target, 'sentinel\n');
+      createLink(target, auditPath);
+
+      try {
+        const result = runToolHook(
+          targetRepository,
+          'Bash',
+          { command: 'node --version' },
+          'playwright-test-healer',
+          { PLAYWRIGHT_TESTGEN_HOOK_AUDIT_PATH: auditPath },
+          'tool-linked-audit',
+        );
+
+        assert.equal(result.permissionDecision, 'deny');
+        assert.equal(readFileSync(target, 'utf8'), 'sentinel\n');
+      } finally {
+        rmSync(auditRoot, { force: true, recursive: true });
+      }
+    });
+  });
+}
+
+test('appends hook audit records to an ordinary existing file', () => {
+  withTargetRepository(({ targetRepository }) => {
+    const auditRoot = mkdtempSync(path.join(tmpdir(), 'testgen-hook-audit-'));
+    const auditPath = path.join(auditRoot, 'hook-audit.jsonl');
+
+    try {
+      for (const toolUseId of ['tool-first-audit', 'tool-second-audit']) {
+        assert.equal(
+          runToolHook(
+            targetRepository,
+            'Bash',
+            { command: 'node --version' },
+            'playwright-test-healer',
+            { PLAYWRIGHT_TESTGEN_HOOK_AUDIT_PATH: auditPath },
+            toolUseId,
+          ).permissionDecision,
+          'allow',
+        );
+      }
+      assert.deepEqual(
+        readFileSync(auditPath, 'utf8')
+          .trim()
+          .split('\n')
+          .map((line) => JSON.parse(line).tool_use_id),
+        ['tool-first-audit', 'tool-second-audit'],
+      );
+    } finally {
+      rmSync(auditRoot, { force: true, recursive: true });
+    }
+  });
+});
+
 test('requires an anchored filter for the exact approved spec', () => {
   withTargetRepository(({ targetRepository }) => {
     const output = `.playwright-cli/testgen/${runId}/attempt-2/test-results`;
@@ -2828,6 +2891,13 @@ test('binds artifact mutations to the role that owns each artifact', () => {
     const handoffPath = path.join(runDirectory, 'handoff.json');
     const inputPath = path.join(runDirectory, 'healer-input.json');
     const tracePath = path.join(runDirectory, 'healer-trace.json');
+    assert.equal(
+      runToolHook(targetRepository, 'Write', {
+        file_path: handoffPath,
+        content: '{}',
+      }).permissionDecision,
+      'allow',
+    );
     writeFileSync(handoffPath, '{}');
     writeFileSync(inputPath, '{}');
     writeFileSync(tracePath, '{}');
@@ -2948,6 +3018,64 @@ test('binds artifact mutations to the role that owns each artifact', () => {
     );
     assert.equal(missingTraceWrite.permissionDecision, 'deny');
     assert.match(missingTraceWrite.permissionDecisionReason, /unavailable/iu);
+  });
+});
+
+for (const [agentType, filename, toolName] of [
+  ['playwright-test-author', 'handoff.json', 'Edit'],
+  ['playwright-test-healer', 'healer-trace.json', 'Write'],
+]) {
+  test(`denies hardlinked ${filename} drafts`, () => {
+    withTargetRepository(({ runDirectory, targetRepository }) => {
+      const policyPath = path.join(runDirectory, 'command-policy.json');
+      const policyBefore = readFileSync(policyPath, 'utf8');
+      const artifactPath = path.join(runDirectory, filename);
+      linkSync(policyPath, artifactPath);
+
+      const result = runToolHook(
+        targetRepository,
+        toolName,
+        { file_path: artifactPath, content: '{}' },
+        agentType,
+      );
+
+      assert.equal(result.permissionDecision, 'deny');
+      assert.equal(readFileSync(policyPath, 'utf8'), policyBefore);
+    });
+  });
+}
+
+test('denies non-regular Author handoff drafts', () => {
+  withTargetRepository(({ runDirectory, targetRepository }) => {
+    const handoffPath = path.join(runDirectory, 'handoff.json');
+    mkdirSync(handoffPath);
+
+    assert.equal(
+      runToolHook(targetRepository, 'Write', {
+        file_path: handoffPath,
+        content: '{}',
+      }).permissionDecision,
+      'deny',
+    );
+  });
+});
+
+test('denies dangling symlink Author handoff drafts', () => {
+  withTargetRepository(({ runDirectory, targetRepository }) => {
+    const handoffPath = path.join(runDirectory, 'handoff.json');
+    symlinkSync(
+      path.join(targetRepository, 'unapproved.json'),
+      handoffPath,
+      'file',
+    );
+
+    assert.equal(
+      runToolHook(targetRepository, 'Write', {
+        file_path: handoffPath,
+        content: '{}',
+      }).permissionDecision,
+      'deny',
+    );
   });
 });
 
