@@ -112,6 +112,51 @@ test('publishes one ignored profile atomically and validates freshness', () => {
   });
 });
 
+test('publishes and validates evidence paths longer than 100 characters', () => {
+  const testPath = `tests/${'feature-component-'.repeat(6)}flow.spec.ts`;
+  withRepository(
+    { [testPath]: 'page.locator(\'[data-test="save"]\');\n' },
+    (root) => {
+      const created = run(root, ['create', '--repo', '.']);
+      assert.equal(created.status, 0, created.stdout || created.stderr);
+      const profile = JSON.parse(readFileSync(path.join(root, profilePath)));
+      assert.deepEqual(profile.facts.layout.tests, [testPath]);
+      assert.ok(profile.facts.test_id.evidence.includes(testPath));
+      const valid = run(root, ['validate', '--repo', '.']);
+      assert.equal(valid.status, 0, valid.stdout || valid.stderr);
+      assert.equal(valid.report.status, 'fresh');
+    },
+  );
+});
+
+test('preserves more than 32 lint and format script names in a fresh profile', () => {
+  const lintNames = Array.from({ length: 33 }, (_, index) => `lint:${index}`);
+  const formatNames = Array.from(
+    { length: 33 },
+    (_, index) => `format:${index}`,
+  );
+  withRepository(
+    {
+      'package.json': JSON.stringify({
+        scripts: Object.fromEntries(
+          [...lintNames, ...formatNames].map((name) => [name, 'true']),
+        ),
+      }),
+    },
+    (root) => {
+      const created = run(root, ['create', '--repo', '.']);
+      assert.equal(created.status, 0, created.stdout || created.stderr);
+      const profile = JSON.parse(readFileSync(path.join(root, profilePath)));
+      assert.equal(profile.scan.status, 'complete');
+      assert.deepEqual(profile.facts.scripts.lint, [...lintNames].sort());
+      assert.deepEqual(profile.facts.scripts.format, [...formatNames].sort());
+      const valid = run(root, ['validate', '--repo', '.']);
+      assert.equal(valid.status, 0, valid.stdout || valid.stderr);
+      assert.equal(valid.report.status, 'fresh');
+    },
+  );
+});
+
 test('rejects missing, unsupported, and unbound profile facts', () => {
   withRepository({}, (root) => {
     const created = run(root, [

@@ -426,6 +426,42 @@ test('keeps dynamic test-id configuration inconclusive', () => {
   );
 });
 
+test('keeps identifier configuration exports inconclusive', () => {
+  fixture(
+    {
+      'package.json': '{}',
+      'playwright.config.cjs':
+        "const config = { use: { testIdAttribute: 'data-testid' } };\nmodule.exports = config;\n",
+      'src/page.tsx': '<div data-test="save" />\n',
+    },
+    (root) => {
+      const report = run(root);
+      assert.equal(report.scan.status, 'complete');
+      assert.equal(report.facts.test_id.status, 'unknown');
+      assert.equal(report.facts.test_id.attribute, null);
+      assert.equal(report.facts.test_id.config_attribute, null);
+    },
+  );
+});
+
+test('keeps top-level configuration spreads inconclusive', () => {
+  fixture(
+    {
+      'package.json': '{}',
+      'playwright.config.cjs':
+        "const inherited = { use: { testIdAttribute: 'data-testid' } };\nmodule.exports = { use: { testIdAttribute: 'data-test' }, ...inherited };\n",
+      'src/page.tsx': '<div data-test="save" />\n',
+    },
+    (root) => {
+      const report = run(root);
+      assert.equal(report.scan.status, 'complete');
+      assert.equal(report.facts.test_id.status, 'unknown');
+      assert.equal(report.facts.test_id.attribute, null);
+      assert.equal(report.facts.test_id.config_attribute, null);
+    },
+  );
+});
+
 test('does not promote commented or mixed test-id config to a convention', () => {
   for (const { config, expectedStatus } of [
     {
