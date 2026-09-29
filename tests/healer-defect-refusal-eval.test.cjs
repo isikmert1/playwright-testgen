@@ -251,6 +251,15 @@ test('prepares an exact-revision plugin source without evaluation answers', asyn
       'scripts/eval',
     ])
       assert.equal(existsSync(path.join(source, relative)), false, relative);
+    const packageScripts = JSON.parse(
+      readFileSync(path.join(source, 'package.json'), 'utf8'),
+    ).scripts;
+    for (const [name, command] of Object.entries(packageScripts)) {
+      if (!name.startsWith('eval:')) continue;
+      const entrypoint = /^node (scripts\/\S+)$/u.exec(command)?.[1];
+      assert.ok(entrypoint, name);
+      assert.equal(existsSync(path.join(source, entrypoint)), false, name);
+    }
     assert.doesNotThrow(() => assertPluginBlind(source));
 
     mkdirSync(path.join(source, 'evals'));
@@ -259,6 +268,12 @@ test('prepares an exact-revision plugin source without evaluation answers', asyn
       /installed-evaluation-material/u,
     );
     rmSync(path.join(source, 'evals'), { recursive: true });
+    writeFileSync(path.join(source, 'scripts', 'run-setup-eval.cjs'), '');
+    assert.throws(
+      () => assertPluginBlind(source),
+      /installed-evaluation-material/u,
+    );
+    rmSync(path.join(source, 'scripts', 'run-setup-eval.cjs'));
     mkdirSync(path.join(source, 'scripts', 'eval'));
     writeFileSync(path.join(source, 'scripts', 'eval', 'runtime.cjs'), '');
     assert.throws(
@@ -270,7 +285,7 @@ test('prepares an exact-revision plugin source without evaluation answers', asyn
   }
 });
 
-test('rejects an installed plugin with a stale access policy', () => {
+test('rejects stale runtime dependencies in an installed plugin', async (t) => {
   const { findInstalledPlugin } = modules().runner;
   const temporaryRoot = mkdtempSync(
     path.join(tmpdir(), 'testgen-plugin-integrity-'),
@@ -286,6 +301,7 @@ test('rejects an installed plugin with a stale access policy', () => {
     'scripts/run-generation-eval.cjs',
     'scripts/run-generation-candidate.cjs',
     'scripts/run-selector-repair-eval.cjs',
+    'scripts/run-setup-eval.cjs',
     'scripts/score-healer-defect-refusal.cjs',
     'scripts/score-outcomes.cjs',
     'scripts/score-selector-repair.cjs',
@@ -324,7 +340,35 @@ test('rejects an installed plugin with a stale access policy', () => {
     assert.doesNotThrow(() =>
       findInstalledPlugin(plugins, pluginId, repositoryRoot, pluginVersion),
     );
-    writeFileSync(path.join(source, 'hooks', 'validate-access.cjs'), 'stale');
+    for (const relative of [
+      'hooks/validate-access.cjs',
+      'hooks/hook-result.cjs',
+      'hooks/run-policy.cjs',
+      'hooks/validate-workflow-command.cjs',
+      'scripts/artifact-validation-common.cjs',
+      'agents/playwright-test-author.md',
+      'commands/setup.md',
+    ]) {
+      await t.test(relative, () => {
+        const filename = path.join(source, relative);
+        try {
+          writeFileSync(filename, 'stale');
+          assert.throws(
+            () =>
+              findInstalledPlugin(
+                plugins,
+                pluginId,
+                repositoryRoot,
+                pluginVersion,
+              ),
+            /installed-revision-unverified/u,
+          );
+        } finally {
+          cpSync(path.join(repositoryRoot, relative), filename);
+        }
+      });
+    }
+    writeFileSync(path.join(source, 'hooks', 'unexpected.cjs'), 'stale');
     assert.throws(
       () =>
         findInstalledPlugin(plugins, pluginId, repositoryRoot, pluginVersion),

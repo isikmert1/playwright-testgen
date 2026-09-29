@@ -52,6 +52,7 @@ function datasetDigest() {
     'scripts/score-healer-defect-refusal.cjs',
     'scripts/score-selector-repair.cjs',
     'scripts/score-outcomes.cjs',
+    'scripts/windows-process-tree.cjs',
   );
   const hash = createHash('sha256');
   for (const relative of files.sort()) {
@@ -318,6 +319,11 @@ function summarizeOutcomeTrials(
     (total, definition) => total + definition.planned_trials,
     0,
   );
+  const casesComplete = Object.values(casesById).every(
+    (value) =>
+      value.attempts.length === value.planned &&
+      value.attempts.every((trial) => trial.complete),
+  );
   const mutationUnavailable = {};
   const unavailableReasons = {};
   for (const trial of attempts) {
@@ -419,12 +425,7 @@ function summarizeOutcomeTrials(
   };
   return {
     schema_version: 'outcome-suite.v1',
-    status:
-      completedTrials.length === plannedTrials &&
-      attempts.length === plannedTrials &&
-      profileCompatible
-        ? 'complete'
-        : 'incomplete',
+    status: casesComplete && profileCompatible ? 'complete' : 'incomplete',
     testgen_revision: revision,
     dataset_sha256: digest,
     profile_sha256: sha256(JSON.stringify(profiles)),

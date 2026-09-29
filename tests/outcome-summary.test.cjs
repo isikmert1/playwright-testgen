@@ -1,11 +1,12 @@
 const assert = require('node:assert/strict');
-const { mkdtempSync, rmSync, writeFileSync } = require('node:fs');
+const { cpSync, mkdtempSync, rmSync, writeFileSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const {
   cohortRevision,
   compareOutcomeSummaries,
+  datasetDigest,
   readTrial,
   summarizeOutcomeTrials,
 } = require('../scripts/score-outcomes.cjs');
@@ -89,6 +90,53 @@ test('summarizes every declared attempt without turning unavailable metrics into
   assert.equal(summary.metrics.cost_usd.reported, 0.6);
   assert.equal(summary.metrics.cost_usd.unavailable, 0);
   assert.equal(summary.cases.generation.attempts.length, 2);
+});
+
+test('requires the declared number of trials for every outcome case', () => {
+  const attempts = [
+    trial('generation', 1),
+    trial('generation', 2),
+    trial('generation', 3),
+    trial('repair', 1),
+    trial('repair', 2),
+    trial('refusal', 1),
+  ];
+  const summary = summarizeOutcomeTrials(
+    definitions,
+    attempts,
+    'dataset',
+    'revision',
+  );
+  assert.equal(summary.completed_trials, 6);
+  assert.equal(summary.status, 'incomplete');
+});
+
+test('changes dataset identity when Windows evaluation cleanup changes', () => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'testgen-dataset-'));
+  const repository = path.resolve(__dirname, '..');
+  try {
+    for (const relative of [
+      'evals/cases',
+      'evals/seeded-bugs',
+      'evals/targets/semantic-only',
+      'scripts',
+    ])
+      cpSync(path.join(repository, relative), path.join(directory, relative), {
+        recursive: true,
+      });
+    const copiedScorer = require(
+      path.join(directory, 'scripts/score-outcomes.cjs'),
+    );
+    const before = copiedScorer.datasetDigest();
+    assert.equal(before, datasetDigest());
+    writeFileSync(
+      path.join(directory, 'scripts/windows-process-tree.cjs'),
+      'module.exports = { windowsProcessTree: () => null };\n',
+    );
+    assert.notEqual(copiedScorer.datasetDigest(), before);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test('refuses incompatible comparisons and catches a green candidate with weak assertions', () => {

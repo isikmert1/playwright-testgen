@@ -4,8 +4,10 @@ const {
   copyFileSync,
   cpSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   rmSync,
   writeFileSync,
@@ -29,28 +31,15 @@ const repositoryRoot = path.resolve(__dirname, '../..');
 
 const PLUGIN_NAME = 'playwright-testgen';
 
-const CRITICAL_PLUGIN_FILES = [
+const PLUGIN_RUNTIME_PATHS = [
   '.claude-plugin/plugin.json',
-  'agents/playwright-test-healer.md',
-  'hooks/hook-audit.cjs',
-  'hooks/hooks.json',
-  'hooks/validate-access.cjs',
-  'hooks/validate-bash.cjs',
-  'hooks/validate-command.cjs',
-  'schemas/healer-input.v1.schema.json',
-  'schemas/healer-trace.v2.schema.json',
-  'scripts/create-healer-input.cjs',
-  'scripts/print-approved-spec-filter.cjs',
-  'scripts/runtime-preflight.cjs',
-  'scripts/validate-healer-trace.cjs',
-  'scripts/validate-healer-input.cjs',
-  'scripts/validate-testgen-artifact.cjs',
-  'skills/playwright-testgen/SKILL.md',
-  'skills/playwright-testgen/references/healing-protocol.md',
-  'vendor/shell-quote/LICENSE',
-  'vendor/shell-quote/SOURCE.md',
-  'vendor/shell-quote/parse.js',
-  'vendor/shell-quote/quote.js',
+  'agents',
+  'commands',
+  'hooks',
+  'schemas',
+  'scripts',
+  'skills',
+  'vendor',
 ];
 
 const FORBIDDEN_PLUGIN_PATHS = [
@@ -62,6 +51,7 @@ const FORBIDDEN_PLUGIN_PATHS = [
   'scripts/run-generation-eval.cjs',
   'scripts/run-generation-candidate.cjs',
   'scripts/run-selector-repair-eval.cjs',
+  'scripts/run-setup-eval.cjs',
   'scripts/score-healer-defect-refusal.cjs',
   'scripts/score-outcomes.cjs',
   'scripts/score-selector-repair.cjs',
@@ -97,6 +87,22 @@ function hashFiles(repository, relativePaths) {
     hash.update('\0');
   }
   return hash.digest('hex');
+}
+
+function pluginRuntimeFiles(repository) {
+  const files = [];
+  function add(relative) {
+    if (FORBIDDEN_PLUGIN_PATHS.includes(relative)) return;
+    const absolute = path.join(repository, relative);
+    const entry = lstatSync(absolute);
+    if (entry.isDirectory()) {
+      for (const name of readdirSync(absolute))
+        add(path.posix.join(relative, name));
+    } else if (entry.isFile()) files.push(relative);
+    else fail('installed-revision-unverified');
+  }
+  for (const relative of PLUGIN_RUNTIME_PATHS) add(relative);
+  return files;
 }
 
 function normalizedPluginState(value) {
@@ -548,8 +554,11 @@ function findInstalledPlugin(plugins, pluginId, repository, version) {
   }
   assertPluginBlind(installPath);
   try {
-    sourceDigest = hashFiles(repositoryRoot, CRITICAL_PLUGIN_FILES);
-    installedDigest = hashFiles(installPath, CRITICAL_PLUGIN_FILES);
+    sourceDigest = hashFiles(
+      repositoryRoot,
+      pluginRuntimeFiles(repositoryRoot),
+    );
+    installedDigest = hashFiles(installPath, pluginRuntimeFiles(installPath));
   } catch {
     fail('installed-revision-unverified');
   }
