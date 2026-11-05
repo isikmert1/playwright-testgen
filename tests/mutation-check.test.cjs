@@ -56,6 +56,21 @@ function git(repository, args) {
   return result.stdout;
 }
 
+function assertProcessStopped(pid) {
+  if (process.platform !== 'linux') {
+    assert.throws(() => process.kill(pid, 0));
+    return;
+  }
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const state = stat.slice(stat.lastIndexOf(')') + 2).split(' ')[0];
+    // A terminated process can remain visible until its parent reaps it.
+    assert.ok(state === 'Z' || state === 'X', `PID ${pid} is still ${state}`);
+  } catch (error) {
+    if (error.code !== 'ENOENT' && error.code !== 'ESRCH') throw error;
+  }
+}
+
 function removeDisposableWorktree(repository) {
   const worktrees = git(repository, ['worktree', 'list', '--porcelain'])
     .split(/\r?\n/u)
@@ -913,7 +928,7 @@ test('stops runner descendants before removing a timed-out checkout', () => {
       assert.equal(result.status, 1);
       const output = JSON.parse(result.stdout);
       assert.equal(output.error, 'runner-timeout');
-      assert.throws(() => process.kill(pid, 0));
+      assertProcessStopped(pid);
       assert.equal(output.cleanup, 'removed');
       assert.equal(readFileSync(sentinel, 'utf8'), 'preserve me\n');
     } finally {
@@ -965,7 +980,7 @@ test('cancels an active runner and removes its isolation', async () => {
     assert.equal(output.status, 'verification-error');
     assert.equal(output.error, 'runner-cancelled');
     assert.equal(output.cleanup, 'removed');
-    assert.throws(() => process.kill(pid, 0));
+    assertProcessStopped(pid);
     assert.equal(
       existsSync(path.join(runDirectory, 'mutation-recovery.json')),
       false,
