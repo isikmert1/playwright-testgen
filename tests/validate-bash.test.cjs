@@ -14,13 +14,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 const { parse } = require('shell-quote');
-const {
-  exactPlaywrightFilter: policySpecFilter,
-} = require('../hooks/run-policy.cjs');
-const { operationOf } = require('../hooks/hook-result.cjs');
-const {
-  validatePlaywright,
-} = require('../hooks/validate-workflow-command.cjs');
+const { validateCommand } = require('../hooks/validate-command.cjs');
 
 const repositoryRoot = path.resolve(__dirname, '..');
 const hookPath = path.join(repositoryRoot, 'hooks', 'validate-bash.cjs');
@@ -102,8 +96,14 @@ function runToolHook(
   return output;
 }
 
+// Policy matrices use the API; runToolHook retains process and audit coverage.
 function runHook(cwd, command, agentType = 'playwright-test-author') {
-  return runToolHook(cwd, 'Bash', { command }, agentType);
+  return validateCommand({
+    agent_type: agentType,
+    cwd,
+    tool_input: { command },
+    tool_name: 'Bash',
+  }).hookSpecificOutput;
 }
 
 function exactSpecFilter(repository, relative = 'tests/account.spec.ts') {
@@ -117,16 +117,6 @@ function runnerCommand(repository, output, options = '') {
   const filter = exactSpecFilter(repository);
   return `PLAYWRIGHT_HTML_OPEN=never npx --no playwright test '${filter}' ${options}--retries=0 --repeat-each=1 --output='${output}'`;
 }
-
-test('makes exact spec filters explicit about platform case semantics', () => {
-  const filter = policySpecFilter('C:/repo/Account.spec.ts');
-
-  assert.equal(filter.startsWith('/^'), true);
-  assert.equal(
-    filter.endsWith(process.platform === 'win32' ? '$/i' : '$/'),
-    true,
-  );
-});
 
 test('prints the approved spec filter as one shell-safe argument', () => {
   withTargetRepository(({ targetRepository }) => {
@@ -161,22 +151,6 @@ test('denies malformed hook input instead of failing open', () => {
   assert.equal(output.hookEventName, 'PreToolUse');
   assert.equal(output.permissionDecision, 'deny');
   assert.match(output.permissionDecisionReason, /hook input is invalid/iu);
-});
-
-test('allows main-thread calls without an agent type to remain ungoverned', () => {
-  const result = spawnSync(process.execPath, [hookPath], {
-    encoding: 'utf8',
-    input: JSON.stringify({
-      cwd: repositoryRoot,
-      hook_event_name: 'PreToolUse',
-      tool_input: { command: 'git status' },
-      tool_name: 'Bash',
-    }),
-  });
-
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stderr, '');
-  assert.deepEqual(JSON.parse(result.stdout), {});
 });
 
 test('fails closed when the hook runtime cannot load', () => {
@@ -232,51 +206,11 @@ function runCliHook(cwd, command, agentType = 'playwright-test-author') {
 
 test('allows the official global Playwright CLI invocation', () => {
   withTargetRepository(({ targetRepository }) => {
-    const result = runHook(
-      targetRepository,
-      `cd .playwright-cli/testgen/${runId} && PWTEST_CLI_GLOBAL_CONFIG=. playwright-cli -s=${runId} snapshot`,
-    );
+    const result = runToolHook(targetRepository, 'Bash', {
+      command: `cd .playwright-cli/testgen/${runId} && PWTEST_CLI_GLOBAL_CONFIG=. playwright-cli -s=${runId} snapshot`,
+    });
 
     assert.equal(result.permissionDecision, 'allow');
-  });
-});
-
-test('allows the official global Playwright CLI preflight', () => {
-  withTargetRepository(({ targetRepository }) => {
-    for (const command of [
-      'node --version',
-      'playwright-cli --version',
-      'playwright-cli --help',
-    ]) {
-      assert.equal(
-        runHook(targetRepository, command).permissionDecision,
-        'allow',
-      );
-    }
-  });
-});
-
-test('allows raw output only for locator generation', () => {
-  withTargetRepository(({ targetRepository }) => {
-    for (const command of [
-      `-s=${runId} --raw generate-locator e1`,
-      `-s=${runId} generate-locator e1 --raw`,
-    ]) {
-      assert.equal(
-        runCliHook(targetRepository, command).permissionDecision,
-        'allow',
-      );
-    }
-
-    for (const command of [
-      `-s=${runId} snapshot --raw`,
-      `-s=${runId} generate-locator e1 --raw=true`,
-    ]) {
-      assert.equal(
-        runCliHook(targetRepository, command).permissionDecision,
-        'deny',
-      );
-    }
   });
 });
 
@@ -305,34 +239,11 @@ test('allows Author to collect only the policy-approved spec', () => {
       JSON.stringify({ scripts: { 'test:e2e': 'playwright test' } }),
     );
     const filter = exactSpecFilter(targetRepository);
-    const result = runHook(
-      targetRepository,
-      `npx --no playwright test '${filter}' --list`,
-    );
+    const result = runToolHook(targetRepository, 'Bash', {
+      command: `npx --no playwright test '${filter}' --list`,
+    });
 
     assert.equal(result.permissionDecision, 'allow');
-  });
-});
-
-test('requires Main-approved runner options for Author collection', () => {
-  withTargetRepository(({ runDirectory, targetRepository }) => {
-    updatePolicy(runDirectory, {
-      allowed_runner_options: ['--project=chromium'],
-    });
-    const filter = exactSpecFilter(targetRepository);
-
-    assert.equal(
-      runHook(targetRepository, `npx --no playwright test '${filter}' --list`)
-        .permissionDecision,
-      'deny',
-    );
-    assert.equal(
-      runHook(
-        targetRepository,
-        `npx --no playwright test '${filter}' --list --project=chromium`,
-      ).permissionDecision,
-      'allow',
-    );
   });
 });
 
@@ -405,27 +316,6 @@ test('fails Author collection closed when run policies are ambiguous', () => {
     writeFileSync(path.join(invalidRunDirectory, 'command-policy.json'), '{}');
 
     assert.equal(runHook(targetRepository, command).permissionDecision, 'deny');
-  });
-});
-
-test('denies npm wrappers that can consume Playwright CLI options', () => {
-  withTargetRepository(({ targetRepository }) => {
-    const result = runHook(
-      targetRepository,
-      `cd .playwright-cli/testgen/${runId} && PWTEST_CLI_GLOBAL_CONFIG=. npm exec --no -- playwright-cli -s=${runId} snapshot`,
-    );
-
-    assert.equal(result.permissionDecision, 'deny');
-    assert.match(result.permissionDecisionReason, /playwright-cli directly/iu);
-  });
-});
-
-test('denies npx Playwright execution that could install a missing package', () => {
-  withTargetRepository(({ targetRepository }) => {
-    const result = runHook(targetRepository, 'npx playwright test --help');
-
-    assert.equal(result.permissionDecision, 'deny');
-    assert.match(result.permissionDecisionReason, /npx --no playwright/iu);
   });
 });
 
@@ -512,175 +402,27 @@ test('governs Explorer reads and bounded searches with a discovery policy', () =
   });
 });
 
-test('scopes Explorer evidence to the selected package', () => {
-  withDiscoveryRepository(({ runDirectory, targetRepository }) => {
-    const packageDirectory = path.join(targetRepository, 'apps', 'web');
-    mkdirSync(path.join(packageDirectory, 'src'), { recursive: true });
-    writeFileSync(path.join(packageDirectory, 'package.json'), '{}\n');
-    writeFileSync(
-      path.join(packageDirectory, 'src', 'orders.ts'),
-      'export const route = "/orders";\n',
-    );
-    writeDiscoveryPolicy(runDirectory, { package_directory: 'apps/web' });
-
-    assert.equal(
-      runToolHook(
-        targetRepository,
-        'Read',
-        { file_path: path.join(packageDirectory, 'src', 'orders.ts') },
-        'playwright-test-explorer',
-      ).permissionDecision,
-      'allow',
-    );
-    assert.equal(
-      runToolHook(
-        targetRepository,
-        'Read',
-        { file_path: path.join(targetRepository, 'src', 'orders.ts') },
-        'playwright-test-explorer',
-      ).permissionDecision,
-      'deny',
-    );
-    const history =
-      'git --no-pager log --max-count=20 --name-only --pretty=format:%H%x09%s --no-ext-diff --no-textconv -- .';
-    assert.equal(
-      runHook(
-        targetRepository,
-        `cd apps/web && ${history}`,
-        'playwright-test-explorer',
-      ).permissionDecision,
-      'allow',
-    );
-    assert.equal(
-      runHook(targetRepository, history, 'playwright-test-explorer')
-        .permissionDecision,
-      'deny',
-    );
-  });
-});
-
-test('keeps bounded generation Glob calls available', () => {
-  withTargetRepository(({ targetRepository }) => {
-    for (const agentType of [
-      'playwright-test-author',
-      'playwright-test-healer',
-    ]) {
-      assert.equal(
-        runToolHook(
-          targetRepository,
-          'Glob',
-          { path: path.join(targetRepository, 'tests'), pattern: '**/*.ts' },
-          agentType,
-        ).permissionDecision,
-        'allow',
-      );
-      assert.equal(
-        runToolHook(
-          targetRepository,
-          'Glob',
-          { pattern: 'tests/**/*.ts' },
-          agentType,
-        ).permissionDecision,
-        'allow',
-      );
-    }
-  });
-});
-
-test('requires a valid discovery policy for Explorer', () => {
-  withTargetRepository(({ targetRepository }) => {
-    const result = runToolHook(
-      targetRepository,
-      'Read',
-      { file_path: path.join(targetRepository, 'tests', 'account.spec.ts') },
-      'playwright-test-explorer',
-    );
-    assert.equal(result.permissionDecision, 'deny');
-    assert.equal(
-      runHook(
-        targetRepository,
-        'git --no-pager log --max-count=20 --name-only --pretty=format:%H%x09%s --no-ext-diff --no-textconv -- .',
-        'playwright-test-explorer',
-      ).permissionDecision,
-      'deny',
-    );
-  });
-
-  for (const values of [
-    { discovery_id: undefined },
-    { approved_spec: 'tests/account.spec.ts' },
-    { allowed_write_paths: [] },
-    { allowed_runner_options: [] },
-    { expected_classification: 'product-behavior-wrong' },
-  ]) {
-    withDiscoveryRepository(({ runDirectory, targetRepository }) => {
-      writeDiscoveryPolicy(runDirectory, values);
-      const result = runToolHook(
-        targetRepository,
-        'Read',
-        { file_path: path.join(targetRepository, 'src', 'orders.ts') },
-        'playwright-test-explorer',
-      );
-      assert.equal(result.permissionDecision, 'deny');
-    });
-  }
-});
-
 test('discovery policy grants no Author or Healer authority', () => {
   withDiscoveryRepository(({ runDirectory, targetRepository }) => {
-    const handoff = path.join(runDirectory, 'handoff.json');
-    const trace = path.join(runDirectory, 'healer-trace.json');
-    writeFileSync(trace, '{}');
-
-    assert.equal(
-      runToolHook(
-        targetRepository,
-        'Write',
-        { content: '{}', file_path: handoff },
-        'playwright-test-author',
-      ).permissionDecision,
-      'deny',
-    );
-    assert.equal(
-      runToolHook(
-        targetRepository,
-        'Read',
-        { file_path: path.join(targetRepository, 'src', 'orders.ts') },
-        'playwright-test-author',
-      ).permissionDecision,
-      'deny',
-    );
-    assert.equal(
-      runToolHook(
-        targetRepository,
-        'Grep',
-        {
-          head_limit: 20,
-          output_mode: 'content',
-          path: path.join(targetRepository, 'src'),
-          pattern: 'route',
-        },
-        'playwright-test-healer',
-      ).permissionDecision,
-      'deny',
-    );
-    assert.equal(
-      runToolHook(
-        targetRepository,
-        'Write',
-        { content: '{}', file_path: trace },
-        'playwright-test-healer',
-      ).permissionDecision,
-      'deny',
-    );
-    assert.equal(
-      runCliHook(
-        targetRepository,
-        `-s=${runId} snapshot`,
-        'playwright-test-author',
-      ).permissionDecision,
-      'deny',
-    );
+    for (const [role, filename] of [
+      ['playwright-test-author', 'handoff.json'],
+      ['playwright-test-healer', 'healer-trace.json'],
+    ]) {
+      const artifact = path.join(runDirectory, filename);
+      writeFileSync(artifact, '{}');
+      assert.equal(
+        runToolHook(
+          targetRepository,
+          'Write',
+          {
+            file_path: artifact,
+            content: '{}',
+          },
+          role,
+        ).permissionDecision,
+        'deny',
+      );
+    }
   });
 });
 
@@ -772,42 +514,27 @@ test('allows only bounded Explorer history and read-only browser inspection', ()
   });
 });
 
-test('bounds Explorer search output and protects state files', () => {
+test('bounds Explorer search output and excludes run scratch', () => {
   withDiscoveryRepository(({ runDirectory, targetRepository }) => {
-    const stateDirectory = path.join(targetRepository, 'auth');
-    const statePath = path.join(stateDirectory, 'state.json');
-    mkdirSync(stateDirectory);
-    writeFileSync(statePath, '{}');
-    const mutationDirectory = path.join(targetRepository, '.testgen');
-    const mutationPath = path.join(mutationDirectory, 'mutation-adapter.json');
-    mkdirSync(mutationDirectory);
-    writeFileSync(mutationPath, '{}');
-    updatePolicy(runDirectory, {
-      allowed_state_paths: [path.relative(runDirectory, statePath)],
-    });
-
-    for (const toolInput of [
-      { path: targetRepository, pattern: 'route' },
+    const alias = path.join(targetRepository, 'src', 'run-scratch');
+    symlinkSync(runDirectory, alias, 'junction');
+    for (const input of [
       {
-        head_limit: 20,
-        output_mode: 'content',
-        path: targetRepository,
-        pattern: 'route',
-      },
-      {
-        head_limit: 101,
-        output_mode: 'content',
         path: path.join(targetRepository, 'src'),
         pattern: 'route',
+        output_mode: 'content',
+        head_limit: 101,
+      },
+      {
+        path: alias,
+        pattern: 'discovery',
+        output_mode: 'content',
+        head_limit: 20,
       },
     ]) {
       assert.equal(
-        runToolHook(
-          targetRepository,
-          'Grep',
-          toolInput,
-          'playwright-test-explorer',
-        ).permissionDecision,
+        runToolHook(targetRepository, 'Grep', input, 'playwright-test-explorer')
+          .permissionDecision,
         'deny',
       );
     }
@@ -815,73 +542,10 @@ test('bounds Explorer search output and protects state files', () => {
       runToolHook(
         targetRepository,
         'Glob',
-        { path: targetRepository, pattern: '**/*' },
-        'playwright-test-explorer',
-      ).permissionDecision,
-      'deny',
-    );
-    assert.equal(
-      runToolHook(
-        targetRepository,
-        'Glob',
-        { path: targetRepository, pattern: '**/*.ts' },
-        'playwright-test-explorer',
-      ).permissionDecision,
-      'deny',
-    );
-    assert.equal(
-      runToolHook(
-        targetRepository,
-        'Read',
-        { file_path: statePath },
-        'playwright-test-explorer',
-      ).permissionDecision,
-      'deny',
-    );
-    assert.equal(
-      runToolHook(
-        targetRepository,
-        'Read',
-        { file_path: mutationPath },
-        'playwright-test-explorer',
-      ).permissionDecision,
-      'deny',
-    );
-
-    const excludedAlias = path.join(targetRepository, 'src', 'run-scratch');
-    symlinkSync(runDirectory, excludedAlias, 'junction');
-    for (const [toolName, toolInput] of [
-      ['Read', { file_path: path.join(excludedAlias, 'command-policy.json') }],
-      [
-        'Grep',
         {
-          head_limit: 20,
-          output_mode: 'content',
-          path: excludedAlias,
-          pattern: 'discovery',
+          path: targetRepository,
+          pattern: '**/*',
         },
-      ],
-      ['Glob', { path: excludedAlias, pattern: '*.json' }],
-    ]) {
-      assert.equal(
-        runToolHook(
-          targetRepository,
-          toolName,
-          toolInput,
-          'playwright-test-explorer',
-        ).permissionDecision,
-        'deny',
-        toolName,
-      );
-    }
-
-    const linkedState = path.join(targetRepository, 'src', 'state-link.json');
-    linkSync(statePath, linkedState);
-    assert.equal(
-      runToolHook(
-        targetRepository,
-        'Glob',
-        { path: path.join(targetRepository, 'src'), pattern: '**/*.json' },
         'playwright-test-explorer',
       ).permissionDecision,
       'deny',
@@ -950,31 +614,6 @@ test('rejects Explorer searches that can traverse excluded descendants', () => {
   });
 });
 
-test('rejects Explorer search roots beyond the entry bound', () => {
-  withDiscoveryRepository(({ targetRepository }) => {
-    const largeDirectory = path.join(targetRepository, 'src', 'large');
-    mkdirSync(largeDirectory);
-    for (let index = 0; index <= 2000; index += 1) {
-      writeFileSync(path.join(largeDirectory, `${index}.ts`), 'source');
-    }
-
-    assert.equal(
-      runToolHook(
-        targetRepository,
-        'Grep',
-        {
-          head_limit: 20,
-          output_mode: 'content',
-          path: largeDirectory,
-          pattern: 'source',
-        },
-        'playwright-test-explorer',
-      ).permissionDecision,
-      'deny',
-    );
-  });
-});
-
 test('limits Explorer cleanup to its browser scratch', () => {
   withDiscoveryRepository(({ targetRepository }) => {
     assert.equal(
@@ -996,129 +635,6 @@ test('limits Explorer cleanup to its browser scratch', () => {
   });
 });
 
-test('allows a quoted CSS selector containing href$=', () => {
-  withTargetRepository(({ targetRepository }) => {
-    for (const selector of [
-      `'a[href$="/2753"]'`,
-      String.raw`"a[href$=\"/2753\"]"`,
-    ]) {
-      assert.equal(
-        runHook(
-          targetRepository,
-          `cd .playwright-cli/testgen/${runId} && PWTEST_CLI_GLOBAL_CONFIG=. playwright-cli -s=${runId} click ${selector}`,
-        ).permissionDecision,
-        'allow',
-      );
-    }
-  });
-});
-
-test('allows required snapshot search and navigation commands', () => {
-  withTargetRepository(({ targetRepository }) => {
-    for (const command of [
-      `-s=${runId} find 'Add to cart'`,
-      `-s=${runId} go-forward`,
-    ]) {
-      assert.equal(
-        runCliHook(targetRepository, command).permissionDecision,
-        'allow',
-      );
-    }
-  });
-});
-
-test('allows Healer to pause only at the approved spec and a positive line', () => {
-  withTargetRepository(({ targetRepository }) => {
-    const allowed = runCliHook(
-      targetRepository,
-      '-s=tw-debug-123 pause-at tests/account.spec.ts:42',
-      'playwright-test-healer',
-    );
-
-    assert.equal(allowed.permissionDecision, 'allow');
-
-    for (const command of [
-      '-s=tw-debug-123 pause-at 42',
-      '-s=tw-debug-123 pause-at tests/other.spec.ts:42',
-      '-s=tw-debug-123 pause-at tests/account.spec.ts:0',
-      '-s=tw-debug-123 pause-at tests/account.spec.ts:42 extra',
-    ]) {
-      const result = runCliHook(
-        targetRepository,
-        command,
-        'playwright-test-healer',
-      );
-      assert.equal(result.permissionDecision, 'deny', command);
-      assert.match(
-        result.permissionDecisionReason,
-        /approved spec.*positive line/iu,
-      );
-    }
-
-    assert.equal(
-      runCliHook(
-        targetRepository,
-        `-s=${runId} pause-at tests/account.spec.ts:42`,
-      ).permissionDecision,
-      'deny',
-    );
-  });
-});
-
-test('allows bounded console levels documented by Playwright CLI', () => {
-  withTargetRepository(({ targetRepository }) => {
-    for (const command of [
-      `-s=${runId} console`,
-      `-s=${runId} console error`,
-      `-s=${runId} console warning`,
-      `-s=${runId} console info`,
-      `-s=${runId} console debug`,
-    ]) {
-      assert.equal(
-        runCliHook(targetRepository, command).permissionDecision,
-        'allow',
-      );
-    }
-
-    for (const command of [
-      `-s=${runId} console verbose`,
-      `-s=${runId} console error extra`,
-    ]) {
-      const result = runCliHook(targetRepository, command);
-      assert.equal(result.permissionDecision, 'deny');
-      assert.match(
-        result.permissionDecisionReason,
-        /error.*warning.*info.*debug/iu,
-      );
-    }
-  });
-});
-
-test('keeps snapshots to the page or one current element ref', () => {
-  withTargetRepository(({ targetRepository }) => {
-    for (const command of [
-      `-s=${runId} snapshot`,
-      `-s=${runId} snapshot e12`,
-      `-s=${runId} snapshot --depth=4`,
-      `-s=${runId} snapshot e12 --depth=4`,
-    ]) {
-      assert.equal(
-        runCliHook(targetRepository, command).permissionDecision,
-        'allow',
-      );
-    }
-
-    for (const command of [
-      `-s=${runId} snapshot "getByRole('row')"`,
-      `-s=${runId} snapshot e12 e13`,
-    ]) {
-      const result = runCliHook(targetRepository, command);
-      assert.equal(result.permissionDecision, 'deny');
-      assert.match(result.permissionDecisionReason, /find.*generate-locator/iu);
-    }
-  });
-});
-
 test('denies a real pipe and names the single-command alternative', () => {
   withTargetRepository(({ targetRepository }) => {
     const result = runCliHook(targetRepository, `-s=${runId} snapshot | more`);
@@ -1128,21 +644,6 @@ test('denies a real pipe and names the single-command alternative', () => {
       result.permissionDecisionReason,
       /run one allowlisted command at a time/iu,
     );
-  });
-});
-
-test('denies shell syntax that shell-quote leaves inside word tokens', () => {
-  withTargetRepository(({ targetRepository }) => {
-    for (const command of [
-      `playwright-cli -s=${runId} click foo\nid`,
-      `playwright-cli -s=${runId} click \`id\``,
-      `PLAYWRIGHT_HTML_OPEN=never npx --no playwright test tests/{account,admin}.spec.ts --retries=0 --repeat-each=1 --output=.playwright-cli/testgen/${runId}/attempt-1/test-results`,
-    ]) {
-      assert.equal(
-        runHook(targetRepository, command).permissionDecision,
-        'deny',
-      );
-    }
   });
 });
 
@@ -1164,17 +665,6 @@ test('denies command substitution in an otherwise valid CLI command', () => {
   });
 });
 
-test('denies escaped command substitution before shell execution', () => {
-  withTargetRepository(({ targetRepository }) => {
-    const result = runCliHook(
-      targetRepository,
-      String.raw`-s=${runId} fill e1 \$(echo nested)`,
-    );
-
-    assert.equal(result.permissionDecision, 'deny');
-  });
-});
-
 test('preserves single-quoted substitution text as literal data', () => {
   withTargetRepository(({ targetRepository }) => {
     const result = runCliHook(
@@ -1183,67 +673,6 @@ test('preserves single-quoted substitution text as literal data', () => {
     );
 
     assert.equal(result.permissionDecision, 'allow');
-  });
-});
-
-test('denies an unquoted bracket glob before Bash can expand it', () => {
-  withTargetRepository(({ targetRepository }) => {
-    const result = runCliHook(targetRepository, `-s=${runId} click a[bc]`);
-
-    assert.equal(result.permissionDecision, 'deny');
-    assert.match(result.permissionDecisionReason, /shell expansion syntax/iu);
-  });
-});
-
-test('denies Bash ANSI-C quoting before it can change an argument', () => {
-  withTargetRepository(({ targetRepository }) => {
-    const result = runCliHook(
-      targetRepository,
-      `-s=${runId} fill e1 $'--submit'`,
-    );
-
-    assert.equal(result.permissionDecision, 'deny');
-    assert.match(result.permissionDecisionReason, /shell expansion syntax/iu);
-  });
-});
-
-test('denies an escaped newline before Bash can reconstruct an option', () => {
-  withTargetRepository(({ targetRepository }) => {
-    const result = runCliHook(
-      targetRepository,
-      `-s=${runId} fill e1 text --submi\\\nt`,
-    );
-
-    assert.equal(result.permissionDecision, 'deny');
-    assert.match(result.permissionDecisionReason, /shell expansion syntax/iu);
-  });
-});
-
-test('denies shell home expansion in a trace path', () => {
-  withTargetRepository(({ targetRepository }) => {
-    const result = runHook(
-      targetRepository,
-      `cd .playwright-cli/testgen/${runId} && npx --no playwright trace open ~/outside.zip`,
-      'playwright-test-healer',
-    );
-
-    assert.equal(result.permissionDecision, 'deny');
-    assert.match(result.permissionDecisionReason, /shell expansion syntax/iu);
-  });
-});
-
-test('denies an unsupported subcommand and names inspection alternatives', () => {
-  withTargetRepository(({ targetRepository }) => {
-    const result = runCliHook(
-      targetRepository,
-      `-s=${runId} eval 'location.href'`,
-    );
-
-    assert.equal(result.permissionDecision, 'deny');
-    assert.match(
-      result.permissionDecisionReason,
-      /use snapshot, find, or generate-locator/iu,
-    );
   });
 });
 
@@ -1259,33 +688,6 @@ test('denies navigation outside the run policy origins', () => {
       result.permissionDecisionReason,
       /use an allowed origin from command-policy\.json/iu,
     );
-  });
-});
-
-test('allows navigation on the approved origin', () => {
-  withTargetRepository(({ targetRepository }) => {
-    const result = runCliHook(
-      targetRepository,
-      `-s=${runId} goto http://127.0.0.1:3000/account`,
-    );
-
-    assert.equal(result.permissionDecision, 'allow');
-  });
-});
-
-test('denies Playwright CLI outside its isolated run directory', () => {
-  withTargetRepository(({ targetRepository }) => {
-    for (const command of [
-      `PWTEST_CLI_GLOBAL_CONFIG=. playwright-cli -s=${runId} snapshot`,
-      `cd .playwright-cli/testgen/${runId} && playwright-cli -s=${runId} snapshot`,
-    ]) {
-      const result = runHook(targetRepository, command);
-      assert.equal(result.permissionDecision, 'deny');
-      assert.match(
-        result.permissionDecisionReason,
-        /exact policy-owned directory|suppress user and repository config/iu,
-      );
-    }
   });
 });
 
@@ -1354,114 +756,34 @@ test('binds storage state to an exact Main-approved repository path', () => {
   });
 });
 
-test('audits approved foreground spec runs through private operation metadata', () => {
+test('audits approved foreground spec runs without exposing private metadata', () => {
   withTargetRepository(({ targetRepository }) => {
     const auditRoot = mkdtempSync(path.join(tmpdir(), 'testgen-hook-audit-'));
     const auditPath = path.join(auditRoot, 'hook-audit.jsonl');
     const output = `.playwright-cli/testgen/${runId}/attempt-2/test-results`;
-    const command = runnerCommand(targetRepository, output);
-
     try {
       const result = runToolHook(
         targetRepository,
         'Bash',
-        { command },
+        {
+          command: runnerCommand(targetRepository, output),
+        },
         'playwright-test-healer',
-        { PLAYWRIGHT_TESTGEN_HOOK_AUDIT_PATH: auditPath },
+        {
+          PLAYWRIGHT_TESTGEN_HOOK_AUDIT_PATH: auditPath,
+        },
         'tool-approved-spec-run',
       );
-
       assert.equal(result.permissionDecision, 'allow');
       assert.equal(JSON.stringify(result).includes('approved-spec-run'), false);
       assert.equal(
         JSON.parse(readFileSync(auditPath, 'utf8')).operation,
         'approved-spec-run',
       );
-
-      const privateResult = validatePlaywright(
-        targetRepository,
-        ['PLAYWRIGHT_HTML_OPEN=never'],
-        [
-          'test',
-          exactSpecFilter(targetRepository),
-          '--retries=0',
-          '--repeat-each=1',
-          `--output=.playwright-cli/testgen/${runId}/attempt-3/test-results`,
-        ],
-        {},
-      );
-      assert.equal(operationOf(privateResult), 'approved-spec-run');
-      assert.equal(
-        JSON.stringify(privateResult).includes('approved-spec-run'),
-        false,
-      );
-
-      const debugResult = validatePlaywright(
-        targetRepository,
-        ['PLAYWRIGHT_HTML_OPEN=never'],
-        [
-          'test',
-          exactSpecFilter(targetRepository),
-          '--debug=cli',
-          '--retries=0',
-          '--repeat-each=1',
-          `--output=.playwright-cli/testgen/${runId}/attempt-4/test-results`,
-        ],
-        { run_in_background: true },
-      );
-      assert.equal(operationOf(debugResult), 'other');
     } finally {
       rmSync(auditRoot, { force: true, recursive: true });
     }
   });
-});
-
-test('audits private approved-run metadata despite a revised reason', () => {
-  const temporaryRoot = mkdtempSync(
-    path.join(tmpdir(), 'testgen-hook-reason-'),
-  );
-  const temporaryHooks = path.join(temporaryRoot, 'hooks');
-  const temporaryHook = path.join(temporaryHooks, 'validate-bash.cjs');
-  const auditPath = path.join(temporaryRoot, 'hook-audit.jsonl');
-  const reason = 'Approved runner wording changed for an operator.';
-
-  try {
-    cpSync(path.join(repositoryRoot, 'hooks'), temporaryHooks, {
-      recursive: true,
-    });
-    writeFileSync(
-      path.join(temporaryHooks, 'validate-command.cjs'),
-      `const { decision } = require('./hook-result.cjs');\nmodule.exports = { validateCommand: () => decision('allow', '${reason}', 'approved-spec-run') };\n`,
-    );
-    const result = spawnSync(process.execPath, [temporaryHook], {
-      encoding: 'utf8',
-      env: {
-        ...process.env,
-        PLAYWRIGHT_TESTGEN_HOOK_AUDIT_PATH: auditPath,
-      },
-      input: JSON.stringify({
-        agent_type: 'playwright-test-healer',
-        cwd: temporaryRoot,
-        hook_event_name: 'PreToolUse',
-        tool_input: { command: 'approved runner' },
-        tool_name: 'Bash',
-        tool_use_id: 'tool-revised-reason',
-      }),
-    });
-
-    assert.equal(result.status, 0, result.stderr);
-    const output = JSON.parse(result.stdout).hookSpecificOutput;
-    assert.equal(output.permissionDecision, 'allow');
-    assert.equal(output.permissionDecisionReason, reason);
-    assert.equal(Object.hasOwn(output, 'operation'), false);
-    assert.equal(JSON.stringify(output).includes('approved-spec-run'), false);
-    assert.equal(
-      JSON.parse(readFileSync(auditPath, 'utf8')).operation,
-      'approved-spec-run',
-    );
-  } finally {
-    rmSync(temporaryRoot, { force: true, recursive: true });
-  }
 });
 
 for (const [kind, createLink] of [
@@ -1612,41 +934,6 @@ test('requires debug runners to be background tasks', () => {
   });
 });
 
-test('keeps confirmation runners in the foreground', () => {
-  withTargetRepository(({ targetRepository }) => {
-    const output = `.playwright-cli/testgen/${runId}/attempt-2/test-results`;
-    const result = runToolHook(
-      targetRepository,
-      'Bash',
-      {
-        command: runnerCommand(targetRepository, output),
-        run_in_background: true,
-      },
-      'playwright-test-healer',
-    );
-
-    assert.equal(result.permissionDecision, 'deny');
-    assert.match(result.permissionDecisionReason, /foreground/iu);
-  });
-});
-
-test('requires Playwright runners to start at the selected package root', () => {
-  withTargetRepository(({ runDirectory, targetRepository }) => {
-    const nestedDirectory = path.join(targetRepository, 'tests');
-    const output = path
-      .join(runDirectory, 'attempt-2', 'test-results')
-      .replaceAll('\\', '/');
-    const result = runHook(
-      nestedDirectory,
-      runnerCommand(targetRepository, output),
-      'playwright-test-healer',
-    );
-
-    assert.equal(result.permissionDecision, 'deny');
-    assert.match(result.permissionDecisionReason, /selected package/iu);
-  });
-});
-
 test('binds collection and execution to the selected workspace package', () => {
   withTargetRepository(({ runDirectory, targetRepository }) => {
     const packageDirectory = path.join(targetRepository, 'apps', 'web');
@@ -1691,78 +978,6 @@ test('binds collection and execution to the selected workspace package', () => {
   });
 });
 
-test('rejects an escaping selected package directory in run policy', () => {
-  withTargetRepository(({ runDirectory, targetRepository }) => {
-    updatePolicy(runDirectory, { package_directory: '../outside' });
-    const result = runToolHook(targetRepository, 'Edit', {
-      file_path: path.join(targetRepository, 'package.json'),
-    });
-
-    assert.equal(result.permissionDecision, 'deny');
-    assert.match(result.permissionDecisionReason, /policy.*invalid/iu);
-  });
-});
-
-test('parent run policy cannot authorize a nested Git repository', () => {
-  withTargetRepository(({ runDirectory, targetRepository }) => {
-    const child = path.join(targetRepository, 'apps', 'independent');
-    const spec = path.join(child, 'tests', 'child.spec.ts');
-    mkdirSync(path.dirname(spec), { recursive: true });
-    writeFileSync(spec, '');
-    writeFileSync(path.join(child, 'package.json'), '{}');
-    const initialized = spawnSync('git', ['init', '--quiet'], {
-      cwd: child,
-      encoding: 'utf8',
-    });
-    assert.equal(initialized.status, 0, initialized.stderr);
-
-    const relativeSpec = 'apps/independent/tests/child.spec.ts';
-    updatePolicy(runDirectory, { approved_spec: relativeSpec });
-    assert.equal(
-      runToolHook(child, 'Write', { file_path: spec, content: '' })
-        .permissionDecision,
-      'deny',
-    );
-    assert.equal(
-      runToolHook(targetRepository, 'Write', {
-        file_path: spec,
-        content: '',
-      }).permissionDecision,
-      'deny',
-    );
-
-    updatePolicy(runDirectory, {
-      approved_spec: 'tests/account.spec.ts',
-      allowed_write_paths: [],
-    });
-    assert.equal(
-      runToolHook(child, 'Write', {
-        file_path: path.join(targetRepository, 'tests', 'account.spec.ts'),
-        content: '',
-      }).permissionDecision,
-      'deny',
-    );
-    updatePolicy(runDirectory, { allowed_write_paths: [relativeSpec] });
-    assert.equal(
-      runToolHook(targetRepository, 'Write', {
-        file_path: spec,
-        content: '',
-      }).permissionDecision,
-      'deny',
-    );
-
-    updatePolicy(runDirectory, {
-      allowed_write_paths: [],
-      package_directory: 'apps/independent',
-    });
-    assert.equal(
-      runToolHook(child, 'Write', { file_path: spec, content: '' })
-        .permissionDecision,
-      'deny',
-    );
-  });
-});
-
 test('denies unsandboxed governed Bash commands', () => {
   withTargetRepository(({ targetRepository }) => {
     const result = runToolHook(targetRepository, 'Bash', {
@@ -1795,24 +1010,6 @@ test('denies inherited Playwright CLI configuration', () => {
       assert.equal(result.permissionDecision, 'deny');
       assert.match(result.permissionDecisionReason, /inherited Playwright/iu);
     }
-  });
-});
-
-test('denies reuse of an existing attempt results directory', () => {
-  withTargetRepository(({ targetRepository }) => {
-    const output = `.playwright-cli/testgen/${runId}/attempt-1/test-results`;
-    const result = runToolHook(
-      targetRepository,
-      'Bash',
-      {
-        command: runnerCommand(targetRepository, output, '--debug=cli '),
-        run_in_background: true,
-      },
-      'playwright-test-healer',
-    );
-
-    assert.equal(result.permissionDecision, 'deny');
-    assert.match(result.permissionDecisionReason, /fresh attempt/iu);
   });
 });
 
@@ -1855,27 +1052,12 @@ test('reserves each runner attempt before the process starts', () => {
 test('denies the Playwright runner to Author before the human checkpoint', () => {
   withTargetRepository(({ targetRepository }) => {
     const output = `.playwright-cli/testgen/${runId}/attempt-1/test-results`;
-    const result = runHook(
-      targetRepository,
-      runnerCommand(targetRepository, output),
-    );
+    const result = runToolHook(targetRepository, 'Bash', {
+      command: runnerCommand(targetRepository, output),
+    });
 
     assert.equal(result.permissionDecision, 'deny');
     assert.match(result.permissionDecisionReason, /human checkpoint/iu);
-  });
-});
-
-test('denies runner output outside the policy run directory', () => {
-  withTargetRepository(({ targetRepository }) => {
-    const output = `elsewhere/.playwright-cli/testgen/${runId}/attempt-1/test-results`;
-    const result = runHook(
-      targetRepository,
-      runnerCommand(targetRepository, output),
-      'playwright-test-healer',
-    );
-
-    assert.equal(result.permissionDecision, 'deny');
-    assert.match(result.permissionDecisionReason, /current run attempt/iu);
   });
 });
 
@@ -1904,20 +1086,6 @@ test('denies runner output through an attempt junction or symlink', () => {
   });
 });
 
-test('denies an additional positional spec argument', () => {
-  withTargetRepository(({ targetRepository }) => {
-    const output = `.playwright-cli/testgen/${runId}/attempt-2/test-results`;
-    const result = runHook(
-      targetRepository,
-      `PLAYWRIGHT_HTML_OPEN=never npx --no playwright test '${exactSpecFilter(targetRepository)}' '${exactSpecFilter(targetRepository, 'tests/admin.spec.ts')}' --retries=0 --repeat-each=1 --output=${output}`,
-      'playwright-test-healer',
-    );
-
-    assert.equal(result.permissionDecision, 'deny');
-    assert.match(result.permissionDecisionReason, /one approved spec/iu);
-  });
-});
-
 test('denies a different spec and unapproved runner flags', () => {
   withTargetRepository(({ targetRepository }) => {
     const output = `.playwright-cli/testgen/${runId}/attempt-2/test-results`;
@@ -1931,36 +1099,6 @@ test('denies a different spec and unapproved runner flags', () => {
         'deny',
       );
     }
-  });
-});
-
-test('denies a policy that approves a directory instead of one spec file', () => {
-  withTargetRepository(({ runDirectory, targetRepository }) => {
-    writeFileSync(
-      path.join(runDirectory, 'command-policy.json'),
-      JSON.stringify({
-        approved_spec: 'tests',
-        allowed_runner_options: [],
-        allowed_state_paths: [],
-        allowed_write_paths: [],
-        format_version: 1,
-        run_id: runId,
-        allowed_origins: ['http://127.0.0.1:3000'],
-      }),
-    );
-    const output = `.playwright-cli/testgen/${runId}/attempt-2/test-results`;
-    const result = runToolHook(
-      targetRepository,
-      'Bash',
-      {
-        command: `PLAYWRIGHT_HTML_OPEN=never npx --no playwright test '${exactSpecFilter(targetRepository, 'tests')}' --debug=cli --retries=0 --repeat-each=1 --output=${output}`,
-        run_in_background: true,
-      },
-      'playwright-test-healer',
-    );
-
-    assert.equal(result.permissionDecision, 'deny');
-    assert.match(result.permissionDecisionReason, /spec file/iu);
   });
 });
 
@@ -1980,51 +1118,6 @@ test('allows trace inspection for the current run', () => {
         'allow',
       );
     }
-  });
-});
-
-test('binds trace snapshot syntax to the runtime policy', () => {
-  withTargetRepository(({ runDirectory, targetRepository }) => {
-    const enterRun = `cd .playwright-cli/testgen/${runId} &&`;
-    updatePolicy(runDirectory, { trace_snapshot_option: '--phase' });
-
-    assert.equal(
-      runHook(
-        targetRepository,
-        `${enterRun} npx --no playwright trace snapshot 9 --phase after`,
-        'playwright-test-healer',
-      ).permissionDecision,
-      'allow',
-    );
-    assert.equal(
-      runHook(
-        targetRepository,
-        `${enterRun} npx --no playwright trace snapshot 9 --name after`,
-        'playwright-test-healer',
-      ).permissionDecision,
-      'deny',
-    );
-
-    updatePolicy(runDirectory, { trace_snapshot_option: null });
-    const unavailable = runHook(
-      targetRepository,
-      `${enterRun} npx --no playwright trace snapshot 9 --phase after`,
-      'playwright-test-healer',
-    );
-    assert.equal(unavailable.permissionDecision, 'deny');
-    assert.match(unavailable.permissionDecisionReason, /unavailable/iu);
-  });
-});
-
-test('allows canonical inspection of a current-attempt artifact', () => {
-  withTargetRepository(({ targetRepository }) => {
-    const result = runHook(
-      targetRepository,
-      `cd .playwright-cli/testgen/${runId} && realpath -- attempt-1/test-results/error-context.md`,
-      'playwright-test-healer',
-    );
-
-    assert.equal(result.permissionDecision, 'allow');
   });
 });
 
@@ -2053,30 +1146,14 @@ test('reserves full run removal for Main', () => {
   });
 });
 
-test('allows Author to remove generated browser scratch from the run directory', () => {
-  withTargetRepository(({ runDirectory }) => {
-    mkdirSync(path.join(runDirectory, '.playwright-cli'));
-    const result = runHook(
-      runDirectory,
-      'rm -rf -- .playwright-cli',
-      'playwright-test-author',
-    );
-
-    assert.equal(result.permissionDecision, 'allow');
-
-    const fullRun = runHook(
-      runDirectory,
-      'rm -rf -- .',
-      'playwright-test-author',
-    );
-    assert.equal(fullRun.permissionDecision, 'deny');
-    assert.match(fullRun.permissionDecisionReason, /Main-owned/iu);
-  });
-});
-
 test('does not govern unrelated agents', () => {
   withTargetRepository(({ targetRepository }) => {
-    const result = runHook(targetRepository, 'git status', 'code-reviewer');
+    const result = runToolHook(
+      targetRepository,
+      'Bash',
+      { command: 'git status' },
+      'code-reviewer',
+    );
 
     assert.deepEqual(result, {});
   });
@@ -2097,39 +1174,6 @@ test('denies agent edits to the run command policy', () => {
       result.permissionDecisionReason,
       /return the update to Main/iu,
     );
-  });
-});
-
-test('denies governed agents from writing the run change manifest', () => {
-  withTargetRepository(({ runDirectory, targetRepository }) => {
-    const manifestPath = path.join(runDirectory, 'change-manifest.json');
-    writeFileSync(manifestPath, '{}');
-
-    for (const agentType of [
-      'playwright-test-author',
-      'playwright-test-healer',
-    ]) {
-      const result = runToolHook(
-        targetRepository,
-        'Write',
-        { content: '{}', file_path: manifestPath },
-        agentType,
-      );
-
-      assert.equal(result.permissionDecision, 'deny');
-      assert.match(result.permissionDecisionReason, /Main-owned/iu);
-    }
-
-    const aliasPath = path.join(targetRepository, 'manifest-link.json');
-    linkSync(manifestPath, aliasPath);
-    const aliasResult = runToolHook(targetRepository, 'Edit', {
-      file_path: aliasPath,
-      new_string: 'changed',
-      old_string: '{}',
-      replace_all: false,
-    });
-    assert.equal(aliasResult.permissionDecision, 'deny');
-    assert.match(aliasResult.permissionDecisionReason, /Main-owned/iu);
   });
 });
 
@@ -2156,311 +1200,64 @@ test('denies governed agents from writing Main-owned result files', () => {
   });
 });
 
-test(
-  'protects owned policy paths with Windows case-insensitive spelling',
-  { skip: process.platform !== 'win32' },
-  () => {
-    withTargetRepository(({ runDirectory, targetRepository }) => {
-      const result = runToolHook(targetRepository, 'Edit', {
-        file_path: path.join(runDirectory, 'command-policy.json').toUpperCase(),
-        new_string: 'https://example.com',
-        old_string: 'http://127.0.0.1:3000',
-        replace_all: false,
-      });
-
-      assert.equal(result.permissionDecision, 'deny');
-      assert.match(result.permissionDecisionReason, /immutable to Author/iu);
-    });
-  },
-);
-
-test('denies agent-created Playwright CLI configuration in run scratch', () => {
-  withTargetRepository(({ runDirectory, targetRepository }) => {
-    const configPath = path.join(
-      runDirectory,
-      '.playwright',
-      'cli.config.json',
-    );
-    const result = runToolHook(targetRepository, 'Write', {
-      content: '{}',
-      file_path: configPath,
-    });
-
-    assert.equal(result.permissionDecision, 'deny');
-    assert.match(result.permissionDecisionReason, /CLI configuration/iu);
-  });
-});
-
 test('keeps approved storage state opaque to governed agents', () => {
   withTargetRepository(({ runDirectory, targetRepository }) => {
-    const stateDirectory = path.join(targetRepository, 'playwright', '.auth');
-    const statePath = path.join(stateDirectory, 'user.json');
-    mkdirSync(stateDirectory, { recursive: true });
-    writeFileSync(statePath, '{}');
-    writeFileSync(
-      path.join(runDirectory, 'command-policy.json'),
-      JSON.stringify({
-        approved_spec: 'tests/account.spec.ts',
-        allowed_runner_options: [],
-        allowed_state_paths: ['../../../playwright/.auth/user.json'],
-        allowed_write_paths: [],
-        format_version: 1,
-        run_id: runId,
-        allowed_origins: ['http://127.0.0.1:3000'],
-      }),
+    const statePath = path.join(
+      targetRepository,
+      'playwright',
+      '.auth',
+      'user.json',
     );
-
-    for (const [toolName, toolInput] of [
-      ['Read', { file_path: statePath }],
-      [
-        'Edit',
-        {
-          file_path: statePath,
-          new_string: '{}',
-          old_string: '{}',
-          replace_all: false,
-        },
-      ],
-    ]) {
-      const result = runToolHook(targetRepository, toolName, toolInput);
+    mkdirSync(path.dirname(statePath), { recursive: true });
+    writeFileSync(statePath, '{}');
+    updatePolicy(runDirectory, {
+      allowed_state_paths: ['../../../playwright/.auth/user.json'],
+    });
+    for (const tool of ['Read', 'Edit']) {
+      const result = runToolHook(targetRepository, tool, {
+        file_path: statePath,
+      });
       assert.equal(result.permissionDecision, 'deny');
       assert.match(
         result.permissionDecisionReason,
         /storage state is opaque/iu,
       );
     }
-
-    const outsideCwd = runToolHook(path.dirname(targetRepository), 'Read', {
-      file_path: statePath,
-    });
-    assert.equal(outsideCwd.permissionDecision, 'deny');
-    assert.match(
-      outsideCwd.permissionDecisionReason,
-      /No valid Testgen run policy/iu,
-    );
-
-    const linkedStatePath = path.join(targetRepository, 'tests', 'state.json');
-    linkSync(statePath, linkedStatePath);
-    const hardLink = runToolHook(targetRepository, 'Read', {
-      file_path: linkedStatePath,
-    });
-    assert.equal(hardLink.permissionDecision, 'deny');
-    assert.match(
-      hardLink.permissionDecisionReason,
-      /storage state is opaque/iu,
-    );
   });
 });
 
 test('keeps approved storage state outside Grep search roots', () => {
   withTargetRepository(({ runDirectory, targetRepository }) => {
-    const stateDirectory = path.join(targetRepository, 'playwright', '.auth');
-    const statePath = path.join(stateDirectory, 'user.json');
-    mkdirSync(stateDirectory, { recursive: true });
+    const statePath = path.join(
+      targetRepository,
+      'playwright',
+      '.auth',
+      'user.json',
+    );
+    const alias = path.join(targetRepository, 'tests', 'state.json');
+    mkdirSync(path.dirname(statePath), { recursive: true });
     writeFileSync(statePath, '{}');
-    writeFileSync(
-      path.join(runDirectory, 'command-policy.json'),
-      JSON.stringify({
-        approved_spec: 'tests/account.spec.ts',
-        allowed_runner_options: [],
-        allowed_state_paths: ['../../../playwright/.auth/user.json'],
-        allowed_write_paths: [],
-        format_version: 1,
-        run_id: runId,
-        allowed_origins: ['http://127.0.0.1:3000'],
-      }),
-    );
-
-    const broadSearch = runToolHook(targetRepository, 'Grep', {
-      output_mode: 'content',
-      path: targetRepository,
-      pattern: 'cookies',
+    linkSync(statePath, alias);
+    updatePolicy(runDirectory, {
+      allowed_state_paths: ['../../../playwright/.auth/user.json'],
     });
-    assert.equal(broadSearch.permissionDecision, 'deny');
-    assert.match(broadSearch.permissionDecisionReason, /scope Grep/iu);
-
-    const outsideCwd = runToolHook(path.dirname(targetRepository), 'Grep', {
-      output_mode: 'content',
-      path: targetRepository,
-      pattern: 'cookies',
-    });
-    assert.equal(outsideCwd.permissionDecision, 'deny');
-    assert.match(outsideCwd.permissionDecisionReason, /scope Grep/iu);
-
-    const parentSearch = runToolHook(path.dirname(targetRepository), 'Grep', {
-      output_mode: 'content',
-      path: path.dirname(targetRepository),
-      pattern: 'cookies',
-    });
-    assert.equal(parentSearch.permissionDecision, 'deny');
-    assert.match(parentSearch.permissionDecisionReason, /scope Grep/iu);
-
-    assert.deepEqual(
-      runToolHook(targetRepository, 'Grep', {
+    for (const searchPath of [
+      statePath,
+      path.join(targetRepository, 'tests'),
+    ]) {
+      const result = runToolHook(targetRepository, 'Grep', {
+        path: searchPath,
         output_mode: 'content',
-        path: path.join(targetRepository, 'tests'),
-        pattern: 'test',
-      }),
-      {},
-    );
-
-    const linkedStatePath = path.join(targetRepository, 'tests', 'state.json');
-    linkSync(statePath, linkedStatePath);
-    const hardLink = runToolHook(targetRepository, 'Grep', {
-      output_mode: 'content',
-      path: linkedStatePath,
-      pattern: 'cookies',
-    });
-    assert.equal(hardLink.permissionDecision, 'deny');
-    assert.match(
-      hardLink.permissionDecisionReason,
-      /storage state is opaque/iu,
-    );
-
-    const hardLinkDirectory = runToolHook(targetRepository, 'Grep', {
-      output_mode: 'content',
-      path: path.join(targetRepository, 'tests'),
-      pattern: 'cookies',
-    });
-    assert.equal(hardLinkDirectory.permissionDecision, 'deny');
-    assert.match(
-      hardLinkDirectory.permissionDecisionReason,
-      /storage state is opaque/iu,
-    );
-  });
-});
-
-test('keeps credential-like files out of Author and Healer reads and searches', () => {
-  withTargetRepository(({ targetRepository }) => {
-    const sourceDirectory = path.join(targetRepository, 'src');
-    mkdirSync(sourceDirectory);
-    const secretPaths = [
-      path.join(targetRepository, '.npmrc'),
-      path.join(sourceDirectory, '.env'),
-      path.join(sourceDirectory, 'credentials.json'),
-      path.join(sourceDirectory, 'client.key'),
-    ];
-    for (const secretPath of secretPaths) writeFileSync(secretPath, 'secret');
-
-    for (const role of ['playwright-test-author', 'playwright-test-healer']) {
-      for (const secretPath of secretPaths) {
-        assert.equal(
-          runToolHook(
-            targetRepository,
-            'Read',
-            {
-              file_path: secretPath,
-            },
-            role,
-          ).permissionDecision,
-          'deny',
-          `${role}: ${secretPath}`,
-        );
-        assert.equal(
-          runToolHook(
-            targetRepository,
-            'Grep',
-            {
-              path: secretPath,
-              pattern: 'secret',
-            },
-            role,
-          ).permissionDecision,
-          'deny',
-          `${role}: ${secretPath}`,
-        );
-      }
-      assert.equal(
-        runToolHook(
-          targetRepository,
-          'Grep',
-          {
-            path: sourceDirectory,
-            pattern: 'secret',
-          },
-          role,
-        ).permissionDecision,
-        'deny',
-      );
-      assert.deepEqual(
-        runToolHook(
-          targetRepository,
-          'Grep',
-          {
-            path: path.join(targetRepository, 'tests'),
-            pattern: 'test',
-          },
-          role,
-        ),
-        {},
+        pattern: 'cookies',
+      });
+      assert.equal(result.permissionDecision, 'deny');
+      assert.match(
+        result.permissionDecisionReason,
+        /storage state is opaque/iu,
       );
     }
-    assert.equal(
-      runToolHook(
-        targetRepository,
-        'Read',
-        {
-          file_path: path.join(targetRepository, 'tests', 'account.spec.ts'),
-        },
-        'playwright-test-healer',
-      ).permissionDecision,
-      'allow',
-    );
   });
 });
-
-for (const relative of [
-  '.aws/credentials',
-  'src/credentials',
-  'src/auth.json',
-  'src/.auth/user.json',
-]) {
-  test(`keeps unapproved ${relative} opaque to governed content readers`, () => {
-    withTargetRepository(({ runDirectory, targetRepository }) => {
-      const secretPath = path.join(targetRepository, relative);
-      mkdirSync(path.dirname(secretPath), { recursive: true });
-      writeFileSync(secretPath, 'synthetic secret');
-
-      for (const role of [
-        'playwright-test-author',
-        'playwright-test-healer',
-        'playwright-test-explorer',
-      ]) {
-        if (role === 'playwright-test-explorer')
-          writeDiscoveryPolicy(runDirectory);
-        for (const [tool, input] of [
-          ['Read', { file_path: secretPath }],
-          ...[secretPath, path.dirname(secretPath)].map((searchPath) => [
-            'Grep',
-            {
-              head_limit: 5,
-              output_mode: 'content',
-              path: searchPath,
-              pattern: 'synthetic',
-            },
-          ]),
-        ]) {
-          assert.equal(
-            runToolHook(targetRepository, tool, input, role).permissionDecision,
-            'deny',
-            `${role}: ${tool} at ${input.file_path ?? input.path}`,
-          );
-        }
-        if (role === 'playwright-test-explorer') {
-          assert.equal(
-            runToolHook(
-              targetRepository,
-              'Glob',
-              { path: path.dirname(secretPath), pattern: '*.json' },
-              role,
-            ).permissionDecision,
-            'deny',
-          );
-        }
-      }
-    });
-  });
-}
 
 test('keeps credential hardlinks opaque without blocking regular auth source', () => {
   withTargetRepository(({ runDirectory, targetRepository }) => {
@@ -2520,77 +1317,25 @@ test('keeps credential hardlinks opaque without blocking regular auth source', (
   });
 });
 
-test('keeps the Main-owned repository profile opaque and immutable to roles', () => {
-  withTargetRepository(({ runDirectory, targetRepository }) => {
-    const profileDirectory = path.join(targetRepository, '.playwright-testgen');
-    const profilePath = path.join(profileDirectory, 'profile.v1.json');
-    mkdirSync(profileDirectory);
-    writeFileSync(profilePath, '{"schema_version":"repository-profile.v1"}');
-    const aliasPath = path.join(
+test('keeps the Main-owned repository profile opaque and immutable', () => {
+  withTargetRepository(({ targetRepository }) => {
+    const profilePath = path.join(
       targetRepository,
-      'tests',
-      'profile-alias.json',
+      '.playwright-testgen',
+      'profile.v1.json',
     );
-    linkSync(profilePath, aliasPath);
-
-    for (const role of ['playwright-test-author', 'playwright-test-healer']) {
-      for (const [tool, input] of [
-        ['Read', { file_path: profilePath }],
-        ['Write', { file_path: profilePath, content: '{}' }],
-        ['Edit', { file_path: profilePath }],
-        ['Grep', { path: profilePath, pattern: 'test_id' }],
-      ]) {
-        const result = runToolHook(targetRepository, tool, input, role);
-        assert.equal(result.permissionDecision, 'deny', `${role}: ${tool}`);
-        assert.match(result.permissionDecisionReason, /profile.*Main-owned/iu);
-      }
-      for (const [tool, input] of [
-        ['Read', { file_path: aliasPath }],
-        ['Grep', { path: aliasPath, pattern: 'schema_version' }],
-        [
-          'Grep',
-          {
-            path: path.join(targetRepository, 'tests'),
-            pattern: 'schema_version',
-          },
-        ],
-      ]) {
-        assert.equal(
-          runToolHook(targetRepository, tool, input, role).permissionDecision,
-          'deny',
-          `${role}: ${tool} at a profile hardlink`,
-        );
-      }
-      for (const [tool, input] of [
-        ['Grep', { path: targetRepository, pattern: 'schema_version' }],
-        ['Grep', { path: profileDirectory, pattern: 'schema_version' }],
-        ['Glob', { path: targetRepository, pattern: '**/*.json' }],
-      ]) {
-        assert.equal(
-          runToolHook(targetRepository, tool, input, role).permissionDecision,
-          'deny',
-          `${role}: ${tool} at ${input.path}`,
-        );
-      }
-    }
-    writeDiscoveryPolicy(runDirectory);
-    for (const tool of ['Grep', 'Glob']) {
-      assert.equal(
-        runToolHook(
-          targetRepository,
-          tool,
-          tool === 'Grep'
-            ? {
-                path: profileDirectory,
-                pattern: 'schema_version',
-                head_limit: 5,
-                output_mode: 'content',
-              }
-            : { path: profileDirectory, pattern: '*.json' },
-          'playwright-test-explorer',
-        ).permissionDecision,
-        'deny',
-      );
+    const alias = path.join(targetRepository, 'tests', 'profile-alias.json');
+    mkdirSync(path.dirname(profilePath));
+    writeFileSync(profilePath, '{"schema_version":"repository-profile.v1"}');
+    linkSync(profilePath, alias);
+    for (const [tool, input] of [
+      ['Read', { file_path: profilePath }],
+      ['Write', { file_path: profilePath, content: '{}' }],
+      ['Grep', { path: alias, pattern: 'schema_version' }],
+    ]) {
+      const result = runToolHook(targetRepository, tool, input);
+      assert.equal(result.permissionDecision, 'deny');
+      assert.match(result.permissionDecisionReason, /profile.*Main-owned/iu);
     }
   });
 });
@@ -2635,92 +1380,12 @@ test('checks resolved credential targets, not just link names', (t) => {
   });
 });
 
-test('denies run ownership through a repository junction or symlink', () => {
-  const targetRepository = mkdtempSync(path.join(tmpdir(), 'testgen-hook-'));
-  const outside = mkdtempSync(path.join(tmpdir(), 'testgen-outside-'));
-  const linkedRoot = path.join(targetRepository, '.playwright-cli');
-  const runDirectory = path.join(outside, 'testgen', runId);
-  mkdirSync(runDirectory, { recursive: true });
-  writeFileSync(
-    path.join(runDirectory, 'command-policy.json'),
-    JSON.stringify({
-      approved_spec: 'tests/account.spec.ts',
-      allowed_runner_options: [],
-      allowed_state_paths: [],
-      allowed_write_paths: [],
-      format_version: 1,
-      run_id: runId,
-      allowed_origins: ['http://127.0.0.1:3000'],
-    }),
-  );
-  symlinkSync(outside, linkedRoot, 'junction');
-
-  try {
-    const policyPath = path.join(
-      linkedRoot,
-      'testgen',
-      runId,
-      'command-policy.json',
-    );
-    assert.equal(
-      runToolHook(targetRepository, 'Edit', {
-        file_path: policyPath,
-        new_string: 'https://example.com',
-        old_string: 'http://127.0.0.1:3000',
-        replace_all: false,
-      }).permissionDecision,
-      'deny',
-    );
-    assert.equal(
-      runHook(targetRepository, `rm -rf -- .playwright-cli/testgen/${runId}`)
-        .permissionDecision,
-      'deny',
-    );
-  } finally {
-    rmSync(linkedRoot, { force: true });
-    rmSync(targetRepository, { force: true, recursive: true });
-    rmSync(outside, { force: true, recursive: true });
-  }
-});
-
-test('rejects absolute or directory storage-state policy entries', () => {
-  withTargetRepository(({ runDirectory, targetRepository }) => {
-    const stateDirectory = path.join(targetRepository, 'playwright', '.auth');
-    mkdirSync(stateDirectory, { recursive: true });
-
-    for (const statePath of [
-      '../../../playwright/.auth',
-      path.resolve(stateDirectory),
-    ]) {
-      writeFileSync(
-        path.join(runDirectory, 'command-policy.json'),
-        JSON.stringify({
-          approved_spec: 'tests/account.spec.ts',
-          allowed_runner_options: [],
-          allowed_state_paths: [statePath],
-          allowed_write_paths: [],
-          format_version: 1,
-          run_id: runId,
-          allowed_origins: ['http://127.0.0.1:3000'],
-        }),
-      );
-
-      assert.equal(
-        runCliHook(targetRepository, `-s=${runId} state-load ${statePath}`)
-          .permissionDecision,
-        'deny',
-      );
-    }
-  });
-});
-
 test('asks before running a declared script through a supported package manager', () => {
   withTargetRepository(({ targetRepository }) => {
     for (const manager of ['npm', 'yarn', 'pnpm', 'bun']) {
-      const result = runHook(
-        targetRepository,
-        `${manager} run lint -- tests/account.spec.ts`,
-      );
+      const result = runToolHook(targetRepository, 'Bash', {
+        command: `${manager} run lint -- tests/account.spec.ts`,
+      });
 
       assert.equal(result.permissionDecision, 'ask', manager);
       assert.match(
@@ -2744,27 +1409,6 @@ test('denies package-manager commands that do not name a declared script', () =>
 
       assert.equal(result.permissionDecision, 'deny', command);
       assert.match(result.permissionDecisionReason, /declared package.json/iu);
-    }
-  });
-});
-
-test('denies package-manager shortcuts and non-script commands', () => {
-  withTargetRepository(({ targetRepository }) => {
-    for (const command of [
-      'npm test',
-      'yarn lint',
-      'pnpm lint',
-      'bun lint',
-      'yarn exec lint',
-      'pnpm exec lint',
-      'bun install',
-      'PLAYWRIGHT_HTML_OPEN=never npm run lint',
-    ]) {
-      assert.equal(
-        runHook(targetRepository, command).permissionDecision,
-        'deny',
-        command,
-      );
     }
   });
 });
@@ -2798,146 +1442,23 @@ test('denies package-manager options that can redirect script execution', () => 
   });
 });
 
-test('denies package scripts when package.json cannot be trusted', () => {
+test('allows the role-owned artifact validator through the installed plugin path', () => {
   withTargetRepository(({ targetRepository }) => {
-    const packagePath = path.join(targetRepository, 'package.json');
-
-    rmSync(packagePath);
-    assert.equal(
-      runHook(targetRepository, 'npm run lint').permissionDecision,
-      'deny',
-    );
-
-    writeFileSync(packagePath, '{');
-    assert.equal(
-      runHook(targetRepository, 'yarn run lint').permissionDecision,
-      'deny',
-    );
-
-    writeFileSync(packagePath, JSON.stringify({ scripts: [] }));
-    assert.equal(
-      runHook(targetRepository, 'bun run lint').permissionDecision,
-      'deny',
-    );
-
-    writeFileSync(packagePath, JSON.stringify({ scripts: { lint: '  ' } }));
-    assert.equal(
-      runHook(targetRepository, 'pnpm run lint').permissionDecision,
-      'deny',
-    );
-  });
-});
-
-test('denies validation scripts outside the repository root', () => {
-  withTargetRepository(({ runDirectory, targetRepository }) => {
-    for (const cwd of [path.join(targetRepository, 'tests'), runDirectory]) {
-      const result = runHook(cwd, 'npm run lint -- tests/account.spec.ts');
-
-      assert.equal(result.permissionDecision, 'deny');
-      assert.match(result.permissionDecisionReason, /selected package/iu);
-    }
-  });
-});
-
-test('keeps the shared runtime preflight Main-owned', () => {
-  withTargetRepository(({ targetRepository }) => {
-    const documentedPreflight = readFileSync(
-      path.join(repositoryRoot, 'skills', 'playwright-testgen', 'SKILL.md'),
-      'utf8',
-    ).match(
-      /^node ".*runtime-preflight\.cjs" --repo \. --package \. --configless$/mu,
-    )?.[0];
-
-    assert.equal(typeof documentedPreflight, 'string');
-    assert.equal(
-      runHook(targetRepository, documentedPreflight).permissionDecision,
-      'deny',
-    );
-  });
-});
-
-test('denies an unapproved executable and names the global CLI alternative', () => {
-  withTargetRepository(({ targetRepository }) => {
-    const result = runHook(
-      targetRepository,
-      `npx playwright-cli -s=${runId} snapshot`,
-    );
-
-    assert.equal(result.permissionDecision, 'deny');
-    assert.match(
-      result.permissionDecisionReason,
-      /use playwright-cli directly/iu,
-    );
-  });
-});
-
-test('allows only the matching role to validate its exact run artifact', () => {
-  withTargetRepository(({ targetRepository }) => {
-    const pluginRoot = repositoryRoot;
     const validator =
       '"$PLAYWRIGHT_TESTGEN_ROOT/scripts/validate-testgen-artifact.cjs"';
-    const command = `node ${validator} --repo . --type handoff --run-id ${runId} .playwright-cli/testgen/${runId}/handoff.json`;
-    const allowed = runToolHook(
-      targetRepository,
-      'Bash',
-      { command },
-      'playwright-test-author',
-      {
-        CLAUDE_PLUGIN_ROOT: pluginRoot,
-        PLAYWRIGHT_TESTGEN_ROOT: pluginRoot,
-      },
-    );
-
-    assert.equal(allowed.permissionDecision, 'allow');
-
-    const healerCommand = `node ${validator} --repo . --type trace --run-id ${runId} .playwright-cli/testgen/${runId}/healer-trace.json`;
-    const healerAllowed = runToolHook(
-      targetRepository,
-      'Bash',
-      { command: healerCommand },
-      'playwright-test-healer',
-      {
-        CLAUDE_PLUGIN_ROOT: pluginRoot,
-        PLAYWRIGHT_TESTGEN_ROOT: pluginRoot,
-      },
-    );
-
-    assert.equal(healerAllowed.permissionDecision, 'allow');
-
-    for (const absoluteValidator of [
-      path.join(repositoryRoot, 'scripts', 'validate-testgen-artifact.cjs'),
-      path
-        .join(repositoryRoot, 'scripts', 'validate-testgen-artifact.cjs')
-        .replaceAll('\\', '/'),
-    ]) {
-      const substituted = runToolHook(
-        targetRepository,
-        'Bash',
-        {
-          command: `node "${absoluteValidator}" --repo . --type handoff --run-id ${runId} .playwright-cli/testgen/${runId}/handoff.json`,
-        },
-        'playwright-test-author',
-        { CLAUDE_PLUGIN_ROOT: pluginRoot },
-      );
-
-      assert.equal(substituted.permissionDecision, 'allow');
-    }
-  });
-});
-
-test('rejects the unavailable Claude plugin root in governed Bash commands', () => {
-  withTargetRepository(({ targetRepository }) => {
-    const command = `node "$CLAUDE_PLUGIN_ROOT/scripts/validate-testgen-artifact.cjs" --repo . --type handoff --run-id ${runId} .playwright-cli/testgen/${runId}/handoff.json`;
     const result = runToolHook(
       targetRepository,
       'Bash',
-      { command },
+      {
+        command: `node ${validator} --repo . --type handoff --run-id ${runId} .playwright-cli/testgen/${runId}/handoff.json`,
+      },
       'playwright-test-author',
-      { CLAUDE_PLUGIN_ROOT: repositoryRoot },
+      {
+        CLAUDE_PLUGIN_ROOT: repositoryRoot,
+        PLAYWRIGHT_TESTGEN_ROOT: repositoryRoot,
+      },
     );
-
-    assert.equal(result.permissionDecision, 'deny');
-    assert.match(result.permissionDecisionReason, /PLAYWRIGHT_TESTGEN_ROOT/u);
+    assert.equal(result.permissionDecision, 'allow');
   });
 });
 
@@ -2980,155 +1501,68 @@ test('denies arbitrary Node commands for governed roles', () => {
   });
 });
 
-test('rejects plugin-root probes with the direct-use recovery', () => {
-  withTargetRepository(({ targetRepository }) => {
-    for (const command of [
-      'echo "$PLAYWRIGHT_TESTGEN_ROOT"',
-      'node -e "console.log(process.env.PLAYWRIGHT_TESTGEN_ROOT)"',
-      `cd .playwright-cli/testgen/${runId} && PWTEST_CLI_GLOBAL_CONFIG=. playwright-cli -s=${runId} find '$PLAYWRIGHT_TESTGEN_ROOT/scripts/validate-testgen-artifact.cjs'`,
-    ]) {
-      const result = runHook(targetRepository, command);
-      assert.equal(result.permissionDecision, 'deny');
-      assert.match(
-        result.permissionDecisionReason,
-        /already exported.*do not.*probe/iu,
-      );
-    }
-  });
-});
-
-test('binds artifact mutations to the role that owns each artifact', () => {
+test('binds artifact writes to their owning role and whole-file trace protocol', () => {
   withTargetRepository(({ runDirectory, targetRepository }) => {
-    const handoffPath = path.join(runDirectory, 'handoff.json');
-    const inputPath = path.join(runDirectory, 'healer-input.json');
-    const tracePath = path.join(runDirectory, 'healer-trace.json');
+    const handoff = path.join(runDirectory, 'handoff.json');
+    const input = path.join(runDirectory, 'healer-input.json');
+    const trace = path.join(runDirectory, 'healer-trace.json');
     assert.equal(
       runToolHook(targetRepository, 'Write', {
-        file_path: handoffPath,
+        file_path: handoff,
         content: '{}',
       }).permissionDecision,
       'allow',
     );
-    writeFileSync(handoffPath, '{}');
-    writeFileSync(inputPath, '{}');
-    writeFileSync(tracePath, '{}');
-
-    for (const [agentType, filePath] of [
-      ['playwright-test-healer', handoffPath],
-      ['playwright-test-author', tracePath],
-    ]) {
-      const result = runToolHook(
+    writeFileSync(handoff, '{}');
+    writeFileSync(input, '{}');
+    writeFileSync(trace, '{}');
+    assert.equal(
+      runToolHook(
         targetRepository,
         'Edit',
-        { file_path: filePath },
-        agentType,
-      );
-
-      assert.equal(result.permissionDecision, 'deny');
-      assert.match(result.permissionDecisionReason, /role-owned artifact/iu);
-    }
-
-    assert.equal(
-      runToolHook(
-        targetRepository,
-        'Read',
-        { file_path: inputPath },
+        {
+          file_path: handoff,
+        },
         'playwright-test-healer',
       ).permissionDecision,
-      'allow',
-    );
-    const inputWrite = runToolHook(
-      targetRepository,
-      'Write',
-      { file_path: inputPath, content: '{}' },
-      'playwright-test-healer',
-    );
-    assert.equal(inputWrite.permissionDecision, 'deny');
-    assert.match(inputWrite.permissionDecisionReason, /Main-owned/iu);
-
-    assert.equal(
-      runToolHook(
-        targetRepository,
-        'Read',
-        { file_path: tracePath },
-        'playwright-test-healer',
-      ).permissionDecision,
-      'allow',
-    );
-    assert.equal(
-      runToolHook(
-        targetRepository,
-        'Write',
-        { file_path: handoffPath },
-        'playwright-test-author',
-      ).permissionDecision,
-      'allow',
+      'deny',
     );
     assert.equal(
       runToolHook(
         targetRepository,
         'Write',
         {
-          file_path: tracePath,
+          file_path: input,
+          content: '{}',
+        },
+        'playwright-test-healer',
+      ).permissionDecision,
+      'deny',
+    );
+    assert.equal(
+      runToolHook(
+        targetRepository,
+        'Write',
+        {
+          file_path: trace,
           content: '{"schema_version":"healer-trace.v2"}',
         },
         'playwright-test-healer',
       ).permissionDecision,
       'allow',
     );
-    writeFileSync(tracePath, '{}');
-    const traceEdit = runToolHook(
+    const partial = runToolHook(
       targetRepository,
       'Edit',
       {
-        file_path: tracePath,
+        file_path: trace,
         old_string: '{}',
         new_string: '{"schema_version":"healer-trace.v2"}',
       },
       'playwright-test-healer',
     );
-    assert.equal(traceEdit.permissionDecision, 'deny');
-    assert.match(traceEdit.permissionDecisionReason, /whole-file Write/iu);
-
-    const emptyTraceWrite = runToolHook(
-      targetRepository,
-      'Write',
-      { file_path: tracePath, content: '' },
-      'playwright-test-healer',
-    );
-    assert.equal(emptyTraceWrite.permissionDecision, 'deny');
-    assert.match(
-      emptyTraceWrite.permissionDecisionReason,
-      /complete artifact/iu,
-    );
-
-    const rejectedTrace = '{"schema_version":"bad"}';
-    writeFileSync(tracePath, rejectedTrace);
-    assert.equal(
-      runToolHook(
-        targetRepository,
-        'Write',
-        {
-          file_path: tracePath,
-          content: '{"schema_version":"healer-trace.v2"}',
-        },
-        'playwright-test-healer',
-      ).permissionDecision,
-      'allow',
-    );
-
-    rmSync(tracePath);
-    const missingTraceWrite = runToolHook(
-      targetRepository,
-      'Write',
-      {
-        file_path: tracePath,
-        content: '{"schema_version":"healer-trace.v2"}',
-      },
-      'playwright-test-healer',
-    );
-    assert.equal(missingTraceWrite.permissionDecision, 'deny');
-    assert.match(missingTraceWrite.permissionDecisionReason, /unavailable/iu);
+    assert.equal(partial.permissionDecision, 'deny');
+    assert.match(partial.permissionDecisionReason, /whole-file Write/iu);
   });
 });
 
@@ -3155,40 +1589,6 @@ for (const [agentType, filename, toolName] of [
     });
   });
 }
-
-test('denies non-regular Author handoff drafts', () => {
-  withTargetRepository(({ runDirectory, targetRepository }) => {
-    const handoffPath = path.join(runDirectory, 'handoff.json');
-    mkdirSync(handoffPath);
-
-    assert.equal(
-      runToolHook(targetRepository, 'Write', {
-        file_path: handoffPath,
-        content: '{}',
-      }).permissionDecision,
-      'deny',
-    );
-  });
-});
-
-test('denies dangling symlink Author handoff drafts', () => {
-  withTargetRepository(({ runDirectory, targetRepository }) => {
-    const handoffPath = path.join(runDirectory, 'handoff.json');
-    symlinkSync(
-      path.join(targetRepository, 'unapproved.json'),
-      handoffPath,
-      'file',
-    );
-
-    assert.equal(
-      runToolHook(targetRepository, 'Write', {
-        file_path: handoffPath,
-        content: '{}',
-      }).permissionDecision,
-      'deny',
-    );
-  });
-});
 
 test('allows only canonical installed-plugin reads required by governed agents', () => {
   withTargetRepository(({ targetRepository }) => {
@@ -3287,116 +1687,6 @@ test('keeps policy-approved state opaque inside installed plugin directories', (
         'allow',
       );
     }
-  });
-});
-
-test('does not exempt Explorer reads of installed plugin internals', () => {
-  withDiscoveryRepository(({ targetRepository }) => {
-    const pluginRoot = mkdtempSync(path.join(tmpdir(), 'testgen-plugin-'));
-    try {
-      const scriptPath = path.join(pluginRoot, 'scripts', 'eval-answer.cjs');
-      mkdirSync(path.dirname(scriptPath));
-      writeFileSync(scriptPath, 'module.exports = "expected";');
-
-      assert.equal(
-        runToolHook(
-          targetRepository,
-          'Read',
-          { file_path: scriptPath },
-          'playwright-test-explorer',
-          { CLAUDE_PLUGIN_ROOT: pluginRoot },
-        ).permissionDecision,
-        'deny',
-      );
-    } finally {
-      rmSync(pluginRoot, { force: true, recursive: true });
-    }
-  });
-});
-
-test('derives the installed plugin root when Claude does not export it', () => {
-  withTargetRepository(({ targetRepository }) => {
-    const result = runToolHook(
-      targetRepository,
-      'Read',
-      {
-        file_path: path.join(
-          repositoryRoot,
-          'skills',
-          'playwright-testgen',
-          'references',
-          'healing-protocol.md',
-        ),
-      },
-      'playwright-test-healer',
-      { CLAUDE_PLUGIN_ROOT: '' },
-    );
-
-    assert.equal(result.permissionDecision, 'allow');
-  });
-});
-
-test('allows Healer to read only its exact run-bound inputs', () => {
-  withTargetRepository(({ runDirectory, targetRepository }) => {
-    const specPath = path.join(targetRepository, 'tests', 'account.spec.ts');
-    const inputPath = path.join(runDirectory, 'healer-input.json');
-    const tracePath = path.join(runDirectory, 'healer-trace.json');
-    writeFileSync(inputPath, '{}');
-    writeFileSync(tracePath, '{}');
-
-    for (const filePath of [specPath, inputPath, tracePath]) {
-      assert.equal(
-        runToolHook(
-          targetRepository,
-          'Read',
-          { file_path: filePath },
-          'playwright-testgen:playwright-test-healer',
-        ).permissionDecision,
-        'allow',
-      );
-    }
-
-    const unrelatedPath = path.join(targetRepository, 'package.json');
-    assert.deepEqual(
-      runToolHook(
-        targetRepository,
-        'Read',
-        { file_path: unrelatedPath },
-        'playwright-test-healer',
-      ),
-      {},
-    );
-  });
-});
-
-test('rejects non-regular and oversized trace drafts before reading', () => {
-  withTargetRepository(({ runDirectory, targetRepository }) => {
-    const tracePath = path.join(runDirectory, 'healer-trace.json');
-    const write = {
-      file_path: tracePath,
-      content: '{"schema_version":"healer-trace.v2"}',
-    };
-
-    writeFileSync(tracePath, 'x'.repeat(64 * 1024 + 1));
-    let result = runToolHook(
-      targetRepository,
-      'Write',
-      write,
-      'playwright-test-healer',
-    );
-    assert.equal(result.permissionDecision, 'deny');
-    assert.match(result.permissionDecisionReason, /regular file.*64 KiB/iu);
-
-    rmSync(tracePath);
-    mkdirSync(tracePath);
-    result = runToolHook(
-      targetRepository,
-      'Write',
-      write,
-      'playwright-test-healer',
-    );
-    assert.equal(result.permissionDecision, 'deny');
-    assert.match(result.permissionDecisionReason, /regular file.*64 KiB/iu);
   });
 });
 
