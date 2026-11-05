@@ -468,7 +468,7 @@ function combineResult(primary, cleanup) {
         ? {}
         : { diagnostics: primary.diagnostics }),
       ...(primary.runtime == null ? {} : { runtime: primary.runtime }),
-      ...(cleanup.status === 'failed' ? { cleanup } : {}),
+      cleanup,
     };
   }
   if (cleanup.status === 'failed')

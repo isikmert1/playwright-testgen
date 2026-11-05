@@ -172,6 +172,34 @@ allow no drop from the baseline.
 
 Raw agent streams, application output, and Playwright reports stay outside Git.
 
+Use `--results-dir <directory>` to score a separate outcome cohort. Every attempt
+counts by default. A replacement requires an explicit JSON array supplied with
+`--replacements <file>`:
+
+```json
+[
+  {
+    "excluded_trial_id": "trial-infrastructure-failure",
+    "replacement_trial_id": "trial-replacement",
+    "reason": "Browser installation was unavailable before agent behavior.",
+    "approval_ref": "Reference to the human review approving this replacement"
+  }
+]
+```
+
+Both trials must exist, belong to the same case and current dataset, and the
+excluded trial must be an allowlisted infrastructure failure with verified
+cleanup. Behavioral failures, missing evidence, and failed cleanup cannot be
+excluded. The summary retains both attempts, replacement decisions, and their
+costs. `approval_ref` records human approval; the scorer cannot authenticate it.
+
+Unknown cost produces `total: null` with separate reported and unavailable
+counts. Mutation telemetry is explicitly unavailable for cases that do not
+collect it. Human-intervention counts describe modeled workflow checkpoints;
+they do not measure observed human effort. The classification and refusal
+metrics remain compatibility aliases. Changing the model or dataset requires a
+new cohort; the historical baseline remains an observation of its recorded inputs.
+
 ## Recorded results
 
 These checks used Claude Code 2.1.278 with `claude-sonnet-5`:
