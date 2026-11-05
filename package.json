@@ -26,6 +26,11 @@
     "eslint": "10.9.1",
     "globals": "17.12.0",
     "prettier": "3.9.6",
-    "shell-quote": "1.10.0"
+    "shell-quote": "1.11.0"
+  },
+  "overrides": {
+    "eslint": {
+      "minimatch": "11.0.1"
+    }
   }
 }
