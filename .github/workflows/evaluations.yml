@@ -1,0 +1,119 @@
+name: Installed capability evaluation
+
+on:
+  workflow_dispatch:
+    inputs:
+      case:
+        description: One reviewed capability case (one trial, one worker, no retries)
+        type: choice
+        required: true
+        default: healer-defect-refusal
+        options:
+          - healer-defect-refusal
+          - discovery
+          - checkpoint
+      verify_failure:
+        description: Reject a deliberately invalid grade; the job must fail without model calls
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: installed-capability-evaluation
+  cancel-in-progress: false
+
+jobs:
+  protection:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Require reviewed default branch and environment protection
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/$DEFAULT_BRANCH" ]; then
+            echo '::error::Dispatch this workflow from the reviewed default branch.'
+            exit 1
+          fi
+          protected=$(gh api "repos/$GITHUB_REPOSITORY/environments/agent-evaluations" \
+            --jq '.protection_rules | any(.type == "required_reviewers" and (.reviewers | length) > 0)')
+          if [ "$protected" != true ]; then
+            echo '::error::Configure required reviewers for agent-evaluations before running evaluations.'
+            exit 1
+          fi
+
+  evaluate:
+    needs: protection
+    runs-on: ubuntu-24.04
+    environment: agent-evaluations
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24.22.1
+          cache: npm
+      - run: npm ci
+      - run: npm install --global npm@11.19.1 @anthropic-ai/claude-code@2.1.285 @playwright/cli@0.1.19
+      - run: claude plugin validate . --strict
+      - run: claude plugin validate .claude-plugin/plugin.json --strict
+      - name: Verify a failed grade blocks the job
+        if: ${{ inputs.verify_failure }}
+        run: node -e "require('./scripts/score-healer-defect-refusal.cjs').scoreEvidence({})"
+      - name: Prepare the CLI browser and system libraries
+        if: ${{ !inputs.verify_failure }}
+        run: playwright-cli install-browser chrome --with-deps
+      - name: Run one bounded capability case
+        if: ${{ !inputs.verify_failure }}
+        timeout-minutes: 15
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          EVALUATION_CASE: ${{ inputs.case }}
+          CLAUDE_CONFIG_DIR: ${{ runner.temp }}/testgen-claude
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo '::error::Configure ANTHROPIC_API_KEY for agent-evaluations.'
+            exit 1
+          fi
+          case "$EVALUATION_CASE" in
+            healer-defect-refusal) script=eval:healer-defect-refusal ;;
+            discovery) script=eval:discovery ;;
+            checkpoint) script=eval:checkpoint ;;
+            *) echo '::error::Unsupported evaluation case.'; exit 1 ;;
+          esac
+          results="$RUNNER_TEMP/testgen-evaluation"
+          mkdir -p "$results" "$CLAUDE_CONFIG_DIR"
+          evaluation_exit=0
+          npm run "$script" -- --model claude-sonnet-5-5 --max-budget-usd 2 \
+            --results-dir "$results" > "$results/runner.log" 2>&1 || evaluation_exit=$?
+          printf '%s\n' "$evaluation_exit" > "$RUNNER_TEMP/evaluation-exit"
+          exit "$evaluation_exit"
+      - name: Write a public summary from recorded evidence
+        if: ${{ always() && !cancelled() && !inputs.verify_failure }}
+        env:
+          EVALUATION_CASE: ${{ inputs.case }}
+        run: |
+          evaluation_exit=1
+          if [ -f "$RUNNER_TEMP/evaluation-exit" ]; then
+            read -r evaluation_exit < "$RUNNER_TEMP/evaluation-exit"
+          fi
+          node scripts/eval/public-summary.cjs "$RUNNER_TEMP/testgen-evaluation" \
+            "$EVALUATION_CASE" "$evaluation_exit" > "$RUNNER_TEMP/evaluation-summary.json"
+          cat "$RUNNER_TEMP/evaluation-summary.json" >> "$GITHUB_STEP_SUMMARY"
+      # Artifacts from this public repository are public; never upload raw results.
+      - name: Upload capability summary
+        if: ${{ always() && !cancelled() && !inputs.verify_failure }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: capability-summary
+          path: ${{ runner.temp }}/evaluation-summary.json
+          if-no-files-found: ignore
+          retention-days: 3

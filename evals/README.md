@@ -251,6 +251,57 @@ Review local raw artifacts before sharing them, especially for private cases;
 Playwright authentication state can contain account credentials. GitHub secret
 scanning and push protection supplement these boundaries.
 
+## CI evaluations
+
+Pull requests run deterministic checks on Windows and Ubuntu with Node 22.13.0
+and 24. CI also validates both the marketplace and plugin manifests with Claude
+Code 2.1.285. These checks do not consume model usage.
+
+The **Installed capability evaluation** workflow runs manually from a reviewed
+commit on the default branch. Configure the `agent-evaluations` environment with
+required reviewers and an environment-scoped `ANTHROPIC_API_KEY`. Missing
+protection blocks the evaluation. The workflow uses an isolated Claude config
+directory and does not persist checkout credentials.
+
+Add the key in the repository's **Settings → Environments → agent-evaluations →
+Environment secrets → Add secret**, named `ANTHROPIC_API_KEY`. Store it as a
+secret, never an Actions variable or checked-in configuration. A local `.env`
+file is unnecessary for CI or normal plugin development; local installed
+evaluations use your existing Claude Code authentication. Use a dedicated
+evaluation key and set provider spending limits separately from the per-run
+agent budget.
+
+The paid job uses Ubuntu 24.04, Node 24.22.1, npm 11.19.1, Claude Code 2.1.285,
+Playwright CLI 0.1.19, and `claude-sonnet-5-5`. It provisions the CLI's system
+Chrome and browser libraries; each target installs its own pinned runner browser.
+Results record actual browser identities and OS/image provenance. An Ubuntu
+release label does not freeze the runner image or Chrome version.
+
+Start with `healer-defect-refusal`; `checkpoint` and `discovery` are separate
+capability checks. Each dispatch declares one trial, one worker, no automatic
+retries, and a USD 2 agent budget with the case's time/turn limits. Reviewing the
+fixed defect-refusal case authorizes its checked-in spec at that revision.
+Environment approval does not approve any newly generated candidate. Generation
+and candidate execution retain their separate human checkpoints.
+
+Select `verify_failure` to run a deliberately invalid grade without browser or
+model calls. The grading step must fail and turn the job red; a green result is
+an unexpected acceptance of invalid evidence. This control is not a paid trial.
+
+Only an allowlisted summary is uploaded, for three days. It records observed
+identity, grading/cleanup state, known cost, and missing evidence without raw
+transcripts, commands, auth state, or exception text. Runner failures and
+incomplete provenance keep the job failed. Public host fields accept only the
+Ubuntu runner's release and image formats; unexpected values become null and
+fail the summary check. Raw output stays on the ephemeral runner; public
+artifacts and logs are not private storage.
+
+These manual checks are not automatic baseline regression gates. The historical
+baseline remains unchanged. New comparisons need complete trials under matching
+dataset, runtime, host and browser profiles. Quality metrics remain manual;
+approval, attribution, governance and state-integrity failures remain strict.
+Scheduled capability runs and paid pull-request gates are deferred.
+
 ## Recorded results
 
 These checks used Claude Code 2.1.278 with `claude-sonnet-5`:

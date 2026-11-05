@@ -117,6 +117,89 @@ test('requires the declared number of trials for every outcome case', () => {
   assert.equal(summary.status, 'incomplete');
 });
 
+test('public CI summary excludes private evidence and preserves runner and cleanup failures', () => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'testgen-ci-summary-'));
+  const target = path.join(directory, 'trial-0123456789abcdef');
+  mkdirSync(target);
+  const revision = 'a'.repeat(40);
+  const runtime = {
+    ...trial('refusal', 1).profile,
+    platform: 'linux',
+    host: {
+      os_release: '6.11.0-1018-azure',
+      image: 'ubuntu24',
+      image_version: '20261105.1.0',
+    },
+    testgen_revision: revision,
+    dataset_sha256: 'b'.repeat(64),
+    model_requested: 'claude-sonnet-5',
+    model_resolved: 'claude-sonnet-5',
+    total_cost_usd: 0.2,
+    private_notes: 'PRIVATE-EVIDENCE',
+  };
+  const result = {
+    ok: true,
+    case_id: 'semantic-order-not-inserted',
+    trial_id: path.basename(target),
+    result: { status: 'passed', score: { status: 'passed' }, runtime },
+    cleanup: { status: 'passed' },
+    diagnostics: { transcript: 'PRIVATE-EVIDENCE' },
+  };
+  const summarize = (exitCode) => {
+    writeFileSync(path.join(target, 'result.json'), JSON.stringify(result));
+    return spawnSync(
+      process.execPath,
+      [
+        path.resolve(__dirname, '../scripts/eval/public-summary.cjs'),
+        directory,
+        'healer-defect-refusal',
+        String(exitCode),
+      ],
+      { encoding: 'utf8', env: { ...process.env, GITHUB_SHA: revision } },
+    );
+  };
+  try {
+    const passed = summarize(0);
+    assert.equal(passed.status, 0, passed.stderr);
+    const summary = JSON.parse(passed.stdout);
+    assert.equal(summary.status, 'passed');
+    assert.equal(summary.completed_trials, 1);
+    assert.equal(summary.model_resolved, 'claude-sonnet-5');
+    assert.equal(summary.browsers.exploration.version, '156.0.2.0');
+    assert.doesNotMatch(
+      passed.stdout,
+      /PRIVATE-EVIDENCE|private_notes|diagnostics/u,
+    );
+    const recordedHost = runtime.host;
+    const canary = 'sk-ant-api03-PRIVACY-CANARY-NOT-A-REAL-KEY';
+    for (const field of Object.keys(recordedHost)) {
+      runtime.host = { ...recordedHost, [field]: canary };
+      const rejected = summarize(0);
+      assert.ok(!rejected.stdout.includes(canary), field);
+      assert.equal(rejected.status, 1, field);
+      assert.equal(JSON.parse(rejected.stdout).host[field], null, field);
+      assert.equal(rejected.stderr, '');
+    }
+    runtime.host = { ...recordedHost, image: null, image_version: null };
+    assert.equal(summarize(0).status, 1);
+    runtime.host = recordedHost;
+    assert.equal(summarize(1).status, 1);
+    result.cleanup.status = 'failed';
+    const failed = summarize(0);
+    assert.equal(failed.status, 1);
+    assert.equal(JSON.parse(failed.stdout).status, 'failed');
+    assert.equal(failed.stderr, '');
+    result.cleanup.status = 'passed';
+    runtime.claude_code = { private_notes: 'PRIVATE-EVIDENCE' };
+    const malformed = summarize(0);
+    assert.equal(malformed.status, 1);
+    assert.equal(malformed.stderr, '');
+    assert.equal(JSON.parse(malformed.stdout).status, 'failed');
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 const replacement = {
   excluded_trial_id: 'trial-repair-infra',
   replacement_trial_id: 'trial-repair-2',
