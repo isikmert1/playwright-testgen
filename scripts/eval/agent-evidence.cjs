@@ -107,12 +107,17 @@ function diagnosticOperation(block, context) {
 
 function parseAgentStream(output, context = {}) {
   const toolUses = [];
+  const toolBlocks = [];
+  const assistantMessages = [];
+  const sessions = new Set();
   const toolResults = [];
   const diagnosticOperations = [];
   const hookLifecycle = [];
   const runtime = {};
   let resultSubtype = null;
+  let eventIndex = -1;
   for (const line of output.split(/\r?\n/u)) {
+    eventIndex += 1;
     if (line.trim() === '') continue;
     let record;
     try {
@@ -120,6 +125,17 @@ function parseAgentStream(output, context = {}) {
     } catch {
       continue;
     }
+    const parent =
+      typeof record.parent_tool_use_id === 'string'
+        ? record.parent_tool_use_id
+        : null;
+    if (
+      parent == null &&
+      typeof record.session_id === 'string' &&
+      ((record.type === 'system' && record.subtype === 'init') ||
+        record.type === 'result')
+    )
+      sessions.add(record.session_id);
     if (record.type === 'assistant') {
       if (typeof record.message?.model === 'string')
         runtime.model = record.message.model;
@@ -130,9 +146,27 @@ function parseAgentStream(output, context = {}) {
           typeof block.name === 'string'
         ) {
           toolUses.push({ id: block.id, name: block.name });
+          if (context.include_private_evidence === true)
+            toolBlocks.push({
+              id: block.id,
+              name: block.name,
+              input: block.input ?? null,
+              parent_tool_use_id: parent,
+              event_index: eventIndex,
+            });
           const operation = diagnosticOperation(block, context);
           if (operation != null) diagnosticOperations.push(operation);
         }
+        if (
+          context.include_private_evidence === true &&
+          block?.type === 'text' &&
+          typeof block.text === 'string'
+        )
+          assistantMessages.push({
+            text: block.text,
+            parent_tool_use_id: parent,
+            event_index: eventIndex,
+          });
       }
     }
     if (record.type === 'user') {
@@ -186,6 +220,13 @@ function parseAgentStream(output, context = {}) {
     }
   }
   return {
+    ...(context.include_private_evidence === true
+      ? {
+          session_id: sessions.size === 1 ? [...sessions][0] : null,
+          tool_blocks: toolBlocks,
+          assistant_messages: assistantMessages,
+        }
+      : {}),
     tool_uses: toolUses,
     tool_results: toolResults,
     diagnostic_operations: diagnosticOperations,

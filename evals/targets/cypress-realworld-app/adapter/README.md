@@ -43,6 +43,41 @@ a failure attributable to the approved step of the selected test counts as a
 kill. Startup errors, missing or extra tests, and unrelated failures report
 `error`.
 
+## Generated username-validation case
+
+The [case definition](../../../cases/rwa-signin-username/case.json) declares one
+capability trial with Sonnet 5.5. Use its scenario and criterion as Author input;
+keep its expected mutation result, control fixture, and grader evidence outside
+the installed plugin and evaluated target. The owned-target generation runner
+does not support this Git target; use the installed workflow above.
+
+The password must satisfy the independent password rule. Use synthetic public-form
+input, clear and blur Username, and never submit credentials. An invalid password
+can keep Sign In disabled after the username mutation and conceal a weak test.
+
+Before the model call, validate the mutation oracle with the
+[control spec](../../../cases/rwa-signin-username/control.spec.ts) in a separate
+disposable target. `TESTGEN_RWA_CONTROL` selects `strong`, `weak`, or `unrelated`;
+use the approved step `verify required username` and `criterion-1`. Follow the
+same checker approval and boundary procedure for each control. Require:
+
+- `strong`: healthy pass and an attributed mutant failure, reported as `killed`;
+- `weak`: healthy and mutant passes, reported as `survived`;
+- `unrelated`: healthy pass and mutant failure outside the approved step, reported
+  as `error`, never a kill.
+
+Remove the control, outputs, and control environment variable before generation.
+Do not commit controls to the evaluated target or expose their history to Author.
+
+Record the pinned upstream revision, prepared target revision, adapter digest,
+installed plugin revision/fingerprint, requested and resolved model, candidate
+digest, independent assertion review, actual cost, and every attempt. Approve the
+exact generated candidate before execution. Its unchanged bytes must pass on the
+healthy app and detect `signin-username-required` at the approved `criterion-1`
+step. Check candidate and application bytes, database restoration, service
+termination, and worktree cleanup afterward. One success is a capability
+observation, not a reliability estimate; do not silently retry failed trials.
+
 ## Isolation and recovery
 
 - The runner seeds only the disposable checkout and starts its backend and

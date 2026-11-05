@@ -69,13 +69,14 @@ function assistantTools(output) {
 }
 
 function authorExecutionAttempts(output) {
-  return assistantTools(output).filter((block) => {
+  const blocks = Array.isArray(output) ? output : assistantTools(output);
+  return blocks.filter((block) => {
     const commandText = ['Bash', 'PowerShell'].includes(block.name)
       ? block.input?.command
       : null;
     return (
       typeof commandText === 'string' &&
-      ((/\bplaywright\s+test\b/iu.test(commandText) &&
+      ((/\bplaywright(?:\.cmd)?\s+test\b/iu.test(commandText) &&
         !/--list\b/u.test(commandText)) ||
         /\b(?:npm|yarn|pnpm|bun)\s+(?:run\s+)?test(?::[\w-]+)?\b/iu.test(
           commandText,
@@ -470,4 +471,5 @@ module.exports = {
   authorProfileAccessAttempts,
   authorPrompt,
   collectCandidate,
+  verifyBrowserReadiness,
 };

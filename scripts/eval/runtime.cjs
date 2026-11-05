@@ -52,6 +52,8 @@ const FORBIDDEN_PLUGIN_PATHS = [
   'scripts/run-generation-candidate.cjs',
   'scripts/run-selector-repair-eval.cjs',
   'scripts/run-setup-eval.cjs',
+  'scripts/run-discovery-eval.cjs',
+  'scripts/run-checkpoint-eval.cjs',
   'scripts/score-healer-defect-refusal.cjs',
   'scripts/score-outcomes.cjs',
   'scripts/score-selector-repair.cjs',

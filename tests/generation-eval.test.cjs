@@ -89,6 +89,26 @@ test('generation evidence rejects spec execution but allows collection', () => {
   );
 });
 
+test('counts actual execution from already parsed checkpoint tool evidence', () => {
+  assert.equal(
+    authorExecutionAttempts([
+      {
+        name: 'Bash',
+        input: {
+          command: 'npx --no playwright test tests/details.spec.ts --list',
+        },
+      },
+      {
+        name: 'Bash',
+        input: { command: 'npx --no playwright test tests/details.spec.ts' },
+      },
+      { name: 'PowerShell', input: { command: 'npm run test:e2e' } },
+      { name: 'Read', input: { file_path: 'tests/details.spec.ts' } },
+    ]),
+    2,
+  );
+});
+
 test('generation cleanup removes only its owned temporary directory', async (t) => {
   const temporaryRoot = mkdtempSync(
     path.join(tmpdir(), 'testgen-generation-evaluation-'),

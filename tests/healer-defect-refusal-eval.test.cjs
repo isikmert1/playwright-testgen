@@ -7,6 +7,7 @@ const {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } = require('node:fs');
@@ -126,6 +127,33 @@ test('rejects an errored agent result even when its subtype says success', () =>
       JSON.stringify({ type: 'result', subtype: 'success', is_error: false }),
     ).result_subtype,
     'success',
+  );
+});
+
+test('accepts bounded Healer overrides and preserves explicit result archiving', (t) => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'testgen-healer-options-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const { parseHealerOptions } = modules().runner;
+  const options = parseHealerOptions([
+    '--archive-results',
+    '--model',
+    'claude-sonnet-5-5',
+    '--max-budget-usd',
+    '0.5',
+    '--results-dir',
+    directory,
+  ]);
+  assert.equal(options.archiveResults, true);
+  assert.equal(options.definition.agent.model, 'claude-sonnet-5-5');
+  assert.equal(options.definition.agent.max_budget_usd, 0.5);
+  assert.equal(options.resultsRoot, realpathSync(directory));
+  assert.throws(
+    () => parseHealerOptions(['--archive-results', '--archive-results']),
+    /evaluation-arguments-invalid/u,
+  );
+  assert.throws(
+    () => parseHealerOptions(['--max-budget-usd', '0']),
+    /case-options-invalid/u,
   );
 });
 
@@ -302,6 +330,8 @@ test('rejects stale runtime dependencies in an installed plugin', async (t) => {
     'scripts/run-generation-candidate.cjs',
     'scripts/run-selector-repair-eval.cjs',
     'scripts/run-setup-eval.cjs',
+    'scripts/run-discovery-eval.cjs',
+    'scripts/run-checkpoint-eval.cjs',
     'scripts/score-healer-defect-refusal.cjs',
     'scripts/score-outcomes.cjs',
     'scripts/score-selector-repair.cjs',

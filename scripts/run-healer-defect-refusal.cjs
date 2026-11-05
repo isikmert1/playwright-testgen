@@ -15,6 +15,7 @@ const { digestAdapter, parseAdapter } = require('./mutation-adapter.cjs');
 const { captureSnapshot, currentHead } = require('./repository-snapshot.cjs');
 const { scoreEvidence } = require('./score-healer-defect-refusal.cjs');
 const { exactPlaywrightFilter } = require('../hooks/run-policy.cjs');
+const { parseCaseOptions } = require('./eval/installed-case.cjs');
 const {
   command,
   executable,
@@ -319,7 +320,7 @@ function writeRunArtifacts(definition, repository, runId, traceSnapshotOption) {
   return runDirectory;
 }
 
-async function evaluateInstalledHealer(signal) {
+async function evaluateInstalledHealer(signal, selectedDefinition) {
   const startedAt = Date.now();
   const runtime = emptyRuntime();
   const state = {
@@ -337,7 +338,7 @@ async function evaluateInstalledHealer(signal) {
   let failureDiagnostics;
   try {
     const definition = validateDefinition(
-      readJson(definitionPath, 'case-invalid'),
+      selectedDefinition ?? readJson(definitionPath, 'case-invalid'),
     );
     runtime.model_requested = definition.agent.model;
     const revision = await rootGit(
@@ -625,15 +626,28 @@ async function evaluateInstalledHealer(signal) {
   return { primary, state };
 }
 
+function parseHealerOptions(args) {
+  const archiveCount = args.filter((arg) => arg === '--archive-results').length;
+  if (archiveCount > 1) fail('evaluation-arguments-invalid');
+  const received = args.filter((arg) => arg !== '--archive-results');
+  const explicitResults = received.some(
+    (arg) => arg === '--results-dir' || arg.startsWith('--results-dir='),
+  );
+  const options = parseCaseOptions(
+    explicitResults
+      ? received
+      : [
+          ...received,
+          '--results-dir',
+          path.join(repositoryRoot, 'evals/outcomes/results'),
+        ],
+    readJson(definitionPath, 'case-invalid'),
+  );
+  return { ...options, archiveResults: archiveCount === 1 || explicitResults };
+}
+
 async function main() {
-  const argumentsReceived = process.argv.slice(2);
-  if (
-    argumentsReceived.length > 1 ||
-    (argumentsReceived.length === 1 &&
-      argumentsReceived[0] !== '--archive-results')
-  )
-    fail('evaluation-arguments-invalid');
-  const archiveResults = argumentsReceived.length === 1;
+  const options = parseHealerOptions(process.argv.slice(2));
   const startedAt = Date.now();
   const lifecycle = lifecycleCancellation();
   let evaluation;
@@ -643,7 +657,10 @@ async function main() {
     temporary_target: 'not-created',
   };
   try {
-    evaluation = await evaluateInstalledHealer(lifecycle.signal);
+    evaluation = await evaluateInstalledHealer(
+      lifecycle.signal,
+      options.definition,
+    );
   } catch (error) {
     const failure = evaluationFailure(error);
     evaluation = {
@@ -657,15 +674,9 @@ async function main() {
   }
   const result = combineResult(evaluation.primary, cleanup);
   result.elapsed_ms = Date.now() - startedAt;
-  if (archiveResults) {
+  if (options.archiveResults) {
     const trialId = `trial-${randomBytes(8).toString('hex')}`;
-    const directory = path.join(
-      repositoryRoot,
-      'evals',
-      'outcomes',
-      'results',
-      trialId,
-    );
+    const directory = path.join(options.resultsRoot, trialId);
     mkdirSync(directory, { recursive: true });
     result.case_id = 'semantic-order-not-inserted';
     result.trial_id = trialId;
@@ -680,4 +691,4 @@ async function main() {
 
 if (require.main === module) void main();
 
-module.exports = { buildHealerPrompt };
+module.exports = { buildHealerPrompt, parseHealerOptions };

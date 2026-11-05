@@ -1,0 +1,20 @@
+{
+  "schema_version": "installed-capability-case.v1",
+  "case_id": "discovery-covered-and-unsupported",
+  "kind": "discovery",
+  "evidence_level": "installed-direct-role",
+  "planned_trials": 1,
+  "retries": 0,
+  "target_path": "evals/targets/semantic-only/repository",
+  "spec_source": "evals/cases/discovery-covered-and-unsupported/order.spec.ts",
+  "spec_path": "tests/order.spec.ts",
+  "origin": "http://127.0.0.1:4173",
+  "scope": ["order-submission", "bulk-cancellation"],
+  "agent": {
+    "name": "playwright-testgen:playwright-test-explorer",
+    "model": "claude-sonnet-5-5",
+    "timeout_ms": 90000,
+    "max_turns": 20,
+    "max_budget_usd": 2
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "schema_version": "discovery-grader.v1",
+  "covered_id": "order-submission",
+  "unsupported_id": "bulk-cancellation",
+  "coverage_reference": "tests/order.spec.ts",
+  "body_fragments": [
+    "getByRole('textbox', { name: 'Item name' }).fill(itemName)",
+    "getByRole('spinbutton', { name: 'Quantity' }).fill(String(quantity))",
+    "getByRole('button', { name: 'Add order' }).click()",
+    "filter({ has: page.getByRole('cell', { name: itemName, exact: true }) })",
+    "expect(orderRow).toHaveCount(1)",
+    "orderRow.getByRole('cell', { name: String(quantity), exact: true })",
+    "orderRow.getByRole('cell', { name: 'Pending', exact: true })",
+    ").toBeVisible()"
+  ],
+  "max_source_test_reads": 10,
+  "max_elapsed_ms": 90000
+}
