@@ -173,14 +173,19 @@ unrelated pre-existing dirty content. It then:
    evidence from the approved target runner;
 5. verifies that neither runner changed the disposable checkout beyond the
    approved patch; and
-6. cancels the runner process tree on timeout or interruption, removes the
-   worktree in `finally`, then rechecks the active checkout and its `HEAD`.
+6. cancels the runner process tree on timeout or interruption, verifies its
+   termination before removing the worktree, then rechecks the active checkout
+   and its `HEAD`.
 
 Before execution, the checker reserves Main-owned `mutation-recovery.json` with
 the exact temporary root and worktree paths. An existing record blocks another
 verification. Successful cleanup removes the reservation; failed cleanup keeps
 it for supervised recovery under `cleanup-contract.md` while preserving the
 primary result separately.
+
+On Windows, verified process-tree cleanup requires Windows PowerShell
+(`powershell.exe`). If termination cannot be verified, the checker retains the
+worktree and recovery record and reports failed cleanup.
 
 The approved target runner must not detach children. It owns normal server and
 test-process shutdown; the outer checker owns the adapter timeout and

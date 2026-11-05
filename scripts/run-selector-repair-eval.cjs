@@ -12,33 +12,32 @@ const {
 const { tmpdir } = require('node:os');
 const path = require('node:path');
 const { exactPlaywrightFilter } = require('../hooks/run-policy.cjs');
-const { command, executable, runBounded } = require('./eval/process.cjs');
+const {
+  command,
+  executable,
+  runBounded,
+  lifecycleCancellation,
+} = require('./process.cjs');
 const {
   buildClaudeArguments,
   parseAgentStream,
 } = require('./eval/agent-evidence.cjs');
 const {
   cleanupEvaluation,
-  findInstalledPlugin,
+  allTests,
+  runApprovedSpec,
+  evaluatedRevision,
+  installPlugin,
   hashFile,
   hashFiles,
-  marketplaceList,
-  normalizedMarketplaceState,
-  normalizedPluginState,
-  pluginList,
   preflight,
   preparePluginSource,
   prepareTarget,
-  runRuntimePreflight,
   startServer,
   validateArtifact,
   verifyInstalledHook,
 } = require('./eval/runtime.cjs');
 const { buildHealerPrompt } = require('./run-healer-defect-refusal.cjs');
-const {
-  allTests,
-  scorePlaywrightReport,
-} = require('./run-generation-candidate.cjs');
 const { scoreSelectorRepair } = require('./score-selector-repair.cjs');
 
 const root = path.resolve(__dirname, '..');
@@ -101,49 +100,6 @@ function selectorFailure(report) {
   );
 }
 
-async function runSpec(repository, playwrightCli, origin, reportPath, signal) {
-  const run = await runBounded(
-    process.execPath,
-    [
-      playwrightCli,
-      'test',
-      exactPlaywrightFilter(path.join(repository, 'tests', 'order.spec.ts')),
-      '--reporter=json',
-      '--workers=1',
-      '--retries=0',
-    ],
-    {
-      cwd: repository,
-      env: {
-        ...process.env,
-        TESTGEN_BASE_URL: origin,
-        PLAYWRIGHT_JSON_OUTPUT_FILE: reportPath,
-      },
-      signal,
-      timeout_ms: 120_000,
-      verify_process_tree: true,
-    },
-  );
-  if (
-    run.tree_cleanup_failed ||
-    run.timed_out ||
-    run.cancelled ||
-    run.output_overflow ||
-    run.spawn_error != null ||
-    !existsSync(reportPath)
-  )
-    throw new Error('playwright-run-failed');
-  const report = readJson(reportPath);
-  const outcome = scorePlaywrightReport(report);
-  if (
-    outcome === 'error' ||
-    (outcome === 'pass' && run.status !== 0) ||
-    (outcome === 'fail' && run.status === 0)
-  )
-    throw new Error('playwright-report-invalid');
-  return { outcome, report };
-}
-
 function approvedSpec(args, definition) {
   if (
     args.length !== 2 ||
@@ -193,11 +149,7 @@ async function evaluateRepair(definition, approvedDigest, signal) {
   };
   try {
     result.dataset_sha256 = require('./score-outcomes.cjs').datasetDigest();
-    const revision = await command(executable('git'), ['rev-parse', 'HEAD'], {
-      cwd: root,
-      error: 'testgen-revision-unavailable',
-      signal,
-    });
+    const revision = await evaluatedRevision(signal);
     result.testgen_revision = revision;
     const runtime = {};
     const tooling = await preflight(signal, runtime);
@@ -212,8 +164,6 @@ async function evaluateRepair(definition, approvedDigest, signal) {
       revision,
       signal,
     );
-    state.marketplace_name = source.marketplace_name;
-    state.plugin_id = source.plugin_id;
     const targetPath = path.join(
       'evals',
       'targets',
@@ -249,10 +199,11 @@ async function evaluateRepair(definition, approvedDigest, signal) {
       descriptor.start.origin,
       signal,
     );
-    const baseline = await runSpec(
+    const baseline = await runApprovedSpec(
       state.repository,
       playwrightCli,
       descriptor.start.origin,
+      definition.spec_path,
       path.join(resultDirectory, 'baseline.json'),
       signal,
     );
@@ -276,10 +227,11 @@ async function evaluateRepair(definition, approvedDigest, signal) {
       error: 'variant-apply-failed',
       signal,
     });
-    const precheck = await runSpec(
+    const precheck = await runApprovedSpec(
       state.repository,
       playwrightCli,
       descriptor.start.origin,
+      definition.spec_path,
       path.join(resultDirectory, 'precheck.json'),
       signal,
     );
@@ -288,40 +240,15 @@ async function evaluateRepair(definition, approvedDigest, signal) {
     if (precheck.outcome !== 'fail' || !result.selector_failure)
       throw new Error('selector-failure-not-reproduced');
 
-    state.plugin_state_before = normalizedPluginState(
-      await pluginList(state.repository, signal),
-    );
-    state.marketplace_state_before = normalizedMarketplaceState(
-      await marketplaceList(state.repository, signal),
-    );
-    state.marketplace_added = true;
-    await command(
-      executable('claude'),
-      ['plugin', 'marketplace', 'add', source.source, '--scope', 'local'],
-      { cwd: state.repository, error: 'plugin-installation-failed', signal },
-    );
-    state.plugin_installed = true;
-    await command(
-      executable('claude'),
-      ['plugin', 'install', source.plugin_id, '--scope', 'local'],
-      { cwd: state.repository, error: 'plugin-installation-failed', signal },
-    );
-    const installed = findInstalledPlugin(
-      await pluginList(state.repository, signal),
-      source.plugin_id,
-      state.repository,
-      source.version,
-    );
-    result.installed_runtime_sha256 = installed.runtime_sha256;
-    const compatibility = await runRuntimePreflight(
-      installed.installPath,
-      state.repository,
-      tooling.playwright_cli,
+    const { installed, compatibility } = await installPlugin(
+      state,
+      source,
+      tooling,
       signal,
-      'playwright.config.cjs',
     );
     result.playwright = compatibility.playwright.version;
     result.playwright_cli = compatibility.playwright_cli.version;
+    result.installed_runtime_sha256 = installed.runtime_sha256;
 
     const runId = `tg-${randomBytes(12).toString('hex')}`;
     result.run_id = runId;
@@ -481,10 +408,11 @@ async function evaluateRepair(definition, approvedDigest, signal) {
         signal,
       ),
     };
-    const finalRun = await runSpec(
+    const finalRun = await runApprovedSpec(
       state.repository,
       playwrightCli,
       descriptor.start.origin,
+      definition.spec_path,
       path.join(resultDirectory, 'confirmation.json'),
       signal,
     );
@@ -540,22 +468,18 @@ async function evaluateRepair(definition, approvedDigest, signal) {
 async function main() {
   const definition = readJson(casePath);
   const approvedDigest = approvedSpec(process.argv.slice(2), definition);
-  const controller = new AbortController();
-  const cancel = () => controller.abort();
-  process.once('SIGINT', cancel);
-  process.once('SIGTERM', cancel);
+  const lifecycle = lifecycleCancellation();
   try {
     const result = await evaluateRepair(
       definition,
       approvedDigest,
-      controller.signal,
+      lifecycle.signal,
     );
     process.stdout.write(`${JSON.stringify(result)}\n`);
     if (result.status !== 'complete' || result.grade?.status !== 'passed')
       process.exitCode = 1;
   } finally {
-    process.off('SIGINT', cancel);
-    process.off('SIGTERM', cancel);
+    lifecycle.dispose();
   }
 }
 

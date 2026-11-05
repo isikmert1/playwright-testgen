@@ -14,6 +14,7 @@ const {
 } = require('node:fs');
 const { tmpdir } = require('node:os');
 const path = require('node:path');
+const { exactPlaywrightFilter } = require('../../hooks/run-policy.cjs');
 const { currentHead } = require('../repository-snapshot.cjs');
 const { versionAtLeast } = require('../runtime-preflight.cjs');
 const {
@@ -25,7 +26,7 @@ const {
   fail,
   runBounded,
   stopProcessTree,
-} = require('./process.cjs');
+} = require('../process.cjs');
 
 const repositoryRoot = path.resolve(__dirname, '../..');
 
@@ -57,7 +58,6 @@ const FORBIDDEN_PLUGIN_PATHS = [
   'scripts/score-healer-defect-refusal.cjs',
   'scripts/score-outcomes.cjs',
   'scripts/score-selector-repair.cjs',
-  'scripts/windows-process-tree.cjs',
 ];
 
 function readJson(filename, code) {
@@ -184,6 +184,174 @@ function assertPluginBlind(source) {
     )
   )
     fail('installed-evaluation-material');
+}
+
+async function verifyBrowserReadiness(
+  tooling,
+  repository,
+  origin,
+  temporaryRoot,
+  signal,
+) {
+  await command(
+    process.execPath,
+    [
+      '-e',
+      "require('playwright').chromium.launch().then(async (browser) => browser.close())",
+    ],
+    { cwd: repository, error: 'runner-browser-unavailable', signal },
+  );
+  const session = `preflight-${randomBytes(8).toString('hex')}`;
+  const directory = path.join(temporaryRoot, 'cli-preflight');
+  mkdirSync(directory);
+  const invoke = (action, args = [], operationSignal = signal) =>
+    runBounded(
+      process.execPath,
+      [tooling.playwright_cli, `-s=${session}`, action, ...args],
+      {
+        cwd: directory,
+        env: { ...process.env, PWTEST_CLI_GLOBAL_CONFIG: '.' },
+        signal: operationSignal,
+        timeout_ms: 30_000,
+        verify_process_tree: false,
+      },
+    );
+  let failure = null;
+  try {
+    const launch = await invoke('open', [origin]);
+    if (
+      launch.status !== 0 ||
+      launch.timed_out ||
+      launch.cancelled ||
+      launch.spawn_error != null
+    )
+      throw new Error('cli-browser-unavailable');
+  } catch (error) {
+    failure = error;
+  }
+  const close = await invoke('close', [], null);
+  if (
+    close.status !== 0 ||
+    close.timed_out ||
+    close.cancelled ||
+    close.spawn_error != null
+  )
+    failure = new EvaluationError(
+      failure?.code ?? failure?.message ?? 'cli-browser-cleanup-failed',
+      failure == null ? [] : ['cli-browser-cleanup-failed'],
+    );
+  if (failure != null) throw failure;
+}
+
+function allTests(suites) {
+  return suites.flatMap((suite) => [
+    ...(suite.specs ?? []).flatMap((spec) => spec.tests ?? []),
+    ...allTests(suite.suites ?? []),
+  ]);
+}
+
+function scorePlaywrightReport(report) {
+  if (
+    !Array.isArray(report?.errors) ||
+    report.errors.length !== 0 ||
+    !Array.isArray(report.suites)
+  )
+    return 'error';
+  const tests = allTests(report.suites);
+  if (tests.length !== 1 || tests[0].results?.length !== 1) return 'error';
+  const status = tests[0].results[0].status;
+  const stats = report.stats ?? {};
+  if (
+    status === 'passed' &&
+    tests[0].status === 'expected' &&
+    stats.expected === 1 &&
+    stats.unexpected === 0 &&
+    stats.skipped === 0 &&
+    stats.flaky === 0
+  )
+    return 'pass';
+  if (
+    ['failed', 'timedOut'].includes(status) &&
+    tests[0].status === 'unexpected' &&
+    stats.expected === 0 &&
+    stats.unexpected === 1 &&
+    stats.skipped === 0 &&
+    stats.flaky === 0
+  )
+    return 'fail';
+  return 'error';
+}
+
+async function runApprovedSpec(
+  repository,
+  playwrightCli,
+  origin,
+  specPath,
+  reportPath,
+  signal,
+) {
+  const run = await runBounded(
+    process.execPath,
+    [
+      playwrightCli,
+      'test',
+      exactPlaywrightFilter(path.resolve(repository, specPath)),
+      '--reporter=json',
+      '--workers=1',
+      '--retries=0',
+    ],
+    {
+      cwd: repository,
+      env: {
+        ...process.env,
+        TESTGEN_BASE_URL: origin,
+        PLAYWRIGHT_JSON_OUTPUT_FILE: reportPath,
+      },
+      signal,
+      timeout_ms: 120_000,
+      verify_process_tree: true,
+    },
+  );
+  if (
+    run.tree_cleanup_failed ||
+    run.timed_out ||
+    run.cancelled ||
+    run.output_overflow ||
+    run.spawn_error != null ||
+    !existsSync(reportPath)
+  )
+    throw new Error('playwright-run-failed');
+  const report = readJson(reportPath, 'playwright-report-invalid');
+  const outcome = scorePlaywrightReport(report);
+  if (
+    outcome === 'error' ||
+    (outcome === 'pass' && run.status !== 0) ||
+    (outcome === 'fail' && run.status === 0)
+  )
+    throw new Error('playwright-report-invalid');
+  return { outcome, report };
+}
+
+async function evaluatedRevision(signal) {
+  const revision = await command(
+    executable('git'),
+    ['rev-parse', '--verify', 'HEAD'],
+    {
+      cwd: repositoryRoot,
+      error: 'testgen-revision-unavailable',
+      signal,
+    },
+  );
+  if (!/^[a-f0-9]{40}$/u.test(revision)) fail('testgen-revision-unavailable');
+  if (
+    await command(executable('git'), ['status', '--porcelain'], {
+      cwd: repositoryRoot,
+      error: 'testgen-state-unavailable',
+      signal,
+    })
+  )
+    fail('testgen-repository-not-clean');
+  return revision;
 }
 
 async function preparePluginSource(
@@ -693,6 +861,51 @@ async function runRuntimePreflight(
   return report;
 }
 
+async function installPlugin(state, source, tooling, signal) {
+  state.marketplace_name = source.marketplace_name;
+  state.plugin_id = source.plugin_id;
+  state.plugin_state_before = normalizedPluginState(
+    await pluginList(state.repository, signal),
+  );
+  state.marketplace_state_before = normalizedMarketplaceState(
+    await marketplaceList(state.repository, signal),
+  );
+  state.marketplace_added = true;
+  await command(
+    executable('claude'),
+    ['plugin', 'marketplace', 'add', source.source, '--scope', 'local'],
+    {
+      cwd: state.repository,
+      error: 'plugin-installation-failed',
+      signal,
+    },
+  );
+  state.plugin_installed = true;
+  await command(
+    executable('claude'),
+    ['plugin', 'install', source.plugin_id, '--scope', 'local'],
+    {
+      cwd: state.repository,
+      error: 'plugin-installation-failed',
+      signal,
+    },
+  );
+  const installed = findInstalledPlugin(
+    await pluginList(state.repository, signal),
+    source.plugin_id,
+    state.repository,
+    source.version,
+  );
+  const compatibility = await runRuntimePreflight(
+    installed.installPath,
+    state.repository,
+    tooling.playwright_cli,
+    signal,
+    'playwright.config.cjs',
+  );
+  return { installed, compatibility };
+}
+
 async function cleanupEvaluation(state) {
   const failures = [];
   const details = [];
@@ -798,22 +1011,23 @@ async function cleanupEvaluation(state) {
 module.exports = {
   assertPluginBlind,
   cleanupEvaluation,
+  allTests,
+  scorePlaywrightReport,
+  runApprovedSpec,
+  verifyBrowserReadiness,
+  evaluatedRevision,
+  installPlugin,
   findInstalledPlugin,
   hashFile,
   hashFiles,
   installedHookPreflightTimeout,
-  marketplaceList,
   matchesInstalledPlugin,
-  normalizedMarketplaceState,
-  normalizedPluginState,
-  pluginList,
   preflight,
   preparePluginSource,
   prepareTarget,
   readHookAudit,
   readJson,
   readJsonOutput,
-  runRuntimePreflight,
   sameJson,
   startServer,
   stateDifferenceCategories,

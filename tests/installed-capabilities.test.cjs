@@ -282,7 +282,8 @@ test('deterministic checkpoint replay resumes twice and gates skip on the revise
       use('author-validation', 'Bash', { command: validationCommand });
       if (executeBeforeApproval)
         use('unapproved-run', 'Bash', {
-          command: 'npx --no playwright test tests/notebook-details.spec.ts',
+          command:
+            'node node_modules/@playwright/test/cli.js test tests/notebook-details.spec.ts',
         });
       records.push({
         type: 'assistant',
@@ -654,13 +655,17 @@ test('reports dirty evaluated source before any installed-agent lifecycle work',
   const resultRoot = mkdtempSync(
     path.join(tmpdir(), 'testgen-discovery-source-check-'),
   );
-  const processTools = require('../scripts/eval/process.cjs');
+  const processTools = require('../scripts/process.cjs');
   const original = processTools.command;
   const helperPath = require.resolve('../scripts/eval/installed-case.cjs');
+  const runtimePath = require.resolve('../scripts/eval/runtime.cjs');
+  const generationPath = require.resolve('../scripts/run-generation-eval.cjs');
   delete require.cache[helperPath];
+  delete require.cache[runtimePath];
+  delete require.cache[generationPath];
   processTools.command = async (_name, args) => {
-    if (args[0] === 'rev-parse') return 'a'.repeat(40);
-    if (args[0] === 'status') return ' M agents/playwright-test-explorer.md';
+    if (args.includes('rev-parse')) return 'a'.repeat(40);
+    if (args.includes('status')) return ' M agents/playwright-test-explorer.md';
     throw new Error('unexpected-lifecycle-work');
   };
   try {
@@ -680,9 +685,18 @@ test('reports dirty evaluated source before any installed-agent lifecycle work',
     assert.equal(result.status, 'failed');
     assert.equal(result.reason, 'testgen-repository-not-clean');
     assert.equal(result.cleanup.status, 'passed');
+    const generation = await require(generationPath).collectCandidate(
+      require('../evals/cases/healthy-generation/case.json'),
+      undefined,
+      { resultsRoot: resultRoot },
+    );
+    assert.equal(generation.error, 'testgen-repository-not-clean');
+    assert.equal(generation.cleanup.status, 'passed');
   } finally {
     processTools.command = original;
     delete require.cache[helperPath];
+    delete require.cache[runtimePath];
+    delete require.cache[generationPath];
     assert.equal(path.dirname(resultRoot), path.resolve(tmpdir()));
     rmSync(resultRoot, { recursive: true, force: true });
   }

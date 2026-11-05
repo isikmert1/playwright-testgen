@@ -22,7 +22,7 @@ const {
   fail,
   lifecycleCancellation,
   runBounded,
-} = require('./eval/process.cjs');
+} = require('./process.cjs');
 const {
   agentFailure,
   buildClaudeArguments,
@@ -34,20 +34,16 @@ const {
 } = require('./eval/agent-evidence.cjs');
 const {
   cleanupEvaluation,
-  findInstalledPlugin,
+  evaluatedRevision,
+  installPlugin,
   hashFile,
   hashFiles,
-  marketplaceList,
-  normalizedMarketplaceState,
-  normalizedPluginState,
-  pluginList,
   preflight,
   preparePluginSource,
   prepareTarget,
   readHookAudit,
   readJson,
   readJsonOutput,
-  runRuntimePreflight,
   sameJson,
   startServer,
   validateArtifact,
@@ -119,14 +115,6 @@ function validateDefinition(definition) {
       fail('case-invalid-path');
   }
   return definition;
-}
-
-async function rootGit(args, error, signal) {
-  return command(
-    executable('git'),
-    ['-c', `safe.directory=${repositoryRoot.replaceAll('\\', '/')}`, ...args],
-    { error, signal },
-  );
 }
 
 async function runTarget(
@@ -341,22 +329,10 @@ async function evaluateInstalledHealer(signal, selectedDefinition) {
       selectedDefinition ?? readJson(definitionPath, 'case-invalid'),
     );
     runtime.model_requested = definition.agent.model;
-    const revision = await rootGit(
-      ['rev-parse', '--verify', 'HEAD'],
-      'testgen-revision-unavailable',
-      signal,
-    );
+    runtime.agent_limits = definition.agent;
+    const revision = await evaluatedRevision(signal);
     runtime.testgen_revision = revision;
     runtime.dataset_sha256 = require('./score-outcomes.cjs').datasetDigest();
-    if (!/^[a-f0-9]{40}$/u.test(revision)) fail('testgen-revision-unavailable');
-    if (
-      (await rootGit(
-        ['status', '--porcelain'],
-        'testgen-state-unavailable',
-        signal,
-      )) !== ''
-    )
-      fail('testgen-repository-not-clean');
     const prerequisite = await preflight(signal, runtime);
     const temporaryRoot = mkdtempSync(
       path.join(tmpdir(), 'testgen-healer-evaluation-'),
@@ -368,8 +344,6 @@ async function evaluateInstalledHealer(signal, selectedDefinition) {
       revision,
       signal,
     );
-    state.marketplace_name = pluginSource.marketplace_name;
-    state.plugin_id = pluginSource.plugin_id;
     state.repository = await prepareTarget(
       definition,
       temporaryRoot,
@@ -408,49 +382,15 @@ async function evaluateInstalledHealer(signal, selectedDefinition) {
     )
       fail('mutation-not-reproduced');
 
-    state.plugin_state_before = normalizedPluginState(
-      await pluginList(state.repository, signal),
-    );
-    state.marketplace_state_before = normalizedMarketplaceState(
-      await marketplaceList(state.repository, signal),
-    );
-    state.marketplace_added = true;
-    await command(
-      executable('claude'),
-      ['plugin', 'marketplace', 'add', pluginSource.source, '--scope', 'local'],
-      {
-        cwd: state.repository,
-        error: 'plugin-installation-failed',
-        signal,
-      },
-    );
-    state.plugin_installed = true;
-    await command(
-      executable('claude'),
-      ['plugin', 'install', pluginSource.plugin_id, '--scope', 'local'],
-      {
-        cwd: state.repository,
-        error: 'plugin-installation-failed',
-        signal,
-      },
-    );
-    const installed = findInstalledPlugin(
-      await pluginList(state.repository, signal),
-      pluginSource.plugin_id,
-      state.repository,
-      pluginSource.version,
-    );
-    runtime.plugin_runtime_sha256 = installed.runtime_sha256;
-
-    const compatibility = await runRuntimePreflight(
-      installed.installPath,
-      state.repository,
-      prerequisite.playwright_cli,
+    const { installed, compatibility } = await installPlugin(
+      state,
+      pluginSource,
+      prerequisite,
       signal,
-      'playwright.config.cjs',
     );
     runtime.playwright = compatibility.playwright.version;
     runtime.playwright_cli = compatibility.playwright_cli.version;
+    runtime.plugin_runtime_sha256 = installed.runtime_sha256;
 
     const runId = `tg-${randomBytes(12).toString('hex')}`;
     const runDirectory = writeRunArtifacts(

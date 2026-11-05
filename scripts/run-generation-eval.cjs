@@ -12,24 +12,27 @@ const {
 const { tmpdir } = require('node:os');
 const path = require('node:path');
 const { exactPlaywrightFilter } = require('../hooks/run-policy.cjs');
-const { command, executable, runBounded } = require('./eval/process.cjs');
+const {
+  executable,
+  runBounded,
+  lifecycleCancellation,
+} = require('./process.cjs');
 const {
   buildClaudeArguments,
+  authorExecutionAttempts,
+  authorProfileAccessAttempts,
   evaluationFailure,
   parseAgentStream,
 } = require('./eval/agent-evidence.cjs');
 const {
   cleanupEvaluation,
-  findInstalledPlugin,
+  verifyBrowserReadiness,
+  evaluatedRevision,
+  installPlugin,
   hashFile,
-  marketplaceList,
-  normalizedMarketplaceState,
-  normalizedPluginState,
-  pluginList,
   preflight,
   preparePluginSource,
   prepareTarget,
-  runRuntimePreflight,
   startServer,
   validateArtifact,
   verifyInstalledHook,
@@ -47,50 +50,6 @@ const resultsRoot = path.join(root, 'evals', 'outcomes', 'results');
 
 function readJson(filename) {
   return JSON.parse(readFileSync(filename, 'utf8'));
-}
-
-function assistantTools(output) {
-  const tools = [];
-  for (const line of output.split(/\r?\n/u)) {
-    let record;
-    try {
-      record = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    if (record.type !== 'assistant') continue;
-    tools.push(
-      ...(record.message?.content ?? []).filter(
-        (block) => block.type === 'tool_use',
-      ),
-    );
-  }
-  return tools;
-}
-
-function authorExecutionAttempts(output) {
-  const blocks = Array.isArray(output) ? output : assistantTools(output);
-  return blocks.filter((block) => {
-    const commandText = ['Bash', 'PowerShell'].includes(block.name)
-      ? block.input?.command
-      : null;
-    return (
-      typeof commandText === 'string' &&
-      ((/\bplaywright(?:\.cmd)?\s+test\b/iu.test(commandText) &&
-        !/--list\b/u.test(commandText)) ||
-        /\b(?:npm|yarn|pnpm|bun)\s+(?:run\s+)?test(?::[\w-]+)?\b/iu.test(
-          commandText,
-        ))
-    );
-  }).length;
-}
-
-function authorProfileAccessAttempts(output) {
-  return assistantTools(output).filter(
-    (block) =>
-      ['Read', 'Grep', 'Glob', 'Bash', 'PowerShell'].includes(block.name) &&
-      JSON.stringify(block.input ?? {}).includes('profile.v1.json'),
-  ).length;
 }
 
 function authorPrompt(definition, runtime) {
@@ -115,61 +74,6 @@ function authorPrompt(definition, runtime) {
       : `The application, CLI browser, and runner browser are ready. No authentication is needed. Main validated its repository profile and supplied these navigation facts: ${JSON.stringify(runtime.setup_facts)}. The profile is Main-owned; use only the supplied facts.`,
     'Each Bash call starts at the repository root. Write and validate one candidate spec and its handoff, close your owned browser session, then stop before test execution. The human has not approved running the candidate.',
   ].join('\n');
-}
-
-async function verifyBrowserReadiness(
-  tooling,
-  repository,
-  origin,
-  temporaryRoot,
-  signal,
-) {
-  await command(
-    process.execPath,
-    [
-      '-e',
-      "require('playwright').chromium.launch().then(async (browser) => browser.close())",
-    ],
-    { cwd: repository, error: 'runner-browser-unavailable', signal },
-  );
-  const session = `preflight-${randomBytes(8).toString('hex')}`;
-  const directory = path.join(temporaryRoot, 'cli-preflight');
-  mkdirSync(directory);
-  const invoke = (action, args = []) =>
-    runBounded(
-      process.execPath,
-      [tooling.playwright_cli, `-s=${session}`, action, ...args],
-      {
-        cwd: directory,
-        env: { ...process.env, PWTEST_CLI_GLOBAL_CONFIG: '.' },
-        signal,
-        timeout_ms: 30_000,
-        verify_process_tree: false,
-      },
-    );
-  let opened = false;
-  let closeFailed = false;
-  try {
-    const launch = await invoke('open', [origin]);
-    if (
-      launch.status !== 0 ||
-      launch.timed_out ||
-      launch.cancelled ||
-      launch.spawn_error != null
-    )
-      throw new Error('cli-browser-unavailable');
-    opened = true;
-  } finally {
-    if (opened) {
-      const close = await invoke('close');
-      closeFailed =
-        close.status !== 0 ||
-        close.timed_out ||
-        close.cancelled ||
-        close.spawn_error != null;
-    }
-  }
-  if (closeFailed) throw new Error('cli-browser-cleanup-failed');
 }
 
 async function collectCandidate(definition, signal, options = {}) {
@@ -221,11 +125,7 @@ async function collectCandidate(definition, signal, options = {}) {
     result.dataset_sha256 =
       options.datasetDigest?.() ??
       require('./score-outcomes.cjs').datasetDigest();
-    const revision = await command(executable('git'), ['rev-parse', 'HEAD'], {
-      cwd: root,
-      error: 'testgen-revision-unavailable',
-      signal,
-    });
+    const revision = await evaluatedRevision(signal);
     result.testgen_revision = revision;
     const runtime = {};
     const tooling = await preflight(signal, runtime);
@@ -240,8 +140,6 @@ async function collectCandidate(definition, signal, options = {}) {
       revision,
       signal,
     );
-    state.marketplace_name = source.marketplace_name;
-    state.plugin_id = source.plugin_id;
     const definitionWithTarget = {
       ...definition,
       target_path: path.join(
@@ -258,40 +156,15 @@ async function collectCandidate(definition, signal, options = {}) {
       tooling,
       signal,
     );
-    state.plugin_state_before = normalizedPluginState(
-      await pluginList(state.repository, signal),
-    );
-    state.marketplace_state_before = normalizedMarketplaceState(
-      await marketplaceList(state.repository, signal),
-    );
-    state.marketplace_added = true;
-    await command(
-      executable('claude'),
-      ['plugin', 'marketplace', 'add', source.source, '--scope', 'local'],
-      { cwd: state.repository, error: 'plugin-installation-failed', signal },
-    );
-    state.plugin_installed = true;
-    await command(
-      executable('claude'),
-      ['plugin', 'install', source.plugin_id, '--scope', 'local'],
-      { cwd: state.repository, error: 'plugin-installation-failed', signal },
-    );
-    const installed = findInstalledPlugin(
-      await pluginList(state.repository, signal),
-      source.plugin_id,
-      state.repository,
-      source.version,
-    );
-    result.installed_runtime_sha256 = installed.runtime_sha256;
-    const compatibility = await runRuntimePreflight(
-      installed.installPath,
-      state.repository,
-      tooling.playwright_cli,
+    const { installed, compatibility } = await installPlugin(
+      state,
+      source,
+      tooling,
       signal,
-      'playwright.config.cjs',
     );
     result.playwright = compatibility.playwright.version;
     result.playwright_cli = compatibility.playwright_cli.version;
+    result.installed_runtime_sha256 = installed.runtime_sha256;
 
     if (options.setupBeforeAuthor != null)
       result.setup = await options.setupBeforeAuthor({
@@ -433,6 +306,7 @@ async function collectCandidate(definition, signal, options = {}) {
     result.status = 'checkpoint';
   } catch (error) {
     result.error = evaluationFailure(error).reason ?? error.message;
+    if (error.details?.length > 0) result.details = error.details;
   } finally {
     cleanup = await cleanupEvaluation(state);
     result.cleanup = cleanup;
@@ -447,29 +321,16 @@ async function collectCandidate(definition, signal, options = {}) {
 }
 
 async function main() {
-  const controller = new AbortController();
-  const cancel = () => controller.abort();
-  process.once('SIGINT', cancel);
-  process.once('SIGTERM', cancel);
+  const lifecycle = lifecycleCancellation();
   try {
-    const result = await collectCandidate(
-      readJson(casePath),
-      controller.signal,
-    );
+    const result = await collectCandidate(readJson(casePath), lifecycle.signal);
     process.stdout.write(`${JSON.stringify(result)}\n`);
     if (result.status !== 'checkpoint') process.exitCode = 1;
   } finally {
-    process.off('SIGINT', cancel);
-    process.off('SIGTERM', cancel);
+    lifecycle.dispose();
   }
 }
 
 if (require.main === module) void main();
 
-module.exports = {
-  authorExecutionAttempts,
-  authorProfileAccessAttempts,
-  authorPrompt,
-  collectCandidate,
-  verifyBrowserReadiness,
-};
+module.exports = { authorPrompt, collectCandidate };

@@ -66,7 +66,14 @@ function removeDisposableWorktree(repository) {
     (candidate) => !samePath(realpathSync.native(candidate), main),
   );
   if (disposable != null) {
-    git(repository, ['worktree', 'unlock', disposable]);
+    const unlock = spawnSync('git', ['worktree', 'unlock', disposable], {
+      cwd: repository,
+      encoding: 'utf8',
+    });
+    assert.ok(
+      unlock.status === 0 || unlock.stderr.includes('is not locked'),
+      unlock.stderr,
+    );
     git(repository, ['worktree', 'remove', '--force', '--', disposable]);
     rmSync(path.dirname(disposable), { force: true, recursive: true });
   }
@@ -358,6 +365,29 @@ test('records dirty paths without storing repository content', () => {
   });
 });
 
+test('refuses an oversized boundary without replacing the readable manifest', () => {
+  withRepository(({ repository, runDirectory }) => {
+    const notes = path.join(repository, 'notes');
+    mkdirSync(notes);
+    for (let index = 0; index < 1200; index += 1)
+      writeFileSync(
+        path.join(
+          notes,
+          `${String(index).padStart(4, '0')}-${'x'.repeat(120)}.txt`,
+        ),
+        'note\n',
+      );
+    assert.equal(capture(repository, 'pre-author').status, 0);
+    const filename = path.join(runDirectory, 'change-manifest.json');
+    const original = readFileSync(filename, 'utf8');
+    writeApprovedCandidate(repository, runDirectory);
+    const result = capture(repository, 'checkpoint');
+    assert.equal(result.status, 1);
+    assert.equal(JSON.parse(result.stderr).error, 'change-manifest-too-large');
+    assert.equal(readFileSync(filename, 'utf8'), original);
+  });
+});
+
 test('binds adapter metadata, runner, and patch content to one digest', () => {
   withRepository(({ repository }) => {
     const adapterPath = writeAdapter(repository);
@@ -606,23 +636,30 @@ test('reports a non-passing baseline as a verification error', () => {
   });
 });
 
-test('reports malformed runner output without echoing it', () => {
-  withRepository(({ repository, runDirectory }) => {
-    const adapterPath = writeAdapter(repository, {
-      runner: "process.stdout.write('private runner log');\n",
+test('reports invalid or oversized runner output without echoing it', () => {
+  for (const [runner, expectedError] of [
+    ["process.stdout.write('private runner log');\n", 'runner-output-invalid'],
+    [
+      "process.stdout.write('private runner log'.repeat(1000));\n",
+      'runner-output-too-large',
+    ],
+  ])
+    withRepository(({ repository, runDirectory }) => {
+      const adapterPath = writeAdapter(repository, {
+        runner,
+      });
+      const definitionDigest = commitAdapter(repository, adapterPath);
+      capturePassingRun(repository, runDirectory);
+
+      const result = verify(repository, adapterPath, definitionDigest);
+
+      assert.equal(result.status, 1);
+      assert.doesNotMatch(result.stdout, /private runner log/iu);
+      assert.doesNotMatch(result.stderr, /private runner log/iu);
+      const output = JSON.parse(result.stdout);
+      assert.equal(output.error, expectedError);
+      assert.equal(output.cleanup, 'removed');
     });
-    const definitionDigest = commitAdapter(repository, adapterPath);
-    capturePassingRun(repository, runDirectory);
-
-    const result = verify(repository, adapterPath, definitionDigest);
-
-    assert.equal(result.status, 1);
-    assert.doesNotMatch(result.stdout, /private runner log/iu);
-    assert.doesNotMatch(result.stderr, /private runner log/iu);
-    const output = JSON.parse(result.stdout);
-    assert.equal(output.error, 'runner-output-invalid');
-    assert.equal(output.cleanup, 'removed');
-  });
 });
 
 test('requires an exact approved selection for a mapped mutation', () => {
@@ -871,11 +908,11 @@ test('stops runner descendants before removing a timed-out checkout', () => {
       const result = verify(repository, adapterPath, definitionDigest, {
         env: { ...process.env, TESTGEN_DESCENDANT_PID: pidFile },
       });
+      pid = Number(readFileSync(pidFile, 'utf8'));
 
       assert.equal(result.status, 1);
       const output = JSON.parse(result.stdout);
       assert.equal(output.error, 'runner-timeout');
-      pid = Number(readFileSync(pidFile, 'utf8'));
       assert.throws(() => process.kill(pid, 0));
       assert.equal(output.cleanup, 'removed');
       assert.equal(readFileSync(sentinel, 'utf8'), 'preserve me\n');
@@ -942,6 +979,51 @@ test('cancels an active runner and removes its isolation', async () => {
       }
     }
     rmSync(repository, { force: true, recursive: true });
+  }
+});
+
+test('retains recovery state when runner termination cannot be verified', async (t) => {
+  const processTools = require('../scripts/process.cjs');
+  const modulePath = require.resolve('../scripts/mutation-isolation.cjs');
+  t.mock.method(processTools, 'runBounded', async () => ({
+    cancelled: false,
+    output: '',
+    output_overflow: false,
+    signal: null,
+    spawn_error: null,
+    status: null,
+    timed_out: true,
+    tree_cleanup_failed: true,
+    tree_cleanup_reason: 'snapshot-unavailable',
+  }));
+  delete require.cache[modulePath];
+  const { verifyMutation: verifyWithUnverifiedCleanup } = require(modulePath);
+  t.after(() => {
+    delete require.cache[modulePath];
+  });
+  const { repository, runDirectory } = createRepository();
+  try {
+    const adapterPath = writeAdapter(repository);
+    const definitionDigest = commitAdapter(repository, adapterPath);
+    capturePassingRun(repository, runDirectory);
+    const result = await verifyWithUnverifiedCleanup({
+      repository,
+      runId,
+      adapter: path.relative(repository, adapterPath),
+      mutationId: 'disable-save',
+      criterionId: 'criterion-1',
+      approvalDigest: definitionDigest,
+    });
+    assert.equal(result.error, 'runner-timeout');
+    assert.equal(result.cleanup_error, 'runner-process-cleanup-failed');
+    assert.equal(result.cleanup, 'failed');
+    const recovery = JSON.parse(
+      readFileSync(path.join(runDirectory, 'mutation-recovery.json'), 'utf8'),
+    );
+    assert.equal(existsSync(recovery.worktree), true);
+  } finally {
+    removeDisposableWorktree(repository);
+    rmSync(repository, { recursive: true, force: true });
   }
 });
 

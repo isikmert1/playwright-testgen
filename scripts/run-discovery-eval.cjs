@@ -18,7 +18,11 @@ const {
   collectInstalledCase,
   parseCaseOptions,
 } = require('./eval/installed-case.cjs');
-const { executable, runBounded } = require('./eval/process.cjs');
+const {
+  executable,
+  runBounded,
+  lifecycleCancellation,
+} = require('./process.cjs');
 
 const root = path.resolve(__dirname, '..');
 const caseRelative = 'evals/cases/discovery-covered-and-unsupported';
@@ -347,7 +351,7 @@ async function collectDiscovery(definition, signal, options) {
       'scripts/run-discovery-eval.cjs',
       'scripts/eval/installed-case.cjs',
       'scripts/eval/runtime.cjs',
-      'scripts/eval/process.cjs',
+      'scripts/process.cjs',
       'scripts/eval/agent-evidence.cjs',
       'scripts/run-generation-eval.cjs',
       'evals/targets/semantic-only/target.json',
@@ -491,10 +495,7 @@ async function collectDiscovery(definition, signal, options) {
 }
 
 async function main() {
-  const controller = new AbortController();
-  const cancel = () => controller.abort();
-  process.once('SIGINT', cancel);
-  process.once('SIGTERM', cancel);
+  const lifecycle = lifecycleCancellation();
   try {
     const options = parseCaseOptions(
       process.argv.slice(2),
@@ -502,7 +503,7 @@ async function main() {
     );
     const result = await collectDiscovery(
       options.definition,
-      controller.signal,
+      lifecycle.signal,
       options,
     );
     process.stdout.write(`${JSON.stringify(result)}\n`);
@@ -511,8 +512,7 @@ async function main() {
     process.stderr.write(`${error.code ?? 'evaluation-options-invalid'}\n`);
     process.exitCode = 1;
   } finally {
-    process.off('SIGINT', cancel);
-    process.off('SIGTERM', cancel);
+    lifecycle.dispose();
   }
 }
 

@@ -10,21 +10,17 @@ const {
 const { tmpdir } = require('node:os');
 const path = require('node:path');
 const { parseArgs } = require('node:util');
-const { verifyBrowserReadiness } = require('../run-generation-eval.cjs');
 const { evaluationFailure } = require('./agent-evidence.cjs');
-const { command, executable, fail } = require('./process.cjs');
+const { executable, fail } = require('../process.cjs');
 const {
   cleanupEvaluation,
-  findInstalledPlugin,
+  verifyBrowserReadiness,
+  evaluatedRevision,
+  installPlugin,
   hashFiles,
-  marketplaceList,
-  normalizedMarketplaceState,
-  normalizedPluginState,
-  pluginList,
   preflight,
   preparePluginSource,
   prepareTarget,
-  runRuntimePreflight,
   startServer,
   verifyInstalledHook,
 } = require('./runtime.cjs');
@@ -156,19 +152,7 @@ async function collectInstalledCase(definition, signal, options) {
       fail('case-invalid');
     result.dataset_sha256 =
       options.datasetDigest?.() ?? hashFiles(root, options.datasetPaths);
-    result.testgen_revision = await command(
-      executable('git'),
-      ['rev-parse', '--verify', 'HEAD'],
-      { cwd: root, error: 'testgen-revision-unavailable', signal },
-    );
-    if (
-      (await command(executable('git'), ['status', '--porcelain'], {
-        cwd: root,
-        error: 'testgen-state-unavailable',
-        signal,
-      })) !== ''
-    )
-      fail('testgen-repository-not-clean');
+    result.testgen_revision = await evaluatedRevision(signal);
     const tooling = await preflight(signal, result);
     result.node = process.version;
     result.platform = process.platform;
@@ -181,49 +165,22 @@ async function collectInstalledCase(definition, signal, options) {
       result.testgen_revision,
       signal,
     );
-    state.marketplace_name = source.marketplace_name;
-    state.plugin_id = source.plugin_id;
     state.repository = await prepareTarget(
       definition,
       state.temporaryRoot,
       tooling,
       signal,
     );
-    state.plugin_state_before = normalizedPluginState(
-      await pluginList(state.repository, signal),
-    );
-    state.marketplace_state_before = normalizedMarketplaceState(
-      await marketplaceList(state.repository, signal),
-    );
-    state.marketplace_added = true;
-    await command(
-      executable('claude'),
-      ['plugin', 'marketplace', 'add', source.source, '--scope', 'local'],
-      { cwd: state.repository, error: 'plugin-installation-failed', signal },
-    );
-    state.plugin_installed = true;
-    await command(
-      executable('claude'),
-      ['plugin', 'install', source.plugin_id, '--scope', 'local'],
-      { cwd: state.repository, error: 'plugin-installation-failed', signal },
-    );
-    const installed = findInstalledPlugin(
-      await pluginList(state.repository, signal),
-      source.plugin_id,
-      state.repository,
-      source.version,
-    );
-    result.installed_runtime_sha256 = installed.runtime_sha256;
-    result.source_runtime_sha256 = installed.runtime_sha256;
-    const compatibility = await runRuntimePreflight(
-      installed.installPath,
-      state.repository,
-      tooling.playwright_cli,
+    const { installed, compatibility } = await installPlugin(
+      state,
+      source,
+      tooling,
       signal,
-      'playwright.config.cjs',
     );
     result.playwright = compatibility.playwright.version;
     result.playwright_cli = compatibility.playwright_cli.version;
+    result.installed_runtime_sha256 = installed.runtime_sha256;
+    result.source_runtime_sha256 = installed.runtime_sha256;
     await verifyInstalledHook(
       installed.installPath,
       state.repository,

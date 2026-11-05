@@ -11,16 +11,16 @@ const path = require('node:path');
 const { parse } = require('espree');
 const {
   buildClaudeArguments,
+  authorExecutionAttempts,
   parseAgentStream,
 } = require('./eval/agent-evidence.cjs');
 const {
   executable,
   lifecycleCancellation,
   runBounded,
-} = require('./eval/process.cjs');
+} = require('./process.cjs');
 const { hashFile, hashFiles, validateArtifact } = require('./eval/runtime.cjs');
 const { parse: parseShell } = require('shell-quote');
-const { authorExecutionAttempts } = require('./run-generation-eval.cjs');
 const { loadPolicy } = require('../hooks/run-policy.cjs');
 
 const root = path.resolve(__dirname, '..');
@@ -885,7 +885,7 @@ async function main() {
             'scripts/eval/installed-case.cjs',
             'scripts/eval/agent-evidence.cjs',
             'scripts/eval/runtime.cjs',
-            'scripts/eval/process.cjs',
+            'scripts/process.cjs',
           ];
           function add(directory) {
             for (const entry of readdirSync(path.join(root, directory), {

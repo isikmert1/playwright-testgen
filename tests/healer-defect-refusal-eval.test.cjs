@@ -26,7 +26,7 @@ const caseDirectory = path.join(
 function modules() {
   return {
     runner: {
-      ...require('../scripts/eval/process.cjs'),
+      ...require('../scripts/process.cjs'),
       ...require('../scripts/eval/agent-evidence.cjs'),
       ...require('../scripts/eval/runtime.cjs'),
       ...require('../scripts/run-healer-defect-refusal.cjs'),
@@ -131,19 +131,51 @@ test('prepares blind plugin source and rejects installed runtime changes', async
   const temporaryRoot = mkdtempSync(
     path.join(tmpdir(), 'testgen-plugin-source-test-'),
   );
-  const revision = spawnSync(
-    'git',
-    [
-      '-c',
-      `safe.directory=${repositoryRoot.replaceAll('\\', '/')}`,
-      'rev-parse',
-      'HEAD',
-    ],
-    { cwd: repositoryRoot, encoding: 'utf8', windowsHide: true },
-  ).stdout.trim();
   try {
+    const fixture = path.join(temporaryRoot, 'evaluated-source');
+    mkdirSync(fixture);
+    for (const relative of [
+      '.gitattributes',
+      '.claude-plugin',
+      'agents',
+      'commands',
+      'hooks',
+      'schemas',
+      'scripts',
+      'skills',
+      'vendor',
+      'package.json',
+    ]) {
+      cpSync(
+        path.join(repositoryRoot, relative),
+        path.join(fixture, relative),
+        { recursive: true },
+      );
+    }
+    const git = (args) => {
+      const result = spawnSync('git', args, {
+        cwd: fixture,
+        encoding: 'utf8',
+        windowsHide: true,
+      });
+      assert.equal(result.status, 0, result.stderr);
+      return result.stdout.trim();
+    };
+    git(['init', '--quiet']);
+    for (const relative of ['evals', 'tests', 'benchmarks']) {
+      mkdirSync(path.join(fixture, relative));
+      writeFileSync(
+        path.join(fixture, relative, 'answer.txt'),
+        'private fixture material',
+      );
+    }
+    git(['config', 'user.name', 'Testgen Tests']);
+    git(['config', 'user.email', 'testgen@example.test']);
+    git(['add', '--all']);
+    git(['commit', '--quiet', '--allow-empty', '-m', 'runtime fixture']);
+    const revision = git(['rev-parse', 'HEAD']);
     const prepared = await preparePluginSource(
-      repositoryRoot,
+      fixture,
       temporaryRoot,
       revision,
     ).catch((error) => {
@@ -196,10 +228,13 @@ test('prepares blind plugin source and rejects installed runtime changes', async
       findInstalledPlugin(
         plugins,
         prepared.plugin_id,
-        repositoryRoot,
+        fixture,
         prepared.version,
       );
     assert.doesNotThrow(verify);
+    assert.doesNotThrow(() =>
+      require(path.join(source, 'scripts', 'mutation-isolation.cjs')),
+    );
     const hook = path.join(source, 'hooks', 'validate-access.cjs');
     const original = readFileSync(hook);
     writeFileSync(hook, 'stale');
@@ -587,7 +622,7 @@ test(
       "childProcess.spawnSync=(name,args,options)=>name==='powershell.exe'?(Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,6500),{status:0,stdout:'1||'}):spawnSync(name,args,options);",
       'const execFile=childProcess.execFile;',
       "childProcess.execFile=(name,args,options,callback)=>name==='powershell.exe'?undefined:execFile(name,args,options,callback);",
-      "const {runBounded}=require('./scripts/eval/process.cjs');",
+      "const {runBounded}=require('./scripts/process.cjs');",
       'const started=Date.now();',
       "runBounded(process.execPath,['-e','setInterval(()=>{},1000)'],{cwd:process.cwd(),env:process.env,timeout_ms:50}).then(result=>{let childAlive;try{process.kill(childPid,0);childAlive=true}catch{childAlive=false}process.stdout.write(JSON.stringify({elapsed:Date.now()-started,timed_out:result.timed_out,tree_cleanup_failed:result.tree_cleanup_failed,child_alive:childAlive}))});",
     ].join('');

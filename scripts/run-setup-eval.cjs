@@ -10,17 +10,19 @@ const {
   writeFileSync,
 } = require('node:fs');
 const path = require('node:path');
-const {
-  collectCandidate,
-  authorExecutionAttempts,
-} = require('./run-generation-eval.cjs');
+const { collectCandidate } = require('./run-generation-eval.cjs');
 const {
   approvedTrial,
   executeCandidate,
 } = require('./run-generation-candidate.cjs');
-const { executable, runBounded } = require('./eval/process.cjs');
+const {
+  executable,
+  runBounded,
+  lifecycleCancellation,
+} = require('./process.cjs');
 const {
   buildClaudeArguments,
+  authorExecutionAttempts,
   parseAgentStream,
 } = require('./eval/agent-evidence.cjs');
 const { validateProfile } = require('./setup-profile.cjs');
@@ -225,10 +227,7 @@ async function setupBeforeAuthor({
 }
 
 async function main() {
-  const controller = new AbortController();
-  const cancel = () => controller.abort();
-  process.once('SIGINT', cancel);
-  process.once('SIGTERM', cancel);
+  const lifecycle = lifecycleCancellation();
   try {
     const args = process.argv.slice(2);
     if (args[0] === '--score') {
@@ -243,18 +242,14 @@ async function main() {
       throw new Error('invalid-arguments');
     const executing = args[0] === '--candidate';
     const result = executing
-      ? await executeCandidate(
-          approvedTrial(args.slice(1)),
-          controller.signal,
-          {
-            casePath,
-            resultsRoot,
-            datasetDigest: setupDatasetDigest,
-          },
-        )
+      ? await executeCandidate(approvedTrial(args.slice(1)), lifecycle.signal, {
+          casePath,
+          resultsRoot,
+          datasetDigest: setupDatasetDigest,
+        })
       : await collectCandidate(
           JSON.parse(readFileSync(casePath, 'utf8')),
-          controller.signal,
+          lifecycle.signal,
           {
             resultsRoot,
             setupBeforeAuthor,
@@ -265,8 +260,7 @@ async function main() {
     if (result.status !== (executing ? 'complete' : 'checkpoint'))
       process.exitCode = 1;
   } finally {
-    process.off('SIGINT', cancel);
-    process.off('SIGTERM', cancel);
+    lifecycle.dispose();
   }
 }
 
