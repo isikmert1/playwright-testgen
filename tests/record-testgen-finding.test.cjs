@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const { createHash } = require('node:crypto');
 const {
+  linkSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -271,24 +272,28 @@ test('rejects a fixed or non-product trace', () => {
   });
 });
 
-test('rejects findings path escaping through a junction or symlink', () => {
-  withRepository((repository) => {
-    const outside = mkdtempSync(
-      path.join(tmpdir(), 'testgen-finding-outside-'),
-    );
-    const link = path.join(
-      repository,
-      '.playwright-cli',
-      'testgen',
-      'findings.md',
-    );
-    try {
-      symlinkSync(path.join(outside, 'findings.md'), link, 'file');
-      const result = run(repository, 'approved');
-      assert.equal(result.status, 1);
-      assert.match(result.stderr, /findings-unavailable/);
-    } finally {
-      rmSync(outside, { force: true, recursive: true });
-    }
-  });
+test('rejects symlinked or hardlinked findings without modifying their target', () => {
+  for (const createLink of [symlinkSync, linkSync])
+    withRepository((repository) => {
+      const outside = mkdtempSync(
+        path.join(tmpdir(), 'testgen-finding-outside-'),
+      );
+      const link = path.join(
+        repository,
+        '.playwright-cli',
+        'testgen',
+        'findings.md',
+      );
+      try {
+        const target = path.join(outside, 'findings.md');
+        writeFileSync(target, 'preserve this file\n');
+        createLink(target, link);
+        const result = run(repository, 'approved');
+        assert.equal(result.status, 1);
+        assert.match(result.stderr, /findings-unavailable/);
+        assert.equal(readFileSync(target, 'utf8'), 'preserve this file\n');
+      } finally {
+        rmSync(outside, { force: true, recursive: true });
+      }
+    });
 });

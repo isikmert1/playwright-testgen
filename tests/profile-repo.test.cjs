@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const { spawnSync } = require('node:child_process');
 const {
   existsSync,
+  linkSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -296,6 +297,10 @@ test('reports only auth mechanisms, never credential values', () => {
       '.playwright-testgen/profile.tsx': '<div data-cy="profile" />\n',
     },
     (root) => {
+      linkSync(
+        path.join(root, '.auth', 'session.tsx'),
+        path.join(root, 'src', 'session-alias.tsx'),
+      );
       const report = run(root);
       assert.equal(report.facts.authentication.status, 'detected');
       assert.ok(

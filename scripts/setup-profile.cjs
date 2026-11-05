@@ -170,7 +170,10 @@ function sourceFingerprints(root, paths) {
     let canonical;
     let size;
     try {
-      if (!lstatSync(absolute).isFile()) fail('profile-source-invalid');
+      const metadata = lstatSync(absolute);
+      if (!metadata.isFile()) fail('profile-source-invalid');
+      if (metadata.nlink !== 1)
+        fail('profile-source-invalid', 'source-excluded');
       canonical = realpathSync(absolute);
       size = statSync(canonical).size;
     } catch (error) {
@@ -829,9 +832,5 @@ function errorCode(error) {
 
 if (require.main === module) main();
 module.exports = {
-  MAX_PROFILE_BYTES,
-  PROFILE_PATH,
-  createProfile,
   validateProfile,
-  validateStatePath,
 };

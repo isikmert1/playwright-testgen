@@ -3,6 +3,7 @@ const { spawnSync } = require('node:child_process');
 const {
   existsSync,
   lstatSync,
+  linkSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -465,14 +466,21 @@ test('does not fingerprint credential-like paths named by an edited profile', ()
     writeFileSync(path.join(root, '.auth', 'user.json'), '{"secret":"opaque"}');
     const filename = path.join(root, profilePath);
     const profile = JSON.parse(readFileSync(filename, 'utf8'));
-    profile.freshness.sources['.auth/user.json'] = '0'.repeat(64);
-    profile.scan.inspected_paths.push('.auth/user.json');
-    writeFileSync(filename, `${JSON.stringify(profile)}\n`);
+    linkSync(
+      path.join(root, '.auth', 'user.json'),
+      path.join(root, 'src', 'session-alias.ts'),
+    );
+    for (const source of ['.auth/user.json', 'src/session-alias.ts']) {
+      const edited = structuredClone(profile);
+      edited.freshness.sources[source] = '0'.repeat(64);
+      edited.scan.inspected_paths.push(source);
+      writeFileSync(filename, `${JSON.stringify(edited)}\n`);
 
-    const result = run(root, ['validate', '--repo', '.']);
-    assert.equal(result.status, 1);
-    assert.equal(result.report.error, 'profile-source-invalid');
-    assert.doesNotMatch(result.stdout, /secret|opaque/u);
+      const result = run(root, ['validate', '--repo', '.']);
+      assert.equal(result.status, 1);
+      assert.equal(result.report.error, 'profile-source-invalid');
+      assert.doesNotMatch(result.stdout, /secret|opaque/u);
+    }
   });
 });
 

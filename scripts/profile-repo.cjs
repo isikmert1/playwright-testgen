@@ -141,7 +141,8 @@ function ownedFile(root, relative) {
   const absolute = path.join(root, relative);
   const stat = lstatSync(absolute);
   const resolved = realpathSync(absolute);
-  if (!stat.isFile() || !inside(root, resolved)) return null;
+  if (!stat.isFile() || stat.nlink !== 1 || !inside(root, resolved))
+    return null;
   const resolvedRelative = path.relative(root, resolved).replaceAll('\\', '/');
   if (excluded(resolvedRelative) || nestedRoot(root, resolvedRelative) != null)
     return null;
@@ -772,7 +773,6 @@ function main() {
 
 if (require.main === module) main();
 module.exports = {
-  DEFAULT_LIMITS,
   excluded,
   hasDefaultConfig,
   inspectionSource,
