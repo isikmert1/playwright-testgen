@@ -2409,6 +2409,117 @@ test('keeps credential-like files out of Author and Healer reads and searches', 
   });
 });
 
+for (const relative of [
+  '.aws/credentials',
+  'src/credentials',
+  'src/auth.json',
+  'src/.auth/user.json',
+]) {
+  test(`keeps unapproved ${relative} opaque to governed content readers`, () => {
+    withTargetRepository(({ runDirectory, targetRepository }) => {
+      const secretPath = path.join(targetRepository, relative);
+      mkdirSync(path.dirname(secretPath), { recursive: true });
+      writeFileSync(secretPath, 'synthetic secret');
+
+      for (const role of [
+        'playwright-test-author',
+        'playwright-test-healer',
+        'playwright-test-explorer',
+      ]) {
+        if (role === 'playwright-test-explorer')
+          writeDiscoveryPolicy(runDirectory);
+        for (const [tool, input] of [
+          ['Read', { file_path: secretPath }],
+          ...[secretPath, path.dirname(secretPath)].map((searchPath) => [
+            'Grep',
+            {
+              head_limit: 5,
+              output_mode: 'content',
+              path: searchPath,
+              pattern: 'synthetic',
+            },
+          ]),
+        ]) {
+          assert.equal(
+            runToolHook(targetRepository, tool, input, role).permissionDecision,
+            'deny',
+            `${role}: ${tool} at ${input.file_path ?? input.path}`,
+          );
+        }
+        if (role === 'playwright-test-explorer') {
+          assert.equal(
+            runToolHook(
+              targetRepository,
+              'Glob',
+              { path: path.dirname(secretPath), pattern: '*.json' },
+              role,
+            ).permissionDecision,
+            'deny',
+          );
+        }
+      }
+    });
+  });
+}
+
+test('keeps credential hardlinks opaque without blocking regular auth source', () => {
+  withTargetRepository(({ runDirectory, targetRepository }) => {
+    const sourceDirectory = path.join(targetRepository, 'src');
+    const sourcePath = path.join(sourceDirectory, 'auth.ts');
+    const secretPath = path.join(targetRepository, '.env');
+    const aliasPath = path.join(sourceDirectory, 'environment.ts');
+    mkdirSync(sourceDirectory);
+    writeFileSync(sourcePath, 'export const auth = true;');
+    writeFileSync(secretPath, 'synthetic secret');
+    linkSync(secretPath, aliasPath);
+
+    for (const role of [
+      'playwright-test-author',
+      'playwright-test-healer',
+      'playwright-test-explorer',
+    ]) {
+      if (role === 'playwright-test-explorer')
+        writeDiscoveryPolicy(runDirectory);
+      for (const [tool, input] of [
+        ['Read', { file_path: sourcePath }],
+        [
+          'Grep',
+          {
+            head_limit: 5,
+            output_mode: 'content',
+            path: sourcePath,
+            pattern: 'auth',
+          },
+        ],
+      ]) {
+        const result = runToolHook(targetRepository, tool, input, role);
+        if (role === 'playwright-test-explorer')
+          assert.equal(result.permissionDecision, 'allow');
+        else assert.deepEqual(result, {});
+      }
+      for (const [tool, input] of [
+        ['Read', { file_path: secretPath }],
+        ['Read', { file_path: aliasPath }],
+        ...[aliasPath, sourceDirectory].map((searchPath) => [
+          'Grep',
+          {
+            head_limit: 5,
+            output_mode: 'content',
+            path: searchPath,
+            pattern: 'synthetic',
+          },
+        ]),
+      ]) {
+        assert.equal(
+          runToolHook(targetRepository, tool, input, role).permissionDecision,
+          'deny',
+          `${role}: ${tool} at ${input.file_path ?? input.path}`,
+        );
+      }
+    }
+  });
+});
+
 test('keeps the Main-owned repository profile opaque and immutable to roles', () => {
   withTargetRepository(({ runDirectory, targetRepository }) => {
     const profileDirectory = path.join(targetRepository, '.playwright-testgen');
@@ -3135,6 +3246,46 @@ test('allows only canonical installed-plugin reads required by governed agents',
       assert.match(escaped.permissionDecisionReason, /escapes/iu);
     } finally {
       rmSync(pluginRoot, { force: true, recursive: true });
+    }
+  });
+});
+
+test('keeps policy-approved state opaque inside installed plugin directories', () => {
+  withTargetRepository(({ runDirectory, targetRepository }) => {
+    const scriptDirectory = path.join(targetRepository, 'scripts');
+    const statePath = path.join(scriptDirectory, 'session.json');
+    const referencePath = path.join(scriptDirectory, 'reference.cjs');
+    mkdirSync(scriptDirectory);
+    writeFileSync(statePath, '{"cookies":[],"origins":[]}');
+    writeFileSync(referencePath, 'module.exports = {};');
+    updatePolicy(runDirectory, {
+      allowed_state_paths: [path.relative(runDirectory, statePath)],
+    });
+
+    for (const role of ['playwright-test-author', 'playwright-test-healer']) {
+      const environment = { CLAUDE_PLUGIN_ROOT: targetRepository };
+      const stateRead = runToolHook(
+        targetRepository,
+        'Read',
+        { file_path: statePath },
+        role,
+        environment,
+      );
+      assert.equal(stateRead.permissionDecision, 'deny');
+      assert.match(
+        stateRead.permissionDecisionReason,
+        /storage state is opaque/iu,
+      );
+      assert.equal(
+        runToolHook(
+          targetRepository,
+          'Read',
+          { file_path: referencePath },
+          role,
+          environment,
+        ).permissionDecision,
+        'allow',
+      );
     }
   });
 });

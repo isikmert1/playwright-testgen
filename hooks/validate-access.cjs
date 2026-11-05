@@ -170,17 +170,37 @@ function isCredentialPath(...paths) {
   return paths.some((absolute) => {
     const basename = path.basename(absolute).toLowerCase();
     return (
+      normalizePath(absolute)
+        .toLowerCase()
+        .split('/')
+        .some((part) => ['.auth', '.aws'].includes(part)) ||
       basename === '.env' ||
       basename.startsWith('.env.') ||
       basename.endsWith('.env') ||
       ['.netrc', '.npmrc', '.yarnrc', '.yarnrc.yml'].includes(basename) ||
-      ['credentials.json', 'secret.json', 'secrets.json'].includes(basename) ||
+      [
+        'auth.json',
+        'credentials',
+        'credentials.json',
+        'secret.json',
+        'secrets.json',
+      ].includes(basename) ||
       ['id_dsa', 'id_ecdsa', 'id_ed25519', 'id_rsa'].includes(basename) ||
       ['.jks', '.key', '.keystore', '.p12', '.pem', '.pfx'].some((suffix) =>
         basename.endsWith(suffix),
       )
     );
   });
+}
+
+function isOpaqueContentPath(...paths) {
+  if (isCredentialPath(...paths)) return true;
+  try {
+    const stats = statSync(paths[0]);
+    return stats.isFile() && stats.nlink > 1;
+  } catch (error) {
+    return error.code !== 'ENOENT';
+  }
 }
 
 function isRepositoryProfile(...paths) {
@@ -402,31 +422,8 @@ function validateFileAccess(payload) {
     );
   }
 
-  if (payload.tool_name === 'Read' && isCredentialPath(absolute, canonical)) {
-    return deny('Credential-like files are opaque to governed agents.');
-  }
-
-  const pluginRead = validatePluginRead(payload, absolute, canonical);
-  if (pluginRead != null) return pluginRead;
-
-  const normalized = normalizePath(canonical);
   const discovered = policiesNear(payload.cwd, absolute, canonical);
-  if (discovered.invalid) {
-    return deny(
-      'A discovered Testgen run policy is invalid. Return to Main to repair or remove the invalid command-policy.json before governed access continues.',
-    );
-  }
   const nearbyPolicies = discovered.policies;
-  if (nearbyPolicies.length === 0) {
-    return deny(
-      'No valid Testgen run policy authorizes this access. Return to Main so it can create command-policy.json before dispatching a governed agent.',
-    );
-  }
-  if (aliasesRepositoryProfile(nearbyPolicies, absolute, canonical)) {
-    return deny(
-      'The repository profile is Main-owned navigation evidence; governed roles receive only relevant validated facts.',
-    );
-  }
   if (
     nearbyPolicies.some((policy) =>
       policy.allowedStatePaths.some(
@@ -439,6 +436,40 @@ function validateFileAccess(payload) {
   ) {
     return deny(
       'Approved storage state is opaque to governed agents. Pass only its exact policy-approved path to playwright-cli state-load; never read or modify the file.',
+    );
+  }
+
+  const pluginRead = validatePluginRead(payload, absolute, canonical);
+  if (pluginRead != null) {
+    return isOpaqueContentPath(absolute, canonical)
+      ? deny(
+          'Credential-like or multiply linked files are opaque to governed agents.',
+        )
+      : pluginRead;
+  }
+
+  const normalized = normalizePath(canonical);
+  if (discovered.invalid) {
+    return deny(
+      'A discovered Testgen run policy is invalid. Return to Main to repair or remove the invalid command-policy.json before governed access continues.',
+    );
+  }
+  if (nearbyPolicies.length === 0) {
+    return deny(
+      'No valid Testgen run policy authorizes this access. Return to Main so it can create command-policy.json before dispatching a governed agent.',
+    );
+  }
+  if (aliasesRepositoryProfile(nearbyPolicies, absolute, canonical)) {
+    return deny(
+      'The repository profile is Main-owned navigation evidence; governed roles receive only relevant validated facts.',
+    );
+  }
+  if (
+    payload.tool_name === 'Read' &&
+    isOpaqueContentPath(absolute, canonical)
+  ) {
+    return deny(
+      'Credential-like or multiply linked files are opaque to governed agents.',
     );
   }
 
@@ -680,14 +711,14 @@ function validateGrepAccess(payload) {
   }
 
   if (
-    isCredentialPath(absolute, canonical) ||
+    isOpaqueContentPath(absolute, canonical) ||
     (searchesDirectory &&
       policies.some((policy) =>
-        searchMayReachExcludedPath(policy, absolute, isCredentialPath),
+        searchMayReachExcludedPath(policy, absolute, isOpaqueContentPath),
       ))
   ) {
     return deny(
-      'Credential-like files are opaque to governed agents. Scope Grep to a safe source or test path.',
+      'Credential-like or multiply linked files are opaque to governed agents. Scope Grep to a safe source or test path.',
     );
   }
 
