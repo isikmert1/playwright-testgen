@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const {
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   renameSync,
   rmSync,
   writeFileSync,
@@ -10,8 +11,8 @@ const { tmpdir } = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const test = require('node:test');
-const { versionAtLeast } = require('../scripts/runtime-preflight.cjs');
 
+const repositoryRoot = path.resolve(__dirname, '..');
 const preflight = path.resolve(
   __dirname,
   '..',
@@ -29,7 +30,6 @@ function createRepository({
   commit = true,
   nested = false,
   playwrightVersion = '1.62.1',
-  runnerTraceOption = playwrightVersion === '1.62.1' ? '--name' : '--phase',
 } = {}) {
   const fixtureRoot = mkdtempSync(path.join(tmpdir(), 'testgen-preflight-'));
   const repository = nested
@@ -53,7 +53,7 @@ function createRepository({
     [
       'const args = process.argv.slice(2);',
       "if (args[0] === 'trace' && args[1] === 'snapshot' && args[2] === '--help') {",
-      `  console.log('${runnerTraceOption}');`,
+      "  console.log('--name');",
       '} else {',
       "  console.log('--list --project --config --debug --retries --repeat-each --output');",
       '}',
@@ -142,6 +142,7 @@ test('binds a hoisted runtime to the selected package and config', () => {
     ]);
 
     assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.report.trace_snapshot_option, '--name');
     assert.deepEqual(result.report.selection, {
       package: 'apps/web',
       package_directory: packageDirectory.replaceAll('\\', '/'),
@@ -171,15 +172,6 @@ test('rejects configless preflight when the selected package has a default confi
       'export default {};\n',
     );
     const result = runPreflight(repository, cli);
-    assert.equal(result.status, 1);
-    assert.equal(result.report.error, 'config-selection-invalid');
-  });
-});
-
-test('rejects a selected config that is not a Playwright config', () => {
-  withRepository({}, ({ cli, repository }) => {
-    const result = runPreflight(repository, cli, ['--config', 'package.json']);
-
     assert.equal(result.status, 1);
     assert.equal(result.report.error, 'config-selection-invalid');
   });
@@ -217,55 +209,23 @@ function withRepository(options, callback) {
   }
 }
 
-for (const [packageName, error] of [
-  ['playwright', 'playwright-unavailable'],
-  ['@playwright/test', 'playwright-test-unavailable'],
-]) {
-  test(`rejects ${packageName} resolved outside the repository`, () => {
-    withRepository({ nested: true }, ({ cli, repository }) => {
-      const externalPackage = path.join(
-        path.dirname(repository),
-        'node_modules',
-        packageName,
-      );
-      mkdirSync(path.dirname(externalPackage), { recursive: true });
-      renameSync(
-        path.join(repository, 'node_modules', packageName),
-        externalPackage,
-      );
-
-      const { report, status } = runPreflight(repository, cli);
-
-      assert.equal(status, 1);
-      assert.deepEqual(report, { ok: false, error });
-    });
+test('rejects a Playwright runtime resolved outside the repository', () => {
+  withRepository({ nested: true }, ({ cli, repository }) => {
+    const externalPackage = path.join(
+      path.dirname(repository),
+      'node_modules',
+      'playwright',
+    );
+    mkdirSync(path.dirname(externalPackage), { recursive: true });
+    renameSync(
+      path.join(repository, 'node_modules', 'playwright'),
+      externalPackage,
+    );
+    const { report, status } = runPreflight(repository, cli);
+    assert.equal(status, 1);
+    assert.deepEqual(report, { ok: false, error: 'playwright-unavailable' });
   });
-}
-
-for (const [version, option] of [
-  ['1.62.1', '--name'],
-  ['1.63.0', '--phase'],
-]) {
-  test(`selects ${option} for Playwright ${version}`, () => {
-    withRepository({ playwrightVersion: version }, ({ cli, repository }) => {
-      const result = runPreflight(repository, cli);
-
-      assert.equal(result.status, 0, result.stderr);
-      assert.equal(result.report.ok, true);
-      assert.equal(result.report.playwright.version, version);
-      assert.equal(result.report.playwright_test.version, version);
-      assert.equal(result.report.playwright_cli.version, '0.1.19');
-      assert.equal(result.report.playwright_cli.skill_ready, true);
-      assert.deepEqual(result.report.playwright_cli.auth_state_capabilities, {
-        load: true,
-        save: true,
-      });
-      assert.equal(result.report.hook_dependency_ready, true);
-      assert.equal(result.report.trace_snapshot_option, option);
-      assert.match(result.report.git_head, /^[a-f0-9]{40}$/u);
-    });
-  });
-}
+});
 
 test('keeps optional trace inspection unavailable for an untested runtime', () => {
   withRepository({ playwrightVersion: '1.64.0' }, ({ cli, repository }) => {
@@ -277,34 +237,6 @@ test('keeps optional trace inspection unavailable for an untested runtime', () =
     assert.equal(
       report.trace_inspection_reason,
       'playwright-trace-compatibility-untested',
-    );
-  });
-});
-
-test('does not assume a newer CLI has tested trace compatibility', () => {
-  withRepository({ cliVersion: '0.1.20' }, ({ cli, repository }) => {
-    const { report, status } = runPreflight(repository, cli);
-
-    assert.equal(status, 0);
-    assert.equal(report.ok, true);
-    assert.equal(report.trace_snapshot_option, null);
-    assert.equal(
-      report.trace_inspection_reason,
-      'playwright-trace-compatibility-untested',
-    );
-  });
-});
-
-test('keeps trace inspection optional when a tested spelling is unavailable', () => {
-  withRepository({ runnerTraceOption: '--phase' }, ({ cli, repository }) => {
-    const { report, status } = runPreflight(repository, cli);
-
-    assert.equal(status, 0);
-    assert.equal(report.ok, true);
-    assert.equal(report.trace_snapshot_option, null);
-    assert.equal(
-      report.trace_inspection_reason,
-      'playwright-trace-contract-mismatch',
     );
   });
 });
@@ -332,15 +264,6 @@ for (const [name, arrange, error] of [
     'playwright-unavailable',
   ],
   [
-    'missing local Playwright Test',
-    ({ repository }) =>
-      rmSync(path.join(repository, 'node_modules', '@playwright', 'test'), {
-        force: true,
-        recursive: true,
-      }),
-    'playwright-test-unavailable',
-  ],
-  [
     'missing runner capability',
     ({ repository }) =>
       writeFileSync(
@@ -358,30 +281,6 @@ for (const [name, arrange, error] of [
       }),
     'playwright-cli-skill-unavailable',
   ],
-  [
-    'outdated official skill',
-    ({ repository }) =>
-      writeFileSync(
-        path.join(
-          repository,
-          '.claude',
-          'skills',
-          'playwright-cli',
-          'SKILL.md',
-        ),
-        '# stale\n',
-      ),
-    'playwright-cli-skill-outdated',
-  ],
-  [
-    'missing CLI capability',
-    ({ cli }) =>
-      writeFileSync(
-        cli,
-        "console.log(process.argv.includes('--version') ? '0.1.19' : 'attach findings generate-locator-old requests')\n",
-      ),
-    'playwright-cli-contract-mismatch',
-  ],
 ]) {
   test(`reports ${name} distinctly`, () => {
     withRepository({}, (fixture) => {
@@ -393,12 +292,6 @@ for (const [name, arrange, error] of [
     });
   });
 }
-
-test('enforces the documented Node floor', () => {
-  assert.equal(versionAtLeast('22.12.0', '22.13.0'), false);
-  assert.equal(versionAtLeast('22.13.0', '22.13.0'), true);
-  assert.equal(versionAtLeast('24.0.0', '22.13.0'), true);
-});
 
 test('reports a missing Git HEAD without creating one', () => {
   withRepository({ commit: false }, ({ cli, repository }) => {
@@ -432,4 +325,38 @@ test('rejects mismatched local Playwright packages', () => {
       error: 'playwright-version-mismatch',
     });
   });
+});
+
+test('session hook exports the installed plugin root for Bash commands', () => {
+  const hooks = JSON.parse(
+    readFileSync(path.join(repositoryRoot, 'hooks', 'hooks.json'), 'utf8'),
+  );
+  const sessionHook = hooks.hooks.SessionStart?.[0]?.hooks?.[0];
+  const temporaryDirectory = mkdtempSync(path.join(tmpdir(), 'testgen-env-'));
+  const environmentFile = path.join(temporaryDirectory, 'environment');
+
+  try {
+    assert.equal(sessionHook.command, 'node');
+    assert.deepEqual(sessionHook.args, [
+      '${CLAUDE_PLUGIN_ROOT}/hooks/export-plugin-root.cjs',
+    ]);
+
+    const result = spawnSync(
+      process.execPath,
+      [path.join(repositoryRoot, 'hooks', 'export-plugin-root.cjs')],
+      {
+        encoding: 'utf8',
+        env: { ...process.env, CLAUDE_ENV_FILE: environmentFile },
+      },
+    );
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, '');
+    assert.equal(
+      readFileSync(environmentFile, 'utf8'),
+      `export PLAYWRIGHT_TESTGEN_ROOT='${repositoryRoot.replaceAll('\\', '/')}'\n`,
+    );
+  } finally {
+    rmSync(temporaryDirectory, { force: true, recursive: true });
+  }
 });

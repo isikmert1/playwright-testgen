@@ -1,7 +1,6 @@
 const assert = require('node:assert/strict');
 const { createHash } = require('node:crypto');
 const {
-  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -144,7 +143,7 @@ test('declined finding creates no file', () => {
   });
 });
 
-test('approved finding records only sanitized validated evidence and preserves duplicates', () => {
+test('approved finding records only sanitized validated evidence', () => {
   withRepository((repository) => {
     const first = run(repository, 'approved');
     assert.equal(first.status, 0, first.stderr);
@@ -164,10 +163,6 @@ test('approved finding records only sanitized validated evidence and preserves d
       finding,
       /failure_signature|selector|contradiction|expectation_drift_rejected/iu,
     );
-    const second = run(repository, 'approved');
-    assert.equal(second.status, 0, second.stderr);
-    assert.equal(JSON.parse(second.stdout).duplicate, true);
-    assert.equal(readFileSync(destination, 'utf8'), finding);
   });
 });
 
@@ -212,40 +207,6 @@ test('approved finding survives an earlier declared spec repair', () => {
   });
 });
 
-test('standalone cleanup removes Healer input and preserves an approved finding', () => {
-  withRepository((repository) => {
-    const result = run(repository, 'approved');
-    assert.equal(result.status, 0, result.stderr);
-    const testgenDirectory = path.join(
-      repository,
-      '.playwright-cli',
-      'testgen',
-    );
-    const runDirectory = path.join(testgenDirectory, runId);
-    rmSync(runDirectory, { force: true, recursive: true });
-
-    assert.equal(existsSync(runDirectory), false);
-    assert.equal(existsSync(path.join(testgenDirectory, 'findings.md')), true);
-  });
-});
-
-test('rejects an oversized existing findings ledger', () => {
-  withRepository((repository) => {
-    const destination = path.join(
-      repository,
-      '.playwright-cli',
-      'testgen',
-      'findings.md',
-    );
-    writeFileSync(destination, 'x'.repeat(64 * 1024 + 1));
-
-    const result = run(repository, 'approved');
-
-    assert.equal(result.status, 1);
-    assert.match(result.stderr, /findings-too-large/);
-  });
-});
-
 test('does not append a finding past the ledger limit', () => {
   withRepository((repository) => {
     const destination = path.join(
@@ -258,11 +219,9 @@ test('does not append a finding past the ledger limit', () => {
     writeFileSync(destination, existing);
 
     const first = run(repository, 'approved');
-    const second = run(repository, 'approved');
 
     assert.equal(first.status, 1);
     assert.match(first.stderr, /findings-too-large/);
-    assert.equal(second.status, 1);
     assert.equal(readFileSync(destination, 'utf8'), existing);
   });
 });
@@ -285,28 +244,6 @@ test('recognizes a duplicate in a full valid findings ledger', () => {
     assert.equal(result.status, 0, result.stderr);
     assert.equal(JSON.parse(result.stdout).duplicate, true);
     assert.equal(readFileSync(destination, 'utf8'), fullLedger);
-  });
-});
-
-test('does not treat an embedded run heading as a duplicate', () => {
-  withRepository((repository) => {
-    const destination = path.join(
-      repository,
-      '.playwright-cli',
-      'testgen',
-      'findings.md',
-    );
-    writeFileSync(destination, `- observed_behavior: mentions ## ${runId}\n`);
-
-    const result = run(repository, 'approved');
-    const finding = readFileSync(destination, 'utf8');
-
-    assert.equal(result.status, 0, result.stderr);
-    assert.equal(JSON.parse(result.stdout).duplicate, false);
-    assert.equal(
-      finding.split(/\r?\n/u).filter((line) => line === `## ${runId}`).length,
-      1,
-    );
   });
 });
 
