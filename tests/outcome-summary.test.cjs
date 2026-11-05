@@ -59,6 +59,23 @@ function trial(caseId, index) {
       playwright: '1.62.1',
       playwright_cli: '0.1.19',
       platform: 'win32',
+      agent_limits: {
+        name: 'test-agent',
+        model: 'claude-sonnet-5',
+        max_turns: 30,
+        timeout_ms: 600000,
+        max_budget_usd: 2,
+      },
+      ...(caseId === 'generation'
+        ? {
+            execution: {
+              node: '24.13.0',
+              npm: '11.0.0',
+              playwright: '1.62.1',
+              platform: 'win32',
+            },
+          }
+        : {}),
     },
     ...caseMetrics[caseId],
   };
@@ -234,6 +251,13 @@ test('replaces a Healer infrastructure failure produced with verified cleanup', 
           testgen_revision: 'revision',
           dataset_sha256: 'dataset',
           total_cost_usd: 0.25,
+          agent_limits: {
+            name: 'test-agent',
+            model: 'claude-sonnet-5',
+            max_turns: 30,
+            timeout_ms: 600000,
+            max_budget_usd: 1,
+          },
         },
       },
       { status: 'passed' },
@@ -245,6 +269,7 @@ test('replaces a Healer infrastructure failure produced with verified cleanup', 
     );
     const failed = readTrial(directory, definitions);
     assert.equal(failed.complete, false);
+    assert.equal(failed.profile.agent_limits?.max_budget_usd, 1);
     assert.deepEqual(failed.failure_reasons, ['runner-browser-unavailable']);
     const summary = summarizeOutcomeTrials(
       definitions,
@@ -312,6 +337,104 @@ test('CLI selects only the requested cohort and retains incomplete attempts', ()
   }
 });
 
+test('scoring CLI fails critical integrity even for a complete cohort', () => {
+  const directory = mkdtempSync(
+    path.join(tmpdir(), 'testgen-critical-cohort-'),
+  );
+  try {
+    for (const [folder, kind] of [
+      ['healthy-generation', 'generation'],
+      ['selector-repair', 'repair'],
+      ['healer-product-defect-refusal', 'refusal'],
+    ]) {
+      const definition = require(`../evals/cases/${folder}/case.json`);
+      for (const index of [1, 2]) {
+        const attempt = trial(kind, index);
+        const target = path.join(directory, attempt.trial_id);
+        mkdirSync(target);
+        const runtime = {
+          ...attempt.profile,
+          agent_limits: definition.agent,
+          testgen_revision: 'a'.repeat(40),
+          dataset_sha256: datasetDigest(),
+        };
+        const result =
+          kind === 'refusal'
+            ? combineResult(
+                {
+                  status: 'passed',
+                  score: { classification: 'product-behavior-wrong' },
+                  runtime,
+                },
+                { status: 'passed' },
+              )
+            : {
+                ...runtime,
+                case_id: definition.case_id,
+                trial_id: attempt.trial_id,
+                status: kind === 'generation' ? 'checkpoint' : 'complete',
+                candidate_sha256: 'candidate',
+                cleanup: { status: 'passed' },
+                ...(kind === 'repair'
+                  ? {
+                      grade: {
+                        status: index === 2 ? 'failed' : 'passed',
+                        reason: index === 2 ? 'product-changed' : null,
+                      },
+                    }
+                  : {}),
+              };
+        writeFileSync(path.join(target, 'result.json'), JSON.stringify(result));
+        if (kind === 'generation') {
+          writeFileSync(
+            path.join(target, 'execution.json'),
+            JSON.stringify({
+              trial_id: attempt.trial_id,
+              candidate_sha256: 'candidate',
+              dataset_sha256: runtime.dataset_sha256,
+              status: 'complete',
+              first_try: 'pass',
+              cleanup: { status: 'passed' },
+              runtime: attempt.profile.execution,
+            }),
+          );
+          writeFileSync(
+            path.join(target, 'review.json'),
+            JSON.stringify({
+              status: 'approved',
+              candidate_sha256: 'candidate',
+              criterion_id: definition.criteria[0].id,
+              reason: 'Checks the supplied dialog contents.',
+              locator_policy: true,
+              assertion_specificity: true,
+            }),
+          );
+        }
+      }
+    }
+    const scored = spawnSync(
+      process.execPath,
+      [
+        path.resolve(__dirname, '../scripts/score-outcomes.cjs'),
+        '--results-dir',
+        directory,
+      ],
+      { encoding: 'utf8' },
+    );
+    const { summary } = JSON.parse(scored.stdout);
+    assert.equal(summary.status, 'complete');
+    assert.equal(summary.completed_trials, 6);
+    assert.equal(scored.status, 1);
+    assert.ok(
+      summary.critical_failures.some((failure) =>
+        failure.reasons.includes('product-changed'),
+      ),
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('changes dataset identity when Windows evaluation cleanup changes', () => {
   const directory = mkdtempSync(path.join(tmpdir(), 'testgen-dataset-'));
   const repository = path.resolve(__dirname, '..');
@@ -360,6 +483,44 @@ test('refuses incompatible comparisons and catches a green candidate with weak a
     locator_policy: 0,
     assertion_specificity: 0,
   };
+  assert.equal(baseline.profiles.refusal.agent_limits?.max_budget_usd, 2);
+  const changedLimits = attempts.map((value) => ({
+    ...value,
+    profile: {
+      ...value.profile,
+      agent_limits: { ...value.profile.agent_limits, max_budget_usd: 1 },
+    },
+  }));
+  assert.equal(
+    compareOutcomeSummaries(
+      baseline,
+      summarizeOutcomeTrials(definitions, changedLimits, 'dataset', 'revision'),
+    ).status,
+    'incompatible',
+  );
+  const changedExecution = attempts.map((value) =>
+    value.case_id === 'generation'
+      ? {
+          ...value,
+          profile: {
+            ...value.profile,
+            execution: { ...value.profile.execution, node: '22.14.0' },
+          },
+        }
+      : value,
+  );
+  assert.equal(
+    compareOutcomeSummaries(
+      baseline,
+      summarizeOutcomeTrials(
+        definitions,
+        changedExecution,
+        'dataset',
+        'revision',
+      ),
+    ).status,
+    'incompatible',
+  );
   const degraded = summarizeOutcomeTrials(
     definitions,
     attempts.map((value) =>
@@ -388,6 +549,9 @@ test('refuses incompatible comparisons and catches a green candidate with weak a
     compareOutcomeSummaries(baseline, {
       ...degraded,
       dataset_sha256: 'changed',
+      critical_failures: [
+        { trial_id: 'trial-repair-1', reasons: ['product-changed'] },
+      ],
     }).status,
     'incompatible',
   );

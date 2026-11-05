@@ -18,6 +18,18 @@ const targetUnavailableReasons = new Set([
   'runner-browser-unavailable',
   'playwright-unavailable',
 ]);
+const criticalFailureReasons = new Set([
+  'product-changed',
+  'spec-changed',
+  'repository-state-changed',
+  'target-state-changed',
+  'repair-scope-changed',
+  'trace-invalid',
+  'failure-unattributed',
+  'hook-governance-unverified',
+  'candidate-approval-mismatch',
+  'execution-attribution-invalid',
+]);
 
 function readJson(filename) {
   return JSON.parse(readFileSync(filename, 'utf8'));
@@ -53,6 +65,7 @@ function datasetDigest() {
     'scripts/score-selector-repair.cjs',
     'scripts/score-outcomes.cjs',
     'scripts/windows-process-tree.cjs',
+    'scripts/process.cjs',
   );
   const hash = createHash('sha256');
   for (const relative of files.sort()) {
@@ -90,6 +103,7 @@ function profile(result) {
     playwright: runtime.playwright ?? null,
     playwright_cli: runtime.playwright_cli ?? null,
     platform: runtime.platform ?? null,
+    agent_limits: runtime.agent_limits ?? null,
   };
 }
 
@@ -175,6 +189,7 @@ function readTrial(directory, caseDefinitions) {
       typeof review.assertion_specificity === 'boolean';
     return {
       ...common,
+      profile: { ...common.profile, execution: execution?.runtime ?? null },
       failure_reasons: [
         ...common.failure_reasons,
         execution?.error,
@@ -399,21 +414,39 @@ function summarizeOutcomeTrials(
     const distinct = new Set(
       value.attempts.map((trial) => JSON.stringify(trial.profile)),
     );
-    const runtime = value.attempts[0]?.profile ?? null;
+    const recordedProfile = value.attempts[0]?.profile ?? null;
+    const {
+      agent_limits: limits = null,
+      execution,
+      ...runtime
+    } = recordedProfile ?? {};
+    const definition = caseDefinitions.find((item) => item.case_id === caseId);
     if (
       distinct.size !== 1 ||
-      runtime == null ||
+      recordedProfile == null ||
       Object.values(runtime).some((item) => item == null) ||
+      typeof limits?.name !== 'string' ||
+      typeof limits?.model !== 'string' ||
+      !['max_turns', 'timeout_ms', 'max_budget_usd'].every(
+        (key) => Number.isFinite(limits?.[key]) && limits[key] > 0,
+      ) ||
+      (definition.kind === 'generation' &&
+        ['node', 'npm', 'playwright', 'platform'].some(
+          (key) =>
+            typeof execution?.[key] !== 'string' || execution[key].length === 0,
+        )) ||
       value.attempts.some((trial) => trial.testgen_revision !== revision)
     )
       profileCompatible = false;
-    const definition = caseDefinitions.find((item) => item.case_id === caseId);
     profiles[caseId] = {
       runtime,
       tool_grants: definition.tool_grants ?? null,
       permission_mode: 'dontAsk',
       permission_prompts: 'none',
-      agent_limits: definition.agent ?? null,
+      agent_limits: limits,
+      ...(definition.kind === 'generation'
+        ? { candidate_execution: execution ?? null }
+        : {}),
       grading: 'outcome-suite.v1',
     };
   }
@@ -538,6 +571,14 @@ function summarizeOutcomeTrials(
     profiles,
     planned_trials: plannedTrials,
     completed_trials: completedTrials.length,
+    critical_failures: allAttempts.flatMap((trial) => {
+      const reasons = [
+        ...new Set([trial.error, ...(trial.failure_reasons ?? [])]),
+      ].filter((reason) => criticalFailureReasons.has(reason));
+      return reasons.length === 0
+        ? []
+        : [{ case_id: trial.case_id, trial_id: trial.trial_id, reasons }];
+    }),
     cases: casesById,
     metrics,
     all_attempts: {
@@ -583,6 +624,8 @@ function compareOutcomeSummaries(baseline, current) {
     baseline.planned_trials !== current.planned_trials
   )
     return { status: 'incompatible' };
+  if (current.critical_failures?.length > 0)
+    return { status: 'regressed', regressions: ['critical-integrity'] };
   const thresholds = baseline.thresholds;
   if (
     thresholds == null ||
@@ -678,6 +721,7 @@ function main() {
   process.stdout.write(`${JSON.stringify({ summary, comparison }, null, 2)}\n`);
   if (
     summary.status !== 'complete' ||
+    summary.critical_failures.length > 0 ||
     (comparison && comparison.status !== 'passed')
   )
     process.exitCode = 1;

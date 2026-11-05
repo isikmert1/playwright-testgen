@@ -172,6 +172,13 @@ inputs and execution profiles must match; the Testgen revision may differ.
 Never relabel old trials with a new input digest. Applicable behavior metrics
 allow no drop from the baseline.
 
+Critical approval, attribution, governance, or state-integrity failures also
+make standalone scoring exit nonzero, even when every trial completed. The
+summary retains those observations and lists them under `critical_failures`.
+Profiles bind the selected agent limits and the runtime used for independent
+candidate execution. Missing profile evidence cannot establish a compatible
+cohort; historical results are not backfilled with current defaults.
+
 Raw agent streams, application output, and Playwright reports stay outside Git.
 
 Use `--results-dir <directory>` to score a separate outcome cohort. Every attempt
