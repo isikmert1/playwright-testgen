@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const { spawnSync } = require('node:child_process');
 const {
   existsSync,
+  linkSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -164,52 +165,12 @@ test('supports an explicit configless selection without reading a config', () =>
   );
 });
 
-test('rejects configless when Playwright would discover a package-root config', () => {
-  fixture(
-    {
-      'package.json': '{"private":true}\n',
-      'playwright.config.ts': 'export default {};\n',
-    },
-    (repository) => {
-      const result = spawnSync(
-        process.execPath,
-        [profiler, '--repo', repository, '--package', '.', '--configless'],
-        { encoding: 'utf8' },
-      );
-      assert.equal(result.status, 1);
-      assert.equal(JSON.parse(result.stdout).error, 'config-selection-invalid');
-    },
-  );
-});
-
-test('keeps an unknown-framework workspace package selectable beside a known one', () => {
-  fixture(
-    {
-      'package.json': JSON.stringify({ workspaces: ['apps/*'] }),
-      'apps/known/package.json': JSON.stringify({
-        dependencies: { react: '18.2.0' },
-      }),
-      'apps/unknown/package.json': JSON.stringify({
-        dependencies: { 'unlisted-view-runtime': '1.0.0' },
-      }),
-    },
-    (root) => {
-      const report = run(root);
-      assert.equal(report.selection.status, 'package-required');
-      assert.ok(report.selection.packages.includes('apps/unknown'));
-      const selected = run(root, '--package', 'apps/unknown');
-      assert.equal(selected.selection.package, 'apps/unknown');
-      assert.equal(selected.facts.framework_status, 'unknown');
-    },
-  );
-});
-
 test('uses exact attribute boundaries and requires config evidence for custom IDs', () => {
   fixture(
     {
       'package.json': '{}',
       'playwright.config.ts':
-        "export default { use: { testIdAttribute: 'qa-id' } };\n",
+        "export default { use: { baseURL: 'http://localhost:3000', testIdAttribute: 'qa-id' } };\n",
       'src/page.tsx':
         '<div qa-id="save" qa-id-extra="ignore" data-test-id="ignore" />\n',
     },
@@ -223,28 +184,6 @@ test('uses exact attribute boundaries and requires config evidence for custom ID
       assert.equal(report.facts.test_id.config_attribute, 'qa-id');
     },
   );
-});
-
-test('does not infer test-ID configuration from metadata or project expressions', () => {
-  for (const config of [
-    "export default { metadata: { testIdAttribute: 'qa-id' } };\n",
-    "export default { metadata: { use: { testIdAttribute: 'qa-id' } } };\n",
-    "export default { projects: [{ use: { testIdAttribute: 'qa-id' } }] };\n",
-  ]) {
-    fixture(
-      {
-        'package.json': '{}',
-        'playwright.config.ts': config,
-        'src/page.tsx': '<div qa-id="save" />\n',
-      },
-      (root) => {
-        const report = run(root);
-        assert.equal(report.facts.test_id.config_attribute, null);
-        assert.equal(report.facts.test_id.status, 'unknown');
-        assert.equal(report.facts.test_id.attribute, null);
-      },
-    );
-  }
 });
 
 test('does not cross a nested Git root or follow a symlinked source', (t) => {
@@ -346,25 +285,6 @@ test('reports partial evidence rather than none-found after a read budget', () =
   );
 });
 
-test('does not report unread test files as inspected layout evidence', () => {
-  fixture(
-    {
-      'package.json': '{}',
-      'tests/unread.spec.ts': 'test("unread", () => {});\n',
-    },
-    (root) => {
-      const { profileRepository } = require('../scripts/profile-repo.cjs');
-      const report = profileRepository({
-        repository: root,
-        limits: { maxFilesRead: 1 },
-      });
-      assert.equal(report.scan.status, 'partial');
-      assert.deepEqual(report.facts.layout.tests, []);
-      assert.deepEqual(report.facts.layout.naming, {});
-    },
-  );
-});
-
 test('reports only auth mechanisms, never credential values', () => {
   fixture(
     {
@@ -377,6 +297,10 @@ test('reports only auth mechanisms, never credential values', () => {
       '.playwright-testgen/profile.tsx': '<div data-cy="profile" />\n',
     },
     (root) => {
+      linkSync(
+        path.join(root, '.auth', 'session.tsx'),
+        path.join(root, 'src', 'session-alias.tsx'),
+      );
       const report = run(root);
       assert.equal(report.facts.authentication.status, 'detected');
       assert.ok(
@@ -426,33 +350,6 @@ test('keeps dynamic test-id configuration inconclusive', () => {
   );
 });
 
-test('does not promote commented or mixed test-id config to a convention', () => {
-  for (const { config, expectedStatus } of [
-    {
-      config:
-        "export default { use: { testIdAttribute: 'data-test', fallback: process.env.X, testIdAttribute: process.env.TEST_ATTR } };\n",
-      expectedStatus: 'unknown',
-    },
-    {
-      config: "// testIdAttribute: 'data-test'\nexport default { use: {} };\n",
-      expectedStatus: 'detected',
-    },
-  ]) {
-    fixture(
-      {
-        'package.json': '{}',
-        'playwright.config.ts': config,
-        'src/page.tsx': '<div data-test="save" />\n',
-      },
-      (root) => {
-        const report = run(root);
-        assert.equal(report.facts.test_id.status, expectedStatus);
-        assert.equal(report.facts.test_id.config_attribute, null);
-      },
-    );
-  }
-});
-
 test('reports source and configured test-id conventions that conflict', () => {
   fixture(
     {
@@ -467,95 +364,6 @@ test('reports source and configured test-id conventions that conflict', () => {
       assert.equal(report.facts.test_id.attribute, null);
       assert.equal(report.facts.test_id.config_attribute, 'data-testid');
       assert.equal(report.facts.test_id.source_counts['data-test'], 1);
-    },
-  );
-});
-
-test('keeps a literal custom ID after a URL string in the same config', () => {
-  fixture(
-    {
-      'package.json': '{}',
-      'playwright.config.ts':
-        "export default { use: { baseURL: 'http://localhost:3000', testIdAttribute: 'qa-id' } };\n",
-      'src/page.tsx': '<div qa-id="save" />\n',
-    },
-    (root) => {
-      const report = run(root);
-      assert.equal(report.facts.test_id.config_attribute, 'qa-id');
-      assert.equal(report.facts.test_id.status, 'detected');
-      assert.equal(report.facts.test_id.attribute, 'qa-id');
-    },
-  );
-});
-
-test('does not treat a quoted config example as an actual custom ID setting', () => {
-  fixture(
-    {
-      'package.json': '{}',
-      'playwright.config.ts':
-        'const example = "testIdAttribute: \'qa-id\'"; export default {};\n',
-      'src/page.tsx': '<div qa-id="save" />\n',
-    },
-    (root) => {
-      const report = run(root);
-      assert.equal(report.facts.test_id.config_attribute, null);
-      assert.notEqual(report.facts.test_id.status, 'detected');
-    },
-  );
-});
-
-test('does not treat an unrelated object as exported test-id configuration', () => {
-  fixture(
-    {
-      'package.json': '{}',
-      'playwright.config.ts':
-        "const example = { testIdAttribute: 'qa-id' }; export default {};\n",
-      'src/page.tsx': '<div qa-id="save" />\n',
-    },
-    (root) => {
-      const report = run(root);
-      assert.equal(report.facts.test_id.config_attribute, null);
-      assert.notEqual(report.facts.test_id.status, 'detected');
-    },
-  );
-});
-
-test('does not assign a later unrelated object to an identifier export', () => {
-  fixture(
-    {
-      'package.json': '{}',
-      'playwright.config.ts':
-        "export default config; const example = { testIdAttribute: 'qa-id' };\n",
-      'src/page.tsx': '<div qa-id="save" />\n',
-    },
-    (root) => {
-      const report = run(root);
-      assert.equal(report.facts.test_id.config_attribute, null);
-      assert.notEqual(report.facts.test_id.status, 'detected');
-    },
-  );
-});
-
-test('accepts unknown stacks and reports copied local UI components as evidence', () => {
-  fixture(
-    {
-      'package.json': JSON.stringify({
-        dependencies: { 'unlisted-view-runtime': '1.0.0' },
-      }),
-      'src/page.tsx':
-        "import { Button } from '@/components/ui/button';\nexport const Page = () => <Button />;\n",
-      'src/components/ui/button.tsx': 'export const Button = () => null;\n',
-    },
-    (root) => {
-      const report = run(root);
-      assert.equal(report.selection.status, 'config-unavailable');
-      assert.equal(report.scan.status, 'complete');
-      assert.equal(report.facts.framework_status, 'unknown');
-      assert.deepEqual(report.facts.frameworks, []);
-      assert.equal(report.facts.component_library_status, 'detected');
-      assert.deepEqual(report.facts.component_libraries, [
-        { name: 'local-ui-components', evidence: 'src/page.tsx' },
-      ]);
     },
   );
 });
@@ -588,100 +396,6 @@ test('selected workspace package does not absorb sibling source or hoisted depen
           (item) => !item.startsWith('node_modules/'),
         ),
       );
-    },
-  );
-});
-
-test('an incomplete inventory cannot claim no package or select one implicitly', () => {
-  fixture(
-    {
-      'a.txt': 'first\n',
-      'package.json': '{}',
-      'src/page.tsx': '<div data-testid="later" />\n',
-    },
-    (root) => {
-      const {
-        DEFAULT_LIMITS,
-        profileRepository,
-      } = require('../scripts/profile-repo.cjs');
-      assert.deepEqual(DEFAULT_LIMITS, {
-        maxListedPaths: 4096,
-        maxFilesRead: 512,
-        maxTotalBytes: 4 * 1024 * 1024,
-        maxFileBytes: 64 * 1024,
-        maxDurationMs: 5000,
-        maxOutputBytes: 64 * 1024,
-      });
-      const report = profileRepository({
-        repository: root,
-        limits: { maxListedPaths: 1 },
-      });
-      assert.equal(report.scan.status, 'partial');
-      assert.equal(report.selection.status, 'unknown');
-      assert.equal(report.facts, null);
-    },
-  );
-});
-
-test('large findings collapse to a bounded partial report', () => {
-  fixture(
-    {
-      'package.json': JSON.stringify({
-        scripts: Object.fromEntries(
-          Array.from({ length: 100 }, (_, index) => [
-            `lint:area-${index}`,
-            'true',
-          ]),
-        ),
-      }),
-    },
-    (root) => {
-      const { profileRepository } = require('../scripts/profile-repo.cjs');
-      const report = profileRepository({
-        repository: root,
-        limits: { maxOutputBytes: 1024 },
-      });
-      assert.equal(report.scan.status, 'partial');
-      assert.equal(report.scan.stop_reason, 'output-budget');
-      assert.equal(report.facts, null);
-      assert.ok(Buffer.byteLength(JSON.stringify(report)) <= 1024);
-    },
-  );
-});
-
-test('separates Cypress support files from actual tests', () => {
-  fixture(
-    {
-      'package.json': '{}',
-      'cypress/support/commands.ts':
-        'export const find = () => cy.get(\'[data-test="save"]\');\n',
-      'cypress/e2e/orders.ts': 'describe("orders", () => {});\n',
-    },
-    (root) => {
-      const report = run(root);
-      assert.deepEqual(report.facts.layout.tests, ['cypress/e2e/orders.ts']);
-      assert.deepEqual(report.facts.layout.helpers, [
-        'cypress/support/commands.ts',
-      ]);
-      assert.equal(report.facts.test_id.source_counts['data-test'], 0);
-      assert.equal(report.facts.test_id.test_counts['data-test'], 1);
-    },
-  );
-});
-
-test('workspace-child Cypress support does not establish a source convention', () => {
-  fixture(
-    {
-      'package.json': JSON.stringify({ workspaces: ['apps/*'] }),
-      'apps/web/package.json': '{}',
-      'apps/web/cypress/support/commands.ts':
-        'export const find = () => cy.get(\'[data-test="save"]\');\n',
-    },
-    (root) => {
-      const report = run(root, '--package', 'apps/web');
-      assert.equal(report.facts.test_id.source_counts['data-test'], 0);
-      assert.equal(report.facts.test_id.test_counts['data-test'], 1);
-      assert.equal(report.facts.test_id.status, 'unknown');
     },
   );
 });

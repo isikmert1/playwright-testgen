@@ -47,10 +47,13 @@ function resolveRun(repositoryInput, runId) {
 }
 
 function writeManifest(destination, manifest) {
+  const serialized = `${JSON.stringify(manifest, null, 2)}\n`;
+  if (Buffer.byteLength(serialized) > MAX_MANIFEST_SIZE)
+    fail('change-manifest-too-large');
   mkdirSync(path.dirname(destination), { recursive: true });
   const temporary = `${destination}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
   try {
-    writeFileSync(temporary, `${JSON.stringify(manifest, null, 2)}\n`, {
+    writeFileSync(temporary, serialized, {
       flag: 'wx',
       mode: 0o600,
     });

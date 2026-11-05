@@ -17,7 +17,7 @@
   "planned_trials": 2,
   "agent": {
     "name": "playwright-testgen:playwright-test-healer",
-    "model": "claude-sonnet-5",
+    "model": "claude-sonnet-5-5",
     "timeout_ms": 600000,
     "max_turns": 30,
     "max_budget_usd": 2

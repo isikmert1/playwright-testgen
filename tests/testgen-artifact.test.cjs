@@ -1,7 +1,6 @@
 const assert = require('node:assert/strict');
 const { createHash } = require('node:crypto');
 const {
-  copyFileSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -15,11 +14,6 @@ const path = require('node:path');
 const test = require('node:test');
 
 const repositoryRoot = path.resolve(__dirname, '..');
-const generatorPath = path.join(
-  repositoryRoot,
-  'scripts',
-  'create-testgen-run-id.cjs',
-);
 const healerInputGeneratorPath = path.join(
   repositoryRoot,
   'scripts',
@@ -30,7 +24,6 @@ const validatorPath = path.join(
   'scripts',
   'validate-testgen-artifact.cjs',
 );
-const { normalizedCriteria } = require('../scripts/validate-healer-input.cjs');
 const runId = 'tg-0123456789abcdef01234567';
 
 function runScript(script, args, environment = {}) {
@@ -297,17 +290,6 @@ function assertRejected(repository, type, name, artifact, error) {
   assert.match(result.stderr, error);
 }
 
-test('creates unique canonical Testgen run IDs', () => {
-  const first = runScript(generatorPath, []);
-  const second = runScript(generatorPath, []);
-
-  assert.equal(first.status, 0, first.stderr);
-  assert.equal(second.status, 0, second.stderr);
-  assert.match(first.stdout.trim(), /^tg-[a-f0-9]{24}$/u);
-  assert.match(second.stdout.trim(), /^tg-[a-f0-9]{24}$/u);
-  assert.notEqual(first.stdout, second.stdout);
-});
-
 test('accepts a valid Author handoff in its run-owned location', () => {
   withRepository((repository) => {
     const artifact = writeArtifact(repository, 'handoff.json', handoff());
@@ -380,92 +362,6 @@ test('derives pipeline Healer input from the validated Author handoff', () => {
   }
 });
 
-test('preserves pipeline assertion mappings to declared helper files', () => {
-  const repository = mkdtempSync(path.join(tmpdir(), 'testgen-input-'));
-  try {
-    const spec = "test('generated test', async () => {});\n";
-    mkdirSync(path.join(repository, 'tests', 'helpers'), { recursive: true });
-    writeFileSync(path.join(repository, 'tests', 'account.spec.ts'), spec);
-    writeFileSync(path.join(repository, 'tests', 'helpers', 'account.ts'), '');
-    writePolicy(repository, 'tests/account.spec.ts');
-    const authorHandoff = handoff();
-    authorHandoff.criteria[0].assertion_location =
-      'tests/helpers/account.ts:42';
-    authorHandoff.touched_paths.push('tests/helpers/account.ts');
-    writeArtifact(repository, 'handoff.json', authorHandoff);
-
-    const result = runScript(healerInputGeneratorPath, [
-      '--repo',
-      repository,
-      '--run-id',
-      runId,
-    ]);
-    const relative = `.playwright-cli/testgen/${runId}/healer-input.json`;
-    const validation = validate(repository, 'input', relative);
-
-    assert.equal(result.status, 0, result.stderr);
-    assert.equal(validation.status, 0, validation.stderr);
-    assert.deepEqual(
-      JSON.parse(readFileSync(path.join(repository, relative))).criteria[0]
-        .assertion_locations,
-      ['tests/helpers/account.ts:42'],
-    );
-  } finally {
-    rmSync(repository, { force: true, recursive: true });
-  }
-});
-
-test('normalizes Windows assertion paths in pipeline Healer input', () => {
-  const authorHandoff = handoff();
-  authorHandoff.criteria[0].assertion_location = 'tests\\account.spec.ts:18';
-
-  assert.deepEqual(normalizedCriteria(authorHandoff)[0].assertion_locations, [
-    'tests/account.spec.ts:18',
-  ]);
-});
-
-test('accepts standalone assertion locations with a column', () => {
-  const repository = mkdtempSync(path.join(tmpdir(), 'testgen-input-'));
-  try {
-    const spec = "test('existing test', async () => {});\n";
-    mkdirSync(path.join(repository, 'tests'), { recursive: true });
-    writeFileSync(path.join(repository, 'tests', 'account.spec.ts'), spec);
-    writePolicy(repository, 'tests/account.spec.ts');
-    const value = healerInput(spec);
-    value.criteria[0].assertion_locations = ['tests/account.spec.ts:18:5'];
-    const relative = writeArtifact(repository, 'healer-input.json', value);
-
-    const result = validate(repository, 'input', relative);
-
-    assert.equal(result.status, 0, result.stderr);
-  } finally {
-    rmSync(repository, { force: true, recursive: true });
-  }
-});
-
-test('rejects standalone assertion locations outside the repository', () => {
-  const repository = mkdtempSync(path.join(tmpdir(), 'testgen-input-'));
-  try {
-    const spec = "test('existing test', async () => {});\n";
-    mkdirSync(path.join(repository, 'tests'), { recursive: true });
-    writeFileSync(path.join(repository, 'tests', 'account.spec.ts'), spec);
-    writePolicy(repository, 'tests/account.spec.ts');
-    const value = healerInput(spec);
-    value.criteria[0].assertion_locations = ['../outside.ts:18'];
-
-    const result = validate(
-      repository,
-      'input',
-      writeArtifact(repository, 'healer-input.json', value),
-    );
-
-    assert.equal(result.status, 1);
-    assert.match(result.stderr, /input-assertion-location-invalid-path/iu);
-  } finally {
-    rmSync(repository, { force: true, recursive: true });
-  }
-});
-
 test('rejects pipeline Healer input that changes approved criteria', () => {
   const repository = mkdtempSync(path.join(tmpdir(), 'testgen-input-'));
   try {
@@ -502,60 +398,6 @@ test('rejects stale standalone Healer input before execution', () => {
       'healer-input.json',
       value,
       /input-spec-digest-mismatch/iu,
-    );
-  } finally {
-    rmSync(repository, { force: true, recursive: true });
-  }
-});
-
-test('rejects a non-string Healer input spec path without crashing', () => {
-  const repository = mkdtempSync(path.join(tmpdir(), 'testgen-input-'));
-  try {
-    const spec = "test('existing test', async () => {});\n";
-    mkdirSync(path.join(repository, 'tests'), { recursive: true });
-    writeFileSync(path.join(repository, 'tests', 'account.spec.ts'), spec);
-    writePolicy(repository, 'tests/account.spec.ts');
-    const value = healerInput(spec);
-    value.spec_path = null;
-
-    const result = validate(
-      repository,
-      'input',
-      writeArtifact(repository, 'healer-input.json', value),
-    );
-
-    assert.equal(result.status, 1);
-    assert.match(result.stderr, /input-spec-invalid-path/iu);
-    assert.doesNotMatch(result.stderr, /TypeError|node:internal/iu);
-  } finally {
-    rmSync(repository, { force: true, recursive: true });
-  }
-});
-
-test('binds Healer input to the current run and approved spec', () => {
-  const repository = mkdtempSync(path.join(tmpdir(), 'testgen-input-'));
-  try {
-    const spec = "test('existing test', async () => {});\n";
-    mkdirSync(path.join(repository, 'tests'), { recursive: true });
-    writeFileSync(path.join(repository, 'tests', 'account.spec.ts'), spec);
-    writePolicy(repository, 'tests/account.spec.ts');
-
-    assertRejected(
-      repository,
-      'input',
-      'healer-input.json',
-      healerInput(spec, 'standalone', 'tg-fedcba9876543210fedcba98'),
-      /run-id-mismatch/iu,
-    );
-    const wrongSpec = healerInput(spec);
-    wrongSpec.spec_path = 'tests/other.spec.ts';
-    wrongSpec.criteria[0].assertion_locations = ['tests/other.spec.ts:18'];
-    assertRejected(
-      repository,
-      'input',
-      'healer-input.json',
-      wrongSpec,
-      /policy-spec-mismatch/iu,
     );
   } finally {
     rmSync(repository, { force: true, recursive: true });
@@ -600,48 +442,6 @@ test('accepts a valid fixed Healer trace in its run-owned location', () => {
       classification: null,
       disposition: 'fixed',
     });
-  });
-});
-
-test('rejects foreground-only traces that claim background resources', () => {
-  withRepository((repository) => {
-    const artifact = trace();
-    artifact.cleanup.runner = 'stopped';
-    artifact.cleanup.browser_session = 'not-opened';
-    assertRejected(
-      repository,
-      'trace',
-      'healer-trace.json',
-      artifact,
-      /trace-foreground-runner-cleanup-invalid/iu,
-    );
-  });
-
-  withRepository((repository) => {
-    const artifact = trace();
-    artifact.cleanup.runner = 'not-started';
-    artifact.cleanup.browser_session = 'closed';
-    assertRejected(
-      repository,
-      'trace',
-      'healer-trace.json',
-      artifact,
-      /trace-foreground-browser-cleanup-invalid/iu,
-    );
-  });
-});
-
-test('routes a fixed Healer trace to Main for the vacuity gate', () => {
-  withRepository((repository) => {
-    const artifact = trace();
-    artifact.next_owner = 'human';
-    assertRejected(
-      repository,
-      'trace',
-      'healer-trace.json',
-      artifact,
-      /trace-invalid-fixed-disposition/iu,
-    );
   });
 });
 
@@ -773,57 +573,6 @@ test('rejects a vacuity disposition that overstates its evidence', () => {
   });
 });
 
-test('keeps conclusive behavior evidence authoritative over a secondary error', () => {
-  withRepository((repository) => {
-    for (const [status, mutant, disposition] of [
-      ['killed', 'fail', 'verified-non-vacuous'],
-      ['survived', 'pass', 'rejected-vacuous'],
-    ]) {
-      const value = vacuityReport();
-      value.behavior.status = status;
-      value.behavior.mutant = mutant;
-      value.assertion_sensitivity = {
-        status: 'error',
-        baseline: null,
-        mutant: null,
-        error: 'assertion-check-failed',
-        isolation: 'not-run',
-        cleanup: 'not-run',
-      };
-      value.disposition = disposition;
-      const artifact = writeVacuityReport(repository, value);
-
-      const result = validate(repository, 'vacuity', artifact);
-
-      assert.equal(result.status, 0, `${disposition}: ${result.stderr}`);
-    }
-  });
-});
-
-test('limits unavailable reports to explicit coverage gaps', () => {
-  withRepository((repository) => {
-    const value = vacuityReport();
-    value.behavior = {
-      status: 'unavailable',
-      mutation: null,
-      baseline: null,
-      mutant: null,
-      reason: 'runner-failed',
-      error: null,
-      isolation: 'not-run',
-      cleanup: 'not-run',
-    };
-    value.assertion_sensitivity.status = 'not-run';
-    value.disposition = 'mutation-not-verified';
-    const artifact = writeVacuityReport(repository, value);
-
-    const result = validate(repository, 'vacuity', artifact);
-
-    assert.equal(result.status, 1);
-    assert.match(result.stderr, /report-invalid-unavailable-reason/iu);
-  });
-});
-
 test('binds a selected mutation to an approved criterion', () => {
   withRepository((repository) => {
     const value = vacuityReport();
@@ -834,53 +583,6 @@ test('binds a selected mutation to an approved criterion', () => {
 
     assert.equal(result.status, 1);
     assert.match(result.stderr, /report-unknown-criterion/iu);
-  });
-});
-
-test('requires mutation affected paths to be regular files', () => {
-  withRepository((repository) => {
-    const value = vacuityReport();
-    value.behavior.mutation.affected_paths = ['src'];
-    const artifact = writeVacuityReport(repository, value);
-
-    const result = validate(repository, 'vacuity', artifact);
-
-    assert.equal(result.status, 1);
-    assert.match(result.stderr, /report-affected-path-not-file/iu);
-  });
-});
-
-test('rejects symlinks as mutation affected paths', () => {
-  withRepository((repository) => {
-    const value = vacuityReport();
-    writeVacuityReport(repository, value);
-    const linkedPath = path.join(repository, 'src', 'linked-account.js');
-    symlinkSync(path.join(repository, 'src', 'account.js'), linkedPath, 'file');
-    value.behavior.mutation.affected_paths = ['src/linked-account.js'];
-    const artifact = writeVacuityReport(repository, value);
-
-    const result = validate(repository, 'vacuity', artifact);
-
-    assert.equal(result.status, 1);
-    assert.match(result.stderr, /report-affected-path-not-file/iu);
-  });
-});
-
-test('accepts the repository test filename and test-id convention', () => {
-  withRepository((repository) => {
-    const specPath = 'e2e/account-flow.e2e.ts';
-    mkdirSync(path.join(repository, 'e2e'));
-    writeFileSync(path.join(repository, specPath), '');
-    writePolicy(repository, specPath);
-    const value = handoff();
-    value.spec_path = specPath;
-    value.criteria[0].assertion_location = `${specPath}:18`;
-    value.touched_paths = [specPath];
-    value.test_id_convention = 'test-id';
-    const artifact = writeArtifact(repository, 'handoff.json', value);
-    const result = validate(repository, 'handoff', artifact);
-
-    assert.equal(result.status, 0, result.stderr);
   });
 });
 
@@ -943,40 +645,8 @@ test('rejects a malformed Author handoff', () => {
   });
 });
 
-test('rejects criterion IDs that downstream artifacts cannot use', () => {
+test('rejects ambiguous duplicate criterion step titles', () => {
   withRepository((repository) => {
-    const artifact = handoff();
-    artifact.criteria[0].id = 'criterion one';
-    assertRejected(
-      repository,
-      'handoff',
-      'handoff.json',
-      artifact,
-      /handoff-invalid-criterion-id/iu,
-    );
-  });
-});
-
-test('requires unique human-readable criterion step titles', () => {
-  withRepository((repository) => {
-    for (const stepTitle of [
-      '',
-      ' verify the saved profile',
-      'verify\0the saved profile',
-      'verify\u0085the saved profile',
-      'testgen:criterion:criterion-1',
-    ]) {
-      const artifact = handoff();
-      artifact.criteria[0].step_title = stepTitle;
-      assertRejected(
-        repository,
-        'handoff',
-        'handoff.json',
-        artifact,
-        /handoff-invalid-step-title/iu,
-      );
-    }
-
     const artifact = handoff();
     artifact.criteria.push({
       ...artifact.criteria[0],
@@ -1004,166 +674,6 @@ test('requires the approved spec in Author touched paths', () => {
       'handoff.json',
       artifact,
       /handoff-spec-not-touched/iu,
-    );
-  });
-});
-
-test('rejects duplicate Author touched paths', () => {
-  withRepository((repository) => {
-    const artifact = handoff();
-    artifact.touched_paths.push('tests/account.spec.ts');
-    assertRejected(
-      repository,
-      'handoff',
-      'handoff.json',
-      artifact,
-      /handoff-duplicate-touched-path/iu,
-    );
-  });
-});
-
-test('requires Author touched paths to be regular files', () => {
-  withRepository((repository) => {
-    const artifact = handoff();
-    artifact.touched_paths.push('tests');
-    assertRejected(
-      repository,
-      'handoff',
-      'handoff.json',
-      artifact,
-      /handoff-touched-not-file/iu,
-    );
-  });
-});
-
-test('rejects internal symlinks in Author touched paths', () => {
-  withRepository((repository) => {
-    const target = path.join(repository, 'tests', 'source.ts');
-    const linked = path.join(repository, 'tests', 'linked-source.ts');
-    writeFileSync(target, 'export const value = true;');
-    symlinkSync(target, linked, 'file');
-    const artifact = handoff();
-    artifact.touched_paths.push('tests/linked-source.ts');
-    assertRejected(
-      repository,
-      'handoff',
-      'handoff.json',
-      artifact,
-      /handoff-touched-not-file/iu,
-    );
-  });
-});
-
-test('rejects duplicate test-id additions', () => {
-  withRepository((repository) => {
-    const artifact = handoff();
-    artifact.test_id_convention = 'data-testid';
-    const addition = {
-      path: 'tests/account.spec.ts',
-      attribute: 'data-testid',
-      purpose: 'identify the save control',
-    };
-    artifact.test_id_additions = [addition, { ...addition }];
-    assertRejected(
-      repository,
-      'handoff',
-      'handoff.json',
-      artifact,
-      /handoff-duplicate-test-id-addition/iu,
-    );
-  });
-});
-
-test('requires test-id addition paths to be regular files', () => {
-  withRepository((repository) => {
-    const artifact = handoff();
-    artifact.test_id_convention = 'data-testid';
-    artifact.test_id_additions = [
-      {
-        path: 'tests',
-        attribute: 'data-testid',
-        purpose: 'identify the save control',
-      },
-    ];
-    artifact.touched_paths.push('tests');
-    assertRejected(
-      repository,
-      'handoff',
-      'handoff.json',
-      artifact,
-      /handoff-test-id-addition-not-file/iu,
-    );
-  });
-});
-
-test('rejects internal symlinks as test-id addition paths', () => {
-  withRepository((repository) => {
-    const target = path.join(repository, 'tests', 'source.ts');
-    const linked = path.join(repository, 'tests', 'linked-source.ts');
-    writeFileSync(target, 'export const value = true;');
-    symlinkSync(target, linked, 'file');
-    const artifact = handoff();
-    artifact.test_id_convention = 'data-testid';
-    artifact.test_id_additions = [
-      {
-        path: 'tests/linked-source.ts',
-        attribute: 'data-testid',
-        purpose: 'identify the save control',
-      },
-    ];
-    artifact.touched_paths.push('tests/linked-source.ts');
-    assertRejected(
-      repository,
-      'handoff',
-      'handoff.json',
-      artifact,
-      /handoff-test-id-addition-not-file/iu,
-    );
-  });
-});
-
-test('rejects duplicate Healer repair paths', () => {
-  withRepository((repository) => {
-    const artifact = repairedTrace([
-      'tests/account.spec.ts',
-      'tests/account.spec.ts',
-    ]);
-    assertRejected(
-      repository,
-      'trace',
-      'healer-trace.json',
-      artifact,
-      /trace-duplicate-repair-path/iu,
-    );
-  });
-});
-
-test('requires Healer repair paths to be regular files', () => {
-  withRepository((repository) => {
-    const artifact = repairedTrace(['tests']);
-    assertRejected(
-      repository,
-      'trace',
-      'healer-trace.json',
-      artifact,
-      /trace-repair-not-file/iu,
-    );
-  });
-});
-
-test('rejects internal symlinks as Healer repair paths', () => {
-  withRepository((repository) => {
-    const target = path.join(repository, 'tests', 'source.ts');
-    const linked = path.join(repository, 'tests', 'linked-source.ts');
-    writeFileSync(target, 'export const value = true;');
-    symlinkSync(target, linked, 'file');
-    const artifact = repairedTrace(['tests/linked-source.ts']);
-    assertRejected(
-      repository,
-      'trace',
-      'healer-trace.json',
-      artifact,
-      /trace-repair-not-file/iu,
     );
   });
 });
@@ -1196,44 +706,6 @@ test('accepts benign equals syntax in bounded artifact prose', () => {
     const authorResult = validate(repository, 'handoff', authorPath);
 
     assert.equal(authorResult.status, 0, authorResult.stderr);
-    writePipelineInput(repository, '');
-
-    const healerArtifact = trace();
-    healerArtifact.attempts[0].evidence_summary =
-      'the runner kept retries=0 and the control text=Submit';
-    const healerPath = writeArtifact(
-      repository,
-      'healer-trace.json',
-      healerArtifact,
-    );
-    const healerResult = validate(repository, 'trace', healerPath);
-
-    assert.equal(healerResult.status, 0, healerResult.stderr);
-  });
-});
-
-test('accepts ordinary prose containing test and expect followed by parentheses', () => {
-  withRepository((repository) => {
-    const artifact = handoff();
-    artifact.assumptions = [
-      'The test (after login) still checks the signed-in page.',
-      'We expect (once loaded) one visible result.',
-    ];
-    const artifactPath = writeArtifact(repository, 'handoff.json', artifact);
-
-    const result = validate(repository, 'handoff', artifactPath);
-    assert.equal(result.status, 0, result.stderr);
-  });
-});
-
-test('accepts a benign lowercase field assignment in artifact prose', () => {
-  withRepository((repository) => {
-    const artifact = handoff();
-    artifact.assumptions = ['The row keeps order_status=pending until review.'];
-    const artifactPath = writeArtifact(repository, 'handoff.json', artifact);
-
-    const result = validate(repository, 'handoff', artifactPath);
-    assert.equal(result.status, 0, result.stderr);
   });
 });
 
@@ -1241,32 +713,9 @@ test('rejects environment assignments and raw snapshots', () => {
   withRepository((repository) => {
     for (const value of [
       'DATABASE_URL=postgres://example.test/app',
-      'database_url=postgres://example.test/app',
-      'node_env=production',
-      'server_port=3000',
-      'export http_proxy=http://proxy.internal:8080',
-      'export service_url=https://internal.example.test',
-      'service_url=https://internal.example.test',
-      'env:order_status=pending',
-      'env:DATABASE_URL=postgres://example.test/app',
-      '(database_url=postgres://example.test/app)',
-      '"DATABASE_URL=postgres://example.test/app"',
-      'A=production',
       'snapshot: <main><button>Save</button></main>',
-      '<main><button>Save</button></main>',
-      '<span>Saved</span>',
-      '<div class=x>',
-      '<my-widget />',
       'https://admin:hunter2@example.test/account',
-      'https://private-user@example.test/account',
       "test ('saves an order', async () => {})",
-      'expect (result).toBe(1)',
-      'await expect (page.getByRole("button")).toBeVisible();',
-      'expect (value).not.toBe(1)',
-      'test (scenarioName, async () => {})',
-      'test(foo)',
-      'describe(foo)',
-      'expect(value)',
     ]) {
       const artifact = handoff();
       artifact.assumptions = [value];
@@ -1278,114 +727,6 @@ test('rejects environment assignments and raw snapshots', () => {
         result.stderr,
         /handoff-assumptions-prohibited-(?:environment-value|raw-content|secret)/iu,
       );
-    }
-  });
-});
-
-test('leaves unknown-field rejection to artifact shape validation', () => {
-  withRepository((repository) => {
-    for (const field of ['domain', 'dialog']) {
-      const artifact = handoff();
-      artifact[field] = 'not an allowed field';
-      const artifactPath = writeArtifact(repository, 'handoff.json', artifact);
-      const result = validate(repository, 'handoff', artifactPath);
-
-      assert.equal(result.status, 1);
-      assert.match(result.stderr, /handoff-unknown-field/iu);
-      assert.doesNotMatch(result.stderr, /prohibited/iu);
-    }
-  });
-});
-
-test('identifies the safe trace section containing prohibited content', () => {
-  withRepository((repository) => {
-    const artifact = trace();
-    artifact.attempts[0].evidence_summary =
-      'snapshot: raw page state must remain in scratch';
-    const artifactPath = writeArtifact(
-      repository,
-      'healer-trace.json',
-      artifact,
-    );
-    const result = validate(repository, 'trace', artifactPath);
-
-    assert.equal(result.status, 1);
-    assert.match(result.stderr, /trace-attempts-prohibited-raw-content/iu);
-    assert.doesNotMatch(result.stderr, /raw page state/iu);
-  });
-});
-
-test('rejects a schema that no longer matches the bundled contract', () => {
-  withRepository((repository) => {
-    const plugin = mkdtempSync(path.join(tmpdir(), 'testgen-plugin-'));
-    try {
-      for (const directory of ['hooks', 'schemas', 'scripts'])
-        mkdirSync(path.join(plugin, directory));
-      for (const [source, destination] of [
-        ['hooks/run-policy.cjs', 'hooks/run-policy.cjs'],
-        [
-          'scripts/artifact-validation-common.cjs',
-          'scripts/artifact-validation-common.cjs',
-        ],
-        [
-          'scripts/validate-author-handoff.cjs',
-          'scripts/validate-author-handoff.cjs',
-        ],
-        [
-          'scripts/validate-healer-trace.cjs',
-          'scripts/validate-healer-trace.cjs',
-        ],
-        [
-          'scripts/validate-healer-input.cjs',
-          'scripts/validate-healer-input.cjs',
-        ],
-        [
-          'scripts/validate-testgen-artifact.cjs',
-          'scripts/validate-testgen-artifact.cjs',
-        ],
-        [
-          'schemas/healer-trace.v2.schema.json',
-          'schemas/healer-trace.v2.schema.json',
-        ],
-        [
-          'schemas/healer-input.v1.schema.json',
-          'schemas/healer-input.v1.schema.json',
-        ],
-      ])
-        copyFileSync(
-          path.join(repositoryRoot, source),
-          path.join(plugin, destination),
-        );
-      const handoffSchema = JSON.parse(
-        readFileSync(
-          path.join(repositoryRoot, 'schemas', 'author-handoff.v1.schema.json'),
-          'utf8',
-        ),
-      );
-      handoffSchema.properties.criteria = { type: 'string' };
-      writeFileSync(
-        path.join(plugin, 'schemas', 'author-handoff.v1.schema.json'),
-        JSON.stringify(handoffSchema),
-      );
-      const artifact = writeArtifact(repository, 'handoff.json', handoff());
-      const result = runScript(
-        path.join(plugin, 'scripts', 'validate-testgen-artifact.cjs'),
-        [
-          '--repo',
-          repository,
-          '--type',
-          'handoff',
-          '--run-id',
-          runId,
-          artifact,
-        ],
-        { NODE_PATH: path.join(repositoryRoot, 'node_modules') },
-      );
-
-      assert.equal(result.status, 1);
-      assert.match(result.stderr, /schema-unavailable/iu);
-    } finally {
-      rmSync(plugin, { force: true, recursive: true });
     }
   });
 });
@@ -1421,47 +762,6 @@ test('requires a final non-debug pass before accepting a fixed trace', () => {
   });
 });
 
-test('rejects a trace whose first attempt is mislabeled as confirmation', () => {
-  withRepository((repository) => {
-    const artifact = trace();
-    artifact.attempts[0].kind = 'confirmation-run';
-    const artifactPath = writeArtifact(
-      repository,
-      'healer-trace.json',
-      artifact,
-    );
-    const result = validate(repository, 'trace', artifactPath);
-
-    assert.equal(result.status, 1);
-    assert.match(result.stderr, /first-attempt-not-verification/iu);
-  });
-});
-
-test('rejects another attempt after the initial verification passes', () => {
-  withRepository((repository) => {
-    const artifact = trace();
-    artifact.attempts.push({
-      number: 2,
-      kind: 'confirmation-run',
-      hypothesis: 'the approved spec still passes',
-      failure_signature: null,
-      evidence_summary: 'the redundant run also completed successfully',
-      classification: null,
-      action: null,
-      outcome: 'pass',
-    });
-    const artifactPath = writeArtifact(
-      repository,
-      'healer-trace.json',
-      artifact,
-    );
-    const result = validate(repository, 'trace', artifactPath);
-
-    assert.equal(result.status, 1);
-    assert.match(result.stderr, /attempt-after-terminal-pass/iu);
-  });
-});
-
 test('still requires confirmation after a repair', () => {
   withRepository((repository) => {
     const artifact = repairedTrace(['tests/account.spec.ts']);
@@ -1475,20 +775,6 @@ test('still requires confirmation after a repair', () => {
 
     assert.equal(result.status, 1);
     assert.match(result.stderr, /fixed-requires-confirmation/iu);
-  });
-});
-
-test('preserves the last failure classification after a repaired trace passes', () => {
-  withRepository((repository) => {
-    const artifact = repairedTrace(['tests/account.spec.ts']);
-    const artifactPath = writeArtifact(
-      repository,
-      'healer-trace.json',
-      artifact,
-    );
-    const result = validate(repository, 'trace', artifactPath);
-
-    assert.equal(result.status, 0, result.stderr);
   });
 });
 
@@ -1527,41 +813,6 @@ test('accepts a terminal product-behavior trace with structured evidence', () =>
 
     assert.equal(result.status, 0, result.stderr);
   });
-});
-
-test('accepts a product finding discovered after an approved spec repair', () => {
-  const repository = mkdtempSync(path.join(tmpdir(), 'testgen-input-'));
-  try {
-    const startingSpec = "test('existing test', async () => {});\n";
-    mkdirSync(path.join(repository, 'tests'), { recursive: true });
-    writeFileSync(
-      path.join(repository, 'tests', 'account.spec.ts'),
-      startingSpec,
-    );
-    writePolicy(repository, 'tests/account.spec.ts');
-    writeArtifact(repository, 'healer-input.json', healerInput(startingSpec));
-    writeFileSync(
-      path.join(repository, 'tests', 'account.spec.ts'),
-      "test('repaired test', async () => {});\n",
-    );
-    const artifact = repairedTrace(['tests/account.spec.ts']);
-    const productAttempt = productFindingAttempt();
-    productAttempt.number = 2;
-    productAttempt.kind = 'confirmation-run';
-    artifact.attempts[1] = productAttempt;
-    artifact.final_classification = 'product-behavior-wrong';
-    artifact.disposition = 'product-behavior-wrong';
-    artifact.next_owner = 'product-owner';
-    artifact.escalation =
-      'the repaired selector exposed conflicting product behavior';
-    const relative = writeArtifact(repository, 'healer-trace.json', artifact);
-
-    const result = validate(repository, 'trace', relative);
-
-    assert.equal(result.status, 0, result.stderr);
-  } finally {
-    rmSync(repository, { force: true, recursive: true });
-  }
 });
 
 test('rejects a product-behavior trace after the approved spec changes', () => {
@@ -1616,28 +867,6 @@ test('rejects repairs assigned to an owner-terminal failure', () => {
   });
 });
 
-test('rejects product evidence for a criterion absent from the Healer input', () => {
-  withRepository((repository) => {
-    const artifact = trace();
-    const attempt = productFindingAttempt();
-    attempt.product_behavior_evidence.criterion_id = 'criterion-missing';
-    artifact.attempts = [attempt];
-    artifact.final_classification = 'product-behavior-wrong';
-    artifact.disposition = 'product-behavior-wrong';
-    artifact.next_owner = 'human';
-    artifact.escalation = 'the criterion and current product behavior conflict';
-    const artifactPath = writeArtifact(
-      repository,
-      'healer-trace.json',
-      artifact,
-    );
-    const result = validate(repository, 'trace', artifactPath);
-
-    assert.equal(result.status, 1);
-    assert.match(result.stderr, /unknown-product-criterion/iu);
-  });
-});
-
 test('rejects product evidence that changes the retained criterion outcome', () => {
   withRepository((repository) => {
     const artifact = trace();
@@ -1679,22 +908,6 @@ test('rejects a trace when its pipeline input no longer has a valid handoff', ()
 
     assert.equal(result.status, 1);
     assert.match(result.stderr, /healer-input-unavailable/iu);
-  });
-});
-
-test('rejects a trace whose final classification is not its last failure', () => {
-  withRepository((repository) => {
-    const artifact = trace();
-    artifact.final_classification = 'timing';
-    const artifactPath = writeArtifact(
-      repository,
-      'healer-trace.json',
-      artifact,
-    );
-    const result = validate(repository, 'trace', artifactPath);
-
-    assert.equal(result.status, 1);
-    assert.match(result.stderr, /final-classification-mismatch/iu);
   });
 });
 

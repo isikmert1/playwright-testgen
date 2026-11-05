@@ -1,7 +1,7 @@
 # Evaluations
 
-These checks cover plugin activation, setup, test generation, selector repair,
-and refusal to hide product defects.
+These checks cover plugin activation, setup, discovery, candidate checkpoints,
+test generation, selector repair, and refusal to hide product defects.
 
 ## Targets and fixtures
 
@@ -26,6 +26,8 @@ timeout and cancellation cleanup.
 Run commands from the plugin root. Installed workflow checks need an
 authenticated Claude Code installation and a clean, committed Testgen checkout.
 They install that exact revision in a disposable target and consume model usage.
+New case defaults use `claude-sonnet-5-5`. Historical results below retain their
+original model and runtime profile.
 
 Runners remove their temporary targets and plugin registrations. Shared plugin
 and browser caches may remain; concurrent plugin-state changes are preserved
@@ -41,7 +43,7 @@ Requires Claude Code 2.1.269 or later. These three cases check that a Playwright
 request invokes the plugin skill, while Git and Cypress requests do not:
 
 ```sh
-claude plugin eval . --eval-dir evals/native --runs 1 --ablation none --concurrency 1 --model claude-sonnet-5 --max-cost-usd 1 --no-publish
+claude plugin eval . --eval-dir evals/native --runs 1 --ablation none --concurrency 1 --model claude-sonnet-5-5 --max-cost-usd 1 --no-publish
 ```
 
 This starts three sequential model sessions without model judges. Reported
@@ -170,7 +172,84 @@ inputs and execution profiles must match; the Testgen revision may differ.
 Never relabel old trials with a new input digest. Applicable behavior metrics
 allow no drop from the baseline.
 
+Critical approval, attribution, governance, or state-integrity failures also
+make standalone scoring exit nonzero, even when every trial completed. The
+summary retains those observations and lists them under `critical_failures`.
+Profiles bind the selected agent limits and the runtime used for independent
+candidate execution. Missing profile evidence cannot establish a compatible
+cohort; historical results are not backfilled with current defaults.
+
 Raw agent streams, application output, and Playwright reports stay outside Git.
+
+Use `--results-dir <directory>` to score a separate outcome cohort. Every attempt
+counts by default. A replacement requires an explicit JSON array supplied with
+`--replacements <file>`:
+
+```json
+[
+  {
+    "excluded_trial_id": "trial-infrastructure-failure",
+    "replacement_trial_id": "trial-replacement",
+    "reason": "Browser installation was unavailable before agent behavior.",
+    "approval_ref": "Reference to the human review approving this replacement"
+  }
+]
+```
+
+Both trials must exist, belong to the same case and current dataset, and the
+excluded trial must be an allowlisted infrastructure failure with verified
+cleanup. Behavioral failures, missing evidence, and failed cleanup cannot be
+excluded. The summary retains both attempts, replacement decisions, and their
+costs. `approval_ref` records human approval; the scorer cannot authenticate it.
+
+Unknown cost produces `total: null` with separate reported and unavailable
+counts. Mutation telemetry is explicitly unavailable for cases that do not
+collect it. Human-intervention counts describe modeled workflow checkpoints;
+they do not measure observed human effort. The classification and refusal
+metrics remain compatibility aliases. Changing the model or dataset requires a
+new cohort; the historical baseline remains an observation of its recorded inputs.
+
+## Installed capability checks
+
+```sh
+npm run eval:discovery
+npm run eval:checkpoint
+```
+
+Each command declares one trial and zero retries. They accept `--model`,
+`--max-budget-usd`, and `--results-dir`; a budget override may lower the USD 2
+ceiling. Results must go outside Git or into an ignored, untracked directory.
+The defaults are under ignored `capabilities/results/<case-id>/`.
+
+Discovery invokes the installed Explorer directly. It checks recognition of an
+existing order-submission test and abstention on unsupported bulk-cancellation
+intent, with a 90-second and ten-source-read budget. Actual read and browser
+cleanup evidence is required. This measures the Explorer role, not Main's
+discovery delegation.
+
+The checkpoint case invokes installed Main, requests an assertion adjustment,
+then chooses skip in the same resumed Claude session. It requires Author-owned
+writes, successful validation, preserved scenario and criterion identities,
+changed candidate bytes, a renewed checkpoint, and no test execution, mutation,
+or Healer delegation. Three exchanges share a USD 2 and 600-second ceiling.
+Independent assertion inspection accepts a narrow, direct Playwright syntax;
+unsupported syntax is unverified. A deterministic replay checks the evaluator,
+while an actual installed run establishes workflow capability.
+
+The [Real World App generation case](targets/cypress-realworld-app/adapter/README.md#generated-username-validation-case)
+uses the existing procedural adapter. Its strong, weak, and unrelated-failure
+controls must establish the mutation oracle before collecting a generated
+candidate. Keep controls and expected answers out of Author's context and
+approve the exact generated candidate before execution.
+
+These cases produce separate capability observations. They do not increase the
+historical outcome cohort or establish reliability from a single success.
+
+## Private evidence
+
+Review local raw artifacts before sharing them, especially for private cases;
+Playwright authentication state can contain account credentials. GitHub secret
+scanning and push protection supplement these boundaries.
 
 ## Recorded results
 

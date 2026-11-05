@@ -1,0 +1,37 @@
+{
+  "schema_version": "installed-capability-case.v1",
+  "case_id": "main-adjust-skip",
+  "kind": "checkpoint",
+  "target_id": "semantic-only",
+  "target_path": "evals/targets/semantic-only/repository",
+  "origin": "http://127.0.0.1:4173",
+  "scenario_ref": "notebook-order-details",
+  "scenario": "On the order review page, open the preloaded Notebook order's details. Verify the dialog shows Notebook, quantity 2, and Ready status.",
+  "spec_path": "tests/notebook-details.spec.ts",
+  "criteria": [
+    {
+      "id": "notebook-details-visible",
+      "outcome": "Opening the preloaded Notebook order's details shows Notebook, quantity 2, and Ready status in a dialog."
+    }
+  ],
+  "adjustment": "Add explicit awaited assertions inside the existing criterion step that the dialog-scoped heading with exact accessible name Order details is visible and has exact text Order details. Preserve the original scenario, criterion IDs and outcomes, run ID, spec path, and existing Notebook, quantity 2 and Ready assertions. Return to the candidate checkpoint after Author validates the revised handoff. No test execution or mutation is approved.",
+  "checkpoint": "adjust-then-skip",
+  "planned_trials": 1,
+  "retries": 0,
+  "evidence_level": "installed-main-checkpoint",
+  "max_exchanges": 3,
+  "agent": {
+    "name": "main",
+    "model": "claude-sonnet-5-5",
+    "timeout_ms": 600000,
+    "max_turns": 40,
+    "max_budget_usd": 2
+  },
+  "expected": {
+    "disposition": "generated-unverified",
+    "execution_attempts": 0,
+    "mutation_attempts": 0,
+    "healer_delegations": 0,
+    "cleanup": "passed"
+  }
+}

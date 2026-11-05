@@ -8,17 +8,13 @@ const {
   isRepoPath,
   portable,
 } = require('./artifact-validation-common.cjs');
-const { MutationCheckError } = require('./mutation-check-error.cjs');
+const { MutationCheckError, fail } = require('./mutation-check-error.cjs');
 const { comparablePath } = require('../hooks/run-policy.cjs');
 
 const DIGEST = /^[a-f0-9]{64}$/u;
 const MAX_ADAPTER_SIZE = 128 * 1024;
 const MAX_PATCH_SIZE = 512 * 1024;
 const MAX_RUNNER_SIZE = 64 * 1024;
-
-function fail(code) {
-  throw new MutationCheckError(code);
-}
 
 function exactKeys(value, keys) {
   return (

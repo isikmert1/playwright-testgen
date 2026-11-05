@@ -130,7 +130,11 @@ function main() {
       if (error.code !== 'ENOENT') throw error;
     }
     if (metadata != null) {
-      if (!metadata.isFile() || !isInside(repository, realpathSync(findings)))
+      if (
+        !metadata.isFile() ||
+        metadata.nlink !== 1 ||
+        !isInside(repository, realpathSync(findings))
+      )
         throw new Error('findings-unavailable');
       if (metadata.size > MAX_FINDINGS_SIZE)
         throw new Error('findings-too-large');

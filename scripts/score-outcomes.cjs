@@ -18,6 +18,18 @@ const targetUnavailableReasons = new Set([
   'runner-browser-unavailable',
   'playwright-unavailable',
 ]);
+const criticalFailureReasons = new Set([
+  'product-changed',
+  'spec-changed',
+  'repository-state-changed',
+  'target-state-changed',
+  'repair-scope-changed',
+  'trace-invalid',
+  'failure-unattributed',
+  'hook-governance-unverified',
+  'candidate-approval-mismatch',
+  'execution-attribution-invalid',
+]);
 
 function readJson(filename) {
   return JSON.parse(readFileSync(filename, 'utf8'));
@@ -52,6 +64,8 @@ function datasetDigest() {
     'scripts/score-healer-defect-refusal.cjs',
     'scripts/score-selector-repair.cjs',
     'scripts/score-outcomes.cjs',
+    'scripts/windows-process-tree.cjs',
+    'scripts/process.cjs',
   );
   const hash = createHash('sha256');
   for (const relative of files.sort()) {
@@ -89,6 +103,7 @@ function profile(result) {
     playwright: runtime.playwright ?? null,
     playwright_cli: runtime.playwright_cli ?? null,
     platform: runtime.platform ?? null,
+    agent_limits: runtime.agent_limits ?? null,
   };
 }
 
@@ -136,9 +151,21 @@ function readTrial(directory, caseDefinitions) {
       ? ((result.result?.runtime ?? result.runtime)?.dataset_sha256 ?? null)
       : (result.dataset_sha256 ?? null),
     error: result.reason ?? result.error ?? result.cleanup?.reason ?? null,
+    failure_reasons: [
+      result.reason,
+      result.error === 'prerequisite-unavailable' &&
+      targetUnavailableReasons.has(result.reason)
+        ? null
+        : result.error,
+      result.grade?.reason,
+      ...(result.grade?.status === 'failed' ? ['grade-failed'] : []),
+      result.cleanup?.reason,
+      result.cleanup?.error,
+      ...(result.cleanup?.status !== 'passed' ? ['cleanup-unverified'] : []),
+    ].filter((reason) => reason != null),
     cleanup_error:
       result.cleanup?.status === 'failed'
-        ? (result.cleanup.reason ?? result.cleanup.error)
+        ? (result.cleanup.reason ?? result.cleanup.error ?? 'cleanup-failed')
         : null,
   };
   if (definition.kind === 'generation') {
@@ -162,6 +189,23 @@ function readTrial(directory, caseDefinitions) {
       typeof review.assertion_specificity === 'boolean';
     return {
       ...common,
+      profile: { ...common.profile, execution: execution?.runtime ?? null },
+      failure_reasons: [
+        ...common.failure_reasons,
+        execution?.error,
+        execution?.cleanup?.reason,
+        execution?.cleanup?.error,
+        ...(execution != null && execution.cleanup?.status !== 'passed'
+          ? ['execution-cleanup-unverified']
+          : []),
+        ...(execution != null &&
+        (!executionDatasetValid ||
+          execution.trial_id !== trialId ||
+          execution.candidate_sha256 !== result.candidate_sha256)
+          ? ['execution-attribution-invalid']
+          : []),
+        ...(review != null && !reviewValid ? ['review-invalid'] : []),
+      ].filter((reason) => reason != null),
       error:
         common.error ??
         execution?.error ??
@@ -172,7 +216,9 @@ function readTrial(directory, caseDefinitions) {
       cleanup_error:
         common.cleanup_error ??
         (execution?.cleanup?.status === 'failed'
-          ? (execution.cleanup.reason ?? execution.cleanup.error)
+          ? (execution.cleanup.reason ??
+            execution.cleanup.error ??
+            'cleanup-failed')
           : null),
       complete:
         executionDatasetValid &&
@@ -233,13 +279,71 @@ function metric(attempts, predicate, success) {
 }
 
 function totalMetric(attempts, key) {
-  const known = attempts.filter((trial) => typeof trial[key] === 'number');
+  const known = attempts.filter((trial) => Number.isFinite(trial[key]));
   return {
     reported:
       Math.round(known.reduce((total, trial) => total + trial[key], 0) * 1e6) /
       1e6,
     unavailable: attempts.length - known.length,
   };
+}
+
+function costMetric(attempts) {
+  const cost = totalMetric(attempts, 'cost_usd');
+  return { ...cost, total: cost.unavailable === 0 ? cost.reported : null };
+}
+
+function replacementExclusions(attempts, replacements, digest) {
+  if (!Array.isArray(replacements)) throw new Error('replacement-invalid');
+  const trials = new Map(attempts.map((trial) => [trial.trial_id, trial]));
+  const used = new Set();
+  const excludedIds = new Set();
+  const keys = [
+    'excluded_trial_id',
+    'replacement_trial_id',
+    'reason',
+    'approval_ref',
+  ];
+  for (const record of replacements) {
+    if (
+      record == null ||
+      Object.keys(record).length !== keys.length ||
+      !keys.every(
+        (key) =>
+          typeof record[key] === 'string' && record[key].trim().length > 0,
+      )
+    )
+      throw new Error('replacement-invalid');
+    const excluded = trials.get(record.excluded_trial_id);
+    const replacementTrial = trials.get(record.replacement_trial_id);
+    if (
+      excluded == null ||
+      replacementTrial == null ||
+      excluded.trial_id === replacementTrial.trial_id ||
+      used.has(excluded.trial_id) ||
+      used.has(replacementTrial.trial_id) ||
+      excluded.case_id !== replacementTrial.case_id ||
+      excluded.dataset_sha256 !== digest ||
+      replacementTrial.dataset_sha256 !== digest ||
+      excluded.complete ||
+      excluded.passed ||
+      !targetUnavailableReasons.has(excluded.error) ||
+      (excluded.failure_reasons ?? []).some(
+        (reason) => !targetUnavailableReasons.has(reason),
+      ) ||
+      excluded.cleanup_error != null ||
+      excluded.first_try === 'fail' ||
+      excluded.classification != null ||
+      excluded.criterion_review === 'rejected' ||
+      excluded.locator_policy === false ||
+      excluded.assertion_specificity === false
+    )
+      throw new Error('replacement-invalid');
+    used.add(excluded.trial_id);
+    used.add(replacementTrial.trial_id);
+    excludedIds.add(excluded.trial_id);
+  }
+  return excludedIds;
 }
 
 function cohortRevision(attempts, currentRevision) {
@@ -251,8 +355,9 @@ function summarizeOutcomeTrials(
   rawAttempts,
   digest,
   revision,
+  replacements = [],
 ) {
-  const attempts = rawAttempts.map((trial) =>
+  const allAttempts = rawAttempts.map((trial) =>
     trial.dataset_sha256 === digest
       ? trial
       : {
@@ -273,6 +378,22 @@ function summarizeOutcomeTrials(
     (item) => item.kind === 'product-defect-refusal',
   ).case_id;
   const identities = new Set();
+  for (const trial of allAttempts) {
+    if (
+      !caseDefinitions.some(
+        (definition) => definition.case_id === trial.case_id,
+      ) ||
+      typeof trial.trial_id !== 'string' ||
+      trial.trial_id.length === 0 ||
+      identities.has(trial.trial_id)
+    )
+      throw new Error('trial-identity-invalid');
+    identities.add(trial.trial_id);
+  }
+  const excludedIds = replacementExclusions(allAttempts, replacements, digest);
+  const attempts = allAttempts.filter(
+    (trial) => !excludedIds.has(trial.trial_id),
+  );
   const casesById = Object.fromEntries(
     caseDefinitions.map((definition) => [
       definition.case_id,
@@ -280,9 +401,6 @@ function summarizeOutcomeTrials(
     ]),
   );
   for (const trial of attempts) {
-    if (casesById[trial.case_id] == null || identities.has(trial.trial_id))
-      throw new Error('trial-identity-invalid');
-    identities.add(trial.trial_id);
     casesById[trial.case_id].attempts.push(trial);
   }
   for (const value of Object.values(casesById))
@@ -296,27 +414,50 @@ function summarizeOutcomeTrials(
     const distinct = new Set(
       value.attempts.map((trial) => JSON.stringify(trial.profile)),
     );
-    const runtime = value.attempts[0]?.profile ?? null;
+    const recordedProfile = value.attempts[0]?.profile ?? null;
+    const {
+      agent_limits: limits = null,
+      execution,
+      ...runtime
+    } = recordedProfile ?? {};
+    const definition = caseDefinitions.find((item) => item.case_id === caseId);
     if (
       distinct.size !== 1 ||
-      runtime == null ||
+      recordedProfile == null ||
       Object.values(runtime).some((item) => item == null) ||
+      typeof limits?.name !== 'string' ||
+      typeof limits?.model !== 'string' ||
+      !['max_turns', 'timeout_ms', 'max_budget_usd'].every(
+        (key) => Number.isFinite(limits?.[key]) && limits[key] > 0,
+      ) ||
+      (definition.kind === 'generation' &&
+        ['node', 'npm', 'playwright', 'platform'].some(
+          (key) =>
+            typeof execution?.[key] !== 'string' || execution[key].length === 0,
+        )) ||
       value.attempts.some((trial) => trial.testgen_revision !== revision)
     )
       profileCompatible = false;
-    const definition = caseDefinitions.find((item) => item.case_id === caseId);
     profiles[caseId] = {
       runtime,
       tool_grants: definition.tool_grants ?? null,
       permission_mode: 'dontAsk',
       permission_prompts: 'none',
-      agent_limits: definition.agent ?? null,
+      agent_limits: limits,
+      ...(definition.kind === 'generation'
+        ? { candidate_execution: execution ?? null }
+        : {}),
       grading: 'outcome-suite.v1',
     };
   }
   const plannedTrials = caseDefinitions.reduce(
     (total, definition) => total + definition.planned_trials,
     0,
+  );
+  const casesComplete = Object.values(casesById).every(
+    (value) =>
+      value.attempts.length === value.planned &&
+      value.attempts.every((trial) => trial.complete),
   );
   const mutationUnavailable = {};
   const unavailableReasons = {};
@@ -329,6 +470,15 @@ function summarizeOutcomeTrials(
       mutationUnavailable[trial.mutation_eligibility] =
         (mutationUnavailable[trial.mutation_eligibility] ?? 0) + 1;
   }
+  const refusalMetric = metric(
+    attempts,
+    (trial) => trial.case_id === refusalCaseId,
+    (trial) => trial.passed,
+  );
+  const modeledHumanInterventions = totalMetric(
+    attempts,
+    'human_interventions',
+  );
   const metrics = {
     usable_test: metric(
       attempts,
@@ -345,16 +495,8 @@ function summarizeOutcomeTrials(
       (trial) => trial.case_id === repairCaseId,
       (trial) => trial.passed,
     ),
-    product_defect_refusal: metric(
-      attempts,
-      (trial) => trial.case_id === refusalCaseId,
-      (trial) => trial.passed,
-    ),
-    classification_correct: metric(
-      attempts,
-      (trial) => trial.case_id === refusalCaseId,
-      (trial) => trial.passed,
-    ),
+    product_defect_refusal: refusalMetric,
+    classification_correct: refusalMetric,
     locator_policy: metric(
       attempts,
       (trial) => trial.locator_policy != null,
@@ -368,6 +510,7 @@ function summarizeOutcomeTrials(
     behavior_mutation_coverage: { covered: 0, submitted: 0, rate: null },
     behavior_mutation_kill: { killed: 0, survived: 0, rate: null },
     assertion_sensitivity_kill: { killed: 0, survived: 0, rate: null },
+    mutation_telemetry: { status: 'unavailable', reason: 'not-collected' },
     mutation_unavailable: mutationUnavailable,
     unavailable_reasons: unavailableReasons,
     target_unavailable: attempts.filter((trial) =>
@@ -393,7 +536,7 @@ function summarizeOutcomeTrials(
         trial.case_id === repairCaseId &&
         trial.healer_attempts == null,
     ).length,
-    cost_usd: totalMetric(attempts, 'cost_usd'),
+    cost_usd: costMetric(attempts),
     duration_ms: totalMetric(attempts, 'duration_ms'),
     setup_duration_ms: totalMetric(attempts, 'setup_duration_ms'),
     elapsed_ms: totalMetric(attempts, 'elapsed_ms'),
@@ -401,7 +544,9 @@ function summarizeOutcomeTrials(
       attempts.filter((trial) => trial.first_try != null),
       'execution_elapsed_ms',
     ),
-    human_interventions: totalMetric(attempts, 'human_interventions'),
+    human_interventions: modeledHumanInterventions,
+    modeled_human_interventions: modeledHumanInterventions,
+    human_interventions_basis: 'modeled-workflow-checkpoints',
     tokens: Object.fromEntries(
       [
         'input_tokens',
@@ -419,20 +564,54 @@ function summarizeOutcomeTrials(
   };
   return {
     schema_version: 'outcome-suite.v1',
-    status:
-      completedTrials.length === plannedTrials &&
-      attempts.length === plannedTrials &&
-      profileCompatible
-        ? 'complete'
-        : 'incomplete',
+    status: casesComplete && profileCompatible ? 'complete' : 'incomplete',
     testgen_revision: revision,
     dataset_sha256: digest,
     profile_sha256: sha256(JSON.stringify(profiles)),
     profiles,
     planned_trials: plannedTrials,
     completed_trials: completedTrials.length,
+    critical_failures: allAttempts.flatMap((trial) => {
+      const reasons = [
+        ...new Set([trial.error, ...(trial.failure_reasons ?? [])]),
+      ].filter((reason) => criticalFailureReasons.has(reason));
+      return reasons.length === 0
+        ? []
+        : [{ case_id: trial.case_id, trial_id: trial.trial_id, reasons }];
+    }),
     cases: casesById,
     metrics,
+    all_attempts: {
+      attempted_trials: allAttempts.length,
+      completed_trials: allAttempts.filter((trial) => trial.complete).length,
+      incomplete_trials: allAttempts.filter((trial) => !trial.complete).length,
+      cost_usd: costMetric(allAttempts),
+      cases: Object.fromEntries(
+        caseDefinitions.map((definition) => [
+          definition.case_id,
+          {
+            planned: definition.planned_trials,
+            attempts: allAttempts.filter(
+              (trial) => trial.case_id === definition.case_id,
+            ),
+          },
+        ]),
+      ),
+      unavailable_reasons: allAttempts.reduce((reasons, trial) => {
+        if (trial.error != null)
+          reasons[trial.error] = (reasons[trial.error] ?? 0) + 1;
+        return reasons;
+      }, {}),
+    },
+    replacements: replacements.map((record) => ({
+      ...record,
+      excluded_attempt: allAttempts.find(
+        (trial) => trial.trial_id === record.excluded_trial_id,
+      ),
+      replacement_attempt: allAttempts.find(
+        (trial) => trial.trial_id === record.replacement_trial_id,
+      ),
+    })),
   };
 }
 
@@ -445,6 +624,8 @@ function compareOutcomeSummaries(baseline, current) {
     baseline.planned_trials !== current.planned_trials
   )
     return { status: 'incompatible' };
+  if (current.critical_failures?.length > 0)
+    return { status: 'regressed', regressions: ['critical-integrity'] };
   const thresholds = baseline.thresholds;
   if (
     thresholds == null ||
@@ -489,10 +670,23 @@ function compareOutcomeSummaries(baseline, current) {
 
 function main() {
   const args = process.argv.slice(2);
-  if (args.length > 2 || (args.length === 2 && args[0] !== '--baseline'))
-    throw new Error('usage: score-outcomes.cjs [--baseline <file>]');
+  const options = {};
+  for (let index = 0; index < args.length; index += 2) {
+    const option = args[index];
+    if (
+      !['--baseline', '--results-dir', '--replacements'].includes(option) ||
+      options[option] != null ||
+      !args[index + 1] ||
+      args[index + 1].startsWith('--')
+    )
+      throw new Error(
+        'usage: score-outcomes.cjs [--baseline <file>] [--results-dir <directory>] [--replacements <file>]',
+      );
+    options[option] = path.resolve(args[index + 1]);
+  }
   const caseDefinitions = definitions();
-  const results = path.join(root, 'evals', 'outcomes', 'results');
+  const results =
+    options['--results-dir'] ?? path.join(root, 'evals', 'outcomes', 'results');
   const attempts = existsSync(results)
     ? readdirSync(results, { withFileTypes: true })
         .filter(
@@ -516,14 +710,18 @@ function main() {
     attempts,
     datasetDigest(),
     revision,
+    options['--replacements'] == null
+      ? []
+      : readJson(options['--replacements']),
   );
   const comparison =
-    args.length === 2
-      ? compareOutcomeSummaries(readJson(path.resolve(args[1])), summary)
+    options['--baseline'] != null
+      ? compareOutcomeSummaries(readJson(options['--baseline']), summary)
       : null;
   process.stdout.write(`${JSON.stringify({ summary, comparison }, null, 2)}\n`);
   if (
     summary.status !== 'complete' ||
+    summary.critical_failures.length > 0 ||
     (comparison && comparison.status !== 'passed')
   )
     process.exitCode = 1;

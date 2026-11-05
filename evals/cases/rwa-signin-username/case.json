@@ -1,0 +1,28 @@
+{
+  "schema_version": "outcome-eval-case.v1",
+  "case_id": "rwa-signin-username",
+  "kind": "generation",
+  "target_id": "cypress-realworld-app",
+  "scenario_ref": "signin-requires-username",
+  "scenario": "On the public sign-in page, enter an otherwise-valid synthetic password, then clear and blur Username. Verify that Username is required is visible and Sign In is disabled. Do not submit credentials or sign in.",
+  "spec_path": "tests/playwright/signin-username.spec.ts",
+  "criteria": [
+    {
+      "id": "criterion-1",
+      "outcome": "With an otherwise-valid password and an empty blurred Username, the public form shows Username is required and disables Sign In."
+    }
+  ],
+  "checkpoint": "candidate-before-execution",
+  "planned_trials": 1,
+  "agent": {
+    "name": "playwright-testgen:playwright-test-author",
+    "model": "claude-sonnet-5-5",
+    "timeout_ms": 600000,
+    "max_turns": 30,
+    "max_budget_usd": 2
+  },
+  "expected": {
+    "mutation": "killed",
+    "mutation_id": "signin-username-required"
+  }
+}

@@ -1,4 +1,4 @@
-const { spawn, spawnSync } = require('node:child_process');
+const { runBounded } = require('./process.cjs');
 const {
   chmodSync,
   copyFileSync,
@@ -27,7 +27,7 @@ const {
   isInside,
   portable,
 } = require('./artifact-validation-common.cjs');
-const { MutationCheckError } = require('./mutation-check-error.cjs');
+const { MutationCheckError, fail } = require('./mutation-check-error.cjs');
 const { loadHealerInput } = require('./validate-healer-input.cjs');
 const {
   captureSnapshot,
@@ -37,10 +37,6 @@ const {
 const { comparablePath } = require('../hooks/run-policy.cjs');
 
 const MAX_RUNNER_OUTPUT = 8 * 1024;
-
-function fail(code) {
-  throw new MutationCheckError(code);
-}
 
 function errorCode(error) {
   return error instanceof MutationCheckError ? error.code : 'internal-error';
@@ -145,14 +141,14 @@ function copyOverlay(repository, worktree, entries) {
 }
 
 function parseRunnerOutput(result) {
-  if (result.error?.code === 'ETIMEDOUT') fail('runner-timeout');
-  if (result.error?.code === 'ECANCELED') fail('runner-cancelled');
-  if (result.error != null || result.status !== 0) fail('runner-failed');
-  if (Buffer.byteLength(result.stdout, 'utf8') > MAX_RUNNER_OUTPUT)
-    fail('runner-output-too-large');
+  if (result.timed_out) fail('runner-timeout');
+  if (result.cancelled) fail('runner-cancelled');
+  if (result.output_overflow) fail('runner-output-too-large');
+  if (result.tree_cleanup_failed) fail('runner-process-cleanup-failed');
+  if (result.spawn_error != null || result.status !== 0) fail('runner-failed');
   let output;
   try {
-    output = JSON.parse(result.stdout.trim());
+    output = JSON.parse(result.output.trim());
   } catch {
     fail('runner-output-invalid');
   }
@@ -210,77 +206,6 @@ function runnerDiagnostics(output) {
   };
 }
 
-function stopRunnerTree(child) {
-  if (child.pid == null) return;
-  if (process.platform === 'win32') {
-    const stopped = spawnSync(
-      'taskkill',
-      ['/pid', String(child.pid), '/T', '/F'],
-      { stdio: 'ignore', timeout: 5000, windowsHide: true },
-    );
-    if (stopped.error == null && stopped.status === 0) return;
-  } else {
-    try {
-      process.kill(-child.pid, 'SIGKILL');
-      return;
-    } catch {
-      // Fall back to the direct process when its group has already exited.
-    }
-  }
-  try {
-    child.kill('SIGKILL');
-  } catch {
-    // The process may have exited between the timeout and termination.
-  }
-}
-
-function runAdapterProcess(runner, args, options) {
-  return new Promise((resolve) => {
-    const { signal, timeout, ...spawnOptions } = options;
-    const child = spawn(process.execPath, [runner, ...args], {
-      ...spawnOptions,
-      detached: process.platform !== 'win32',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-    const chunks = [];
-    let bytes = 0;
-    let failure = null;
-    let settled = false;
-    let stopTimer = null;
-    const finish = (status, error = failure) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      clearTimeout(stopTimer);
-      signal?.removeEventListener('abort', abort);
-      resolve({
-        error,
-        status,
-        stdout: Buffer.concat(chunks).toString('utf8'),
-      });
-    };
-    const stop = (code) => {
-      if (settled || failure != null) return;
-      failure = { code };
-      stopRunnerTree(child);
-      stopTimer = setTimeout(() => finish(null), 5000);
-    };
-    const abort = () => stop('ECANCELED');
-    const timer = setTimeout(() => stop('ETIMEDOUT'), timeout);
-    signal?.addEventListener('abort', abort, { once: true });
-    if (signal?.aborted) abort();
-    child.stdout.on('data', (chunk) => {
-      bytes += chunk.length;
-      if (bytes <= MAX_RUNNER_OUTPUT) chunks.push(chunk);
-      if (bytes > MAX_RUNNER_OUTPUT && failure == null) {
-        stop('ENOBUFS');
-      }
-    });
-    child.once('error', (error) => finish(null, error));
-    child.once('close', (status) => finish(status));
-  });
-}
-
 async function runAdapter({
   worktree,
   parsed,
@@ -291,9 +216,10 @@ async function runAdapter({
   signal,
 }) {
   const runner = path.join(worktree, parsed.runner.relative);
-  const result = await runAdapterProcess(
-    runner,
+  const result = await runBounded(
+    process.execPath,
     [
+      runner,
       '--phase',
       phase,
       '--spec',
@@ -313,12 +239,18 @@ async function runAdapter({
         ),
       },
       signal,
-      timeout: mutation.timeout_ms,
-      windowsHide: true,
+      timeout_ms: mutation.timeout_ms,
+      max_output_bytes: MAX_RUNNER_OUTPUT,
+      verify_process_tree: true,
     },
   );
-  if (result.error?.code === 'ENOBUFS') fail('runner-output-too-large');
-  return parseRunnerOutput(result);
+  try {
+    return parseRunnerOutput(result);
+  } catch (error) {
+    if (result.tree_cleanup_failed)
+      error.cleanup_error = 'runner-process-cleanup-failed';
+    throw error;
+  }
 }
 
 function changedPaths(before, after) {
@@ -493,6 +425,7 @@ async function verifyMutation({
   let diagnostics = {};
   let recoveryOwned = false;
   let recoveryRecord = null;
+  let runnerCleanupError = null;
   try {
     temporaryRoot = mkdtempSync(path.join(tmpdir(), 'testgen-mutant-'));
     worktree = path.join(temporaryRoot, 'checkout');
@@ -580,6 +513,7 @@ async function verifyMutation({
       isolation: 'disposable-worktree',
     };
   } catch (error) {
+    runnerCleanupError = error.cleanup_error ?? null;
     result = {
       status: 'verification-error',
       ...base,
@@ -593,6 +527,7 @@ async function verifyMutation({
     let cleanup = 'failed';
     let cleanupError = null;
     try {
+      if (runnerCleanupError != null) fail(runnerCleanupError);
       cleanupWorktree(repository, temporaryRoot, worktree);
       if (recoveryOwned) removeRecoveryRecord(policy);
       cleanup = 'removed';

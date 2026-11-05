@@ -170,7 +170,10 @@ function sourceFingerprints(root, paths) {
     let canonical;
     let size;
     try {
-      if (!lstatSync(absolute).isFile()) fail('profile-source-invalid');
+      const metadata = lstatSync(absolute);
+      if (!metadata.isFile()) fail('profile-source-invalid');
+      if (metadata.nlink !== 1)
+        fail('profile-source-invalid', 'source-excluded');
       canonical = realpathSync(absolute);
       size = statSync(canonical).size;
     } catch (error) {
@@ -358,13 +361,15 @@ function validFactsShape(facts) {
   );
 }
 
-function validNames(values, maximum) {
+function validNames(values, maximum = Infinity, maxLength = 100) {
   return (
     Array.isArray(values) &&
     values.length <= maximum &&
     values.every(
       (value) =>
-        typeof value === 'string' && value.length > 0 && value.length <= 100,
+        typeof value === 'string' &&
+        value.length > 0 &&
+        value.length <= maxLength,
     )
   );
 }
@@ -390,11 +395,11 @@ function validEvidenceEntries(
 
 function validLayout(layout, evidence) {
   return (
-    validNames(layout.tests, 8) &&
+    validNames(layout.tests, 8, 240) &&
     layout.tests.every(evidence) &&
-    validNames(layout.helpers, 8) &&
+    validNames(layout.helpers, 8, 240) &&
     layout.helpers.every(evidence) &&
-    validNames(layout.fixtures, 8) &&
+    validNames(layout.fixtures, 8, 240) &&
     layout.fixtures.every(evidence) &&
     layout.naming != null &&
     typeof layout.naming === 'object' &&
@@ -470,8 +475,8 @@ function validProfileFacts(profile) {
       frameworks,
       evidence,
     ) ||
-    !validNames(facts.scripts.lint, 32) ||
-    !validNames(facts.scripts.format, 32) ||
+    !validNames(facts.scripts.lint) ||
+    !validNames(facts.scripts.format) ||
     !validLayout(facts.layout, evidence) ||
     !validDetectedEntries(
       facts.component_libraries,
@@ -490,7 +495,7 @@ function validTestIdFacts(testId, evidence) {
     !['detected', 'ambiguous', 'none-found', 'unknown'].includes(
       testId.status,
     ) ||
-    !validNames(testId.evidence, 8) ||
+    !validNames(testId.evidence, 8, 240) ||
     !testId.evidence.every(evidence)
   )
     return false;
@@ -827,9 +832,5 @@ function errorCode(error) {
 
 if (require.main === module) main();
 module.exports = {
-  MAX_PROFILE_BYTES,
-  PROFILE_PATH,
-  createProfile,
   validateProfile,
-  validateStatePath,
 };

@@ -1,9 +1,9 @@
 const { execFile, spawn, spawnSync } = require('node:child_process');
 const { readFileSync, readdirSync } = require('node:fs');
 const path = require('node:path');
-const { windowsProcessTree } = require('../windows-process-tree.cjs');
+const { windowsProcessTree } = require('./windows-process-tree.cjs');
 
-const repositoryRoot = path.resolve(__dirname, '../..');
+const repositoryRoot = path.resolve(__dirname, '..');
 
 const MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
 
@@ -297,7 +297,7 @@ function runBounded(commandName, args, options) {
     }
     child.stdout.on('data', (chunk) => {
       outputBytes += chunk.length;
-      if (outputBytes > MAX_OUTPUT_BYTES) {
+      if (outputBytes > (options.max_output_bytes ?? MAX_OUTPUT_BYTES)) {
         overflow = true;
         terminate();
         return;
@@ -307,7 +307,7 @@ function runBounded(commandName, args, options) {
     if (options.capture_stderr === true)
       child.stderr.on('data', (chunk) => {
         outputBytes += chunk.length;
-        if (outputBytes > MAX_OUTPUT_BYTES) {
+        if (outputBytes > (options.max_output_bytes ?? MAX_OUTPUT_BYTES)) {
           overflow = true;
           terminate();
           return;
@@ -351,5 +351,4 @@ module.exports = {
   lifecycleCancellation,
   runBounded,
   stopProcessTree,
-  windowsProcessTree,
 };

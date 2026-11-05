@@ -5,6 +5,7 @@ node_modules/
 evals/native/results/
 evals/outcomes/results/
 evals/setup/results/
+evals/capabilities/results/
 .claude/settings.local.json
 *.log
 .env

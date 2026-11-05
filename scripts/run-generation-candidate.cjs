@@ -11,10 +11,10 @@ const {
 } = require('node:fs');
 const { tmpdir } = require('node:os');
 const path = require('node:path');
-const { exactPlaywrightFilter } = require('../hooks/run-policy.cjs');
-const { command, runBounded } = require('./eval/process.cjs');
+const { command, lifecycleCancellation } = require('./process.cjs');
 const {
   cleanupEvaluation,
+  runApprovedSpec,
   hashFile,
   startServer,
 } = require('./eval/runtime.cjs');
@@ -31,45 +31,6 @@ const resultsRoot = path.join(root, 'evals', 'outcomes', 'results');
 
 function readJson(filename) {
   return JSON.parse(readFileSync(filename, 'utf8'));
-}
-
-function allTests(suites) {
-  return suites.flatMap((suite) => [
-    ...(suite.specs ?? []).flatMap((spec) => spec.tests ?? []),
-    ...allTests(suite.suites ?? []),
-  ]);
-}
-
-function scorePlaywrightReport(report) {
-  if (
-    !Array.isArray(report?.errors) ||
-    report.errors.length !== 0 ||
-    !Array.isArray(report.suites)
-  )
-    return 'error';
-  const tests = allTests(report.suites);
-  if (tests.length !== 1 || tests[0].results?.length !== 1) return 'error';
-  const status = tests[0].results[0].status;
-  const stats = report.stats ?? {};
-  if (
-    status === 'passed' &&
-    tests[0].status === 'expected' &&
-    stats.expected === 1 &&
-    stats.unexpected === 0 &&
-    stats.skipped === 0 &&
-    stats.flaky === 0
-  )
-    return 'pass';
-  if (
-    ['failed', 'timedOut'].includes(status) &&
-    tests[0].status === 'unexpected' &&
-    stats.expected === 0 &&
-    stats.unexpected === 1 &&
-    stats.skipped === 0 &&
-    stats.flaky === 0
-  )
-    return 'fail';
-  return 'error';
 }
 
 function approvedTrial(args) {
@@ -139,6 +100,12 @@ async function executeCandidate(approval, signal, options = {}) {
     first_try: null,
     criterion_review: 'pending',
     mutation_sensitivity: 'unavailable',
+    runtime: {
+      node: process.versions.node,
+      npm: null,
+      playwright: null,
+      platform: process.platform,
+    },
   };
   try {
     const source = path.join(
@@ -171,6 +138,15 @@ async function executeCandidate(approval, signal, options = {}) {
     const npmCli = process.env.npm_execpath;
     if (typeof npmCli !== 'string' || !existsSync(npmCli))
       throw new Error('npm-unavailable');
+    result.runtime.npm = await command(
+      process.execPath,
+      [npmCli, '--version'],
+      {
+        cwd: repository,
+        error: 'npm-unavailable',
+        signal,
+      },
+    );
     await command(process.execPath, [npmCli, 'ci'], {
       cwd: repository,
       error: 'target-dependencies-unavailable',
@@ -194,6 +170,7 @@ async function executeCandidate(approval, signal, options = {}) {
         ? packageJson.bin
         : packageJson.bin.playwright,
     );
+    result.runtime.playwright = packageJson.version;
     await command(process.execPath, [playwrightCli, 'install', 'chromium'], {
       cwd: repository,
       error: 'runner-browser-unavailable',
@@ -205,49 +182,18 @@ async function executeCandidate(approval, signal, options = {}) {
       signal,
     );
     const reportPath = path.join(state.temporaryRoot, 'playwright-report.json');
-    const run = await runBounded(
-      process.execPath,
-      [
-        playwrightCli,
-        'test',
-        exactPlaywrightFilter(path.join(repository, definition.spec_path)),
-        '--reporter=json',
-        '--workers=1',
-        '--retries=0',
-      ],
-      {
-        cwd: repository,
-        env: {
-          ...process.env,
-          TESTGEN_BASE_URL: descriptor.start.origin,
-          PLAYWRIGHT_JSON_OUTPUT_FILE: reportPath,
-        },
-        signal,
-        timeout_ms: 120_000,
-        verify_process_tree: true,
-      },
+    const { outcome } = await runApprovedSpec(
+      repository,
+      playwrightCli,
+      descriptor.start.origin,
+      definition.spec_path,
+      reportPath,
+      signal,
     );
-    if (
-      run.tree_cleanup_failed ||
-      run.timed_out ||
-      run.cancelled ||
-      run.output_overflow ||
-      run.spawn_error != null ||
-      !existsSync(reportPath)
-    )
-      throw new Error('playwright-run-failed');
-    const report = readJson(reportPath);
     copyFileSync(
       reportPath,
       path.join(trialDirectory, 'playwright-report.json'),
     );
-    const outcome = scorePlaywrightReport(report);
-    if (
-      outcome === 'error' ||
-      (outcome === 'pass' && run.status !== 0) ||
-      (outcome === 'fail' && run.status === 0)
-    )
-      throw new Error('playwright-report-invalid');
     if (
       hashFile(path.join(repository, definition.spec_path)) !== before.spec ||
       hashFile(path.join(repository, 'public', 'app.js')) !== before.app ||
@@ -276,25 +222,19 @@ async function executeCandidate(approval, signal, options = {}) {
 
 async function main() {
   const approval = approvedTrial(process.argv.slice(2));
-  const controller = new AbortController();
-  const cancel = () => controller.abort();
-  process.once('SIGINT', cancel);
-  process.once('SIGTERM', cancel);
+  const lifecycle = lifecycleCancellation();
   try {
-    const result = await executeCandidate(approval, controller.signal);
+    const result = await executeCandidate(approval, lifecycle.signal);
     process.stdout.write(`${JSON.stringify(result)}\n`);
     if (result.status !== 'complete') process.exitCode = 1;
   } finally {
-    process.off('SIGINT', cancel);
-    process.off('SIGTERM', cancel);
+    lifecycle.dispose();
   }
 }
 
 if (require.main === module) void main();
 
 module.exports = {
-  allTests,
   approvedTrial,
   executeCandidate,
-  scorePlaywrightReport,
 };

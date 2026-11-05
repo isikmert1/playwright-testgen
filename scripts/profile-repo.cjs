@@ -141,7 +141,8 @@ function ownedFile(root, relative) {
   const absolute = path.join(root, relative);
   const stat = lstatSync(absolute);
   const resolved = realpathSync(absolute);
-  if (!stat.isFile() || !inside(root, resolved)) return null;
+  if (!stat.isFile() || stat.nlink !== 1 || !inside(root, resolved))
+    return null;
   const resolvedRelative = path.relative(root, resolved).replaceAll('\\', '/');
   if (excluded(resolvedRelative) || nestedRoot(root, resolvedRelative) != null)
     return null;
@@ -374,7 +375,7 @@ function configurationObjectEnd(tokens, open) {
 function configuredTestIds(text) {
   const tokens = configurationTokens(text);
   const open = exportedObjectStart(tokens);
-  if (open < 0) return { values: new Set(), dynamic: false };
+  if (open < 0) return { values: new Set(), dynamic: true };
   const close = configurationObjectEnd(tokens, open);
   if (close < 0) return { values: new Set(), dynamic: true };
   const configuration = tokens.slice(open, close + 1);
@@ -409,8 +410,7 @@ function configuredTestIds(text) {
       if (useCount > 1 || configuration[index + 2] !== '{') dynamic = true;
     }
     if (
-      useDepth === 2 &&
-      propertyDepth >= useDepth &&
+      (propertyDepth === 1 || (useDepth === 2 && propertyDepth >= useDepth)) &&
       token === '.' &&
       configuration[index + 1] === '.' &&
       configuration[index + 2] === '.'
@@ -773,7 +773,6 @@ function main() {
 
 if (require.main === module) main();
 module.exports = {
-  DEFAULT_LIMITS,
   excluded,
   hasDefaultConfig,
   inspectionSource,

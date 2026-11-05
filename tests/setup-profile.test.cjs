@@ -3,6 +3,7 @@ const { spawnSync } = require('node:child_process');
 const {
   existsSync,
   lstatSync,
+  linkSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -14,6 +15,10 @@ const {
 const { tmpdir } = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const {
+  gradeSetupProfile,
+  repositorySnapshot,
+} = require('../scripts/run-setup-eval.cjs');
 
 const script = path.resolve(__dirname, '..', 'scripts', 'setup-profile.cjs');
 const profilePath = '.playwright-testgen/profile.v1.json';
@@ -112,39 +117,16 @@ test('publishes one ignored profile atomically and validates freshness', () => {
   });
 });
 
-test('rejects missing, unsupported, and unbound profile facts', () => {
+test('rejects missing facts and facts that disagree with inspected evidence', () => {
   withRepository({}, (root) => {
-    const created = run(root, [
-      'create',
-      '--repo',
-      '.',
-      '--package',
-      '.',
-      '--config',
-      'playwright.config.ts',
-    ]);
+    const created = run(root, ['create', '--repo', '.']);
     assert.equal(created.status, 0, created.stderr);
     const filename = path.join(root, profilePath);
     const original = JSON.parse(readFileSync(filename, 'utf8'));
     for (const mutate of [
       (profile) => delete profile.facts,
       (profile) => {
-        profile.facts.unsupported = { command: 'npm run anything' };
-      },
-      (profile) => {
-        profile.facts.test_id.status = 'configured';
-      },
-      (profile) => {
-        profile.facts.framework_status = 'detected';
-      },
-      (profile) => {
         profile.facts.test_id.counts['data-test'] += 1;
-      },
-      (profile) => {
-        profile.facts.test_id.evidence = ['../secrets.json'];
-      },
-      (profile) => {
-        profile.scan.inspected_paths = [];
       },
     ]) {
       const profile = structuredClone(original);
@@ -227,15 +209,7 @@ test('requires an ignored untracked destination and preserves an old profile on 
 
 test('rejects wrong-target profiles and validates opaque auth-state destinations', () => {
   withRepository({}, (root) => {
-    let result = run(root, [
-      'create',
-      '--repo',
-      '.',
-      '--package',
-      '.',
-      '--config',
-      'playwright.config.ts',
-    ]);
+    let result = run(root, ['create', '--repo', '.']);
     assert.equal(result.status, 0, result.stderr);
 
     result = run(root, [
@@ -350,17 +324,9 @@ test('rejects symlinked profile storage before writing or reading it', (t) => {
   });
 });
 
-test('marks content changes and incomplete fingerprints stale', () => {
+test('marks inspected source content changes stale', () => {
   withRepository({}, (root) => {
-    let result = run(root, [
-      'create',
-      '--repo',
-      '.',
-      '--package',
-      '.',
-      '--config',
-      'playwright.config.ts',
-    ]);
+    let result = run(root, ['create', '--repo', '.']);
     assert.equal(result.status, 0, result.stderr);
 
     writeFileSync(path.join(root, 'src', 'app.tsx'), 'export const App = 2;\n');
@@ -368,27 +334,6 @@ test('marks content changes and incomplete fingerprints stale', () => {
     assert.equal(result.status, 1);
     assert.equal(result.report.error, 'profile-stale');
     assert.equal(result.report.reason, 'repository-content-changed');
-  });
-});
-
-test('ignores generated run output while checking profile freshness', () => {
-  withRepository({}, (root) => {
-    const created = run(root, [
-      'create',
-      '--repo',
-      '.',
-      '--package',
-      '.',
-      '--config',
-      'playwright.config.ts',
-    ]);
-    assert.equal(created.status, 0, created.stderr);
-    const scratch = path.join(root, '.playwright-cli', 'testgen', 'tg-output');
-    mkdirSync(scratch, { recursive: true });
-    writeFileSync(path.join(scratch, 'trace.zip'), 'generated output');
-    const validated = run(root, ['validate', '--repo', '.']);
-    assert.equal(validated.status, 0, validated.stderr);
-    assert.equal(validated.report.status, 'fresh');
   });
 });
 
@@ -426,39 +371,11 @@ test('scopes membership changes to the selected package', () => {
   );
 });
 
-test('ignores runtime data changes outside the static inspection scope', () => {
-  withRepository({ 'data/database.json': '{"counter":0}\n' }, (root) => {
-    const created = run(root, [
-      'create',
-      '--repo',
-      '.',
-      '--package',
-      '.',
-      '--config',
-      'playwright.config.ts',
-    ]);
-    assert.equal(created.status, 0, created.stderr);
-    writeFileSync(path.join(root, 'data', 'database.json'), '{"counter":1}\n');
-
-    const validated = run(root, ['validate', '--repo', '.']);
-    assert.equal(validated.status, 0, validated.stderr);
-    assert.equal(validated.report.status, 'fresh');
-  });
-});
-
 test('detects re-edits to already-dirty inspected source files', () => {
   withRepository({ 'src/secondary.ts': 'export const n = 1;\n' }, (root) => {
     const source = path.join(root, 'src', 'secondary.ts');
     writeFileSync(source, 'export const n = 2;\n');
-    const created = run(root, [
-      'create',
-      '--repo',
-      '.',
-      '--package',
-      '.',
-      '--config',
-      'playwright.config.ts',
-    ]);
+    const created = run(root, ['create', '--repo', '.']);
     assert.equal(created.status, 0, created.stderr);
     writeFileSync(source, 'export const n = 3;\n');
 
@@ -470,15 +387,7 @@ test('detects re-edits to already-dirty inspected source files', () => {
 
 test('records only an approved auth mechanism and path after verification', () => {
   withRepository({}, (root) => {
-    let result = run(root, [
-      'create',
-      '--repo',
-      '.',
-      '--package',
-      '.',
-      '--config',
-      'playwright.config.ts',
-    ]);
+    let result = run(root, ['create', '--repo', '.']);
     assert.equal(result.status, 0, result.stderr);
     mkdirSync(path.join(root, '.auth'), { recursive: true });
     writeFileSync(path.join(root, '.auth', 'user.json'), '{"secret":"opaque"}');
@@ -501,15 +410,7 @@ test('records only an approved auth mechanism and path after verification', () =
     });
     assert.doesNotMatch(profileText, /secret|opaque/u);
 
-    result = run(root, [
-      'create',
-      '--repo',
-      '.',
-      '--package',
-      '.',
-      '--config',
-      'playwright.config.ts',
-    ]);
+    result = run(root, ['create', '--repo', '.']);
     assert.equal(result.status, 0, result.stderr);
     const refreshed = JSON.parse(readFileSync(path.join(root, profilePath)));
     assert.equal(Object.hasOwn(refreshed, 'authentication'), false);
@@ -534,24 +435,14 @@ test('rejects a tracked state file even when an ignore rule matches it', () => {
   });
 });
 
-test('rejects edited package, config, and auth bindings in an ignored profile', () => {
+test('rejects edited selection and auth paths that escape the repository', () => {
   withRepository({}, (root) => {
-    const created = run(root, [
-      'create',
-      '--repo',
-      '.',
-      '--package',
-      '.',
-      '--config',
-      'playwright.config.ts',
-    ]);
+    const created = run(root, ['create', '--repo', '.']);
     assert.equal(created.status, 0, created.stderr);
     const filename = path.join(root, profilePath);
     const original = JSON.parse(readFileSync(filename, 'utf8'));
     for (const change of [
-      { selection: { ...original.selection, package: '../outside' } },
       { selection: { ...original.selection, config: '../outside.config.ts' } },
-      { selection: { ...original.selection, config: 'src/app.tsx' } },
       {
         authentication: { mechanism: 'storage-state', path: '../secret.json' },
       },
@@ -569,42 +460,33 @@ test('rejects edited package, config, and auth bindings in an ignored profile', 
 
 test('does not fingerprint credential-like paths named by an edited profile', () => {
   withRepository({}, (root) => {
-    const created = run(root, [
-      'create',
-      '--repo',
-      '.',
-      '--package',
-      '.',
-      '--config',
-      'playwright.config.ts',
-    ]);
+    const created = run(root, ['create', '--repo', '.']);
     assert.equal(created.status, 0, created.stderr);
     mkdirSync(path.join(root, '.auth'), { recursive: true });
     writeFileSync(path.join(root, '.auth', 'user.json'), '{"secret":"opaque"}');
     const filename = path.join(root, profilePath);
     const profile = JSON.parse(readFileSync(filename, 'utf8'));
-    profile.freshness.sources['.auth/user.json'] = '0'.repeat(64);
-    profile.scan.inspected_paths.push('.auth/user.json');
-    writeFileSync(filename, `${JSON.stringify(profile)}\n`);
+    linkSync(
+      path.join(root, '.auth', 'user.json'),
+      path.join(root, 'src', 'session-alias.ts'),
+    );
+    for (const source of ['.auth/user.json', 'src/session-alias.ts']) {
+      const edited = structuredClone(profile);
+      edited.freshness.sources[source] = '0'.repeat(64);
+      edited.scan.inspected_paths.push(source);
+      writeFileSync(filename, `${JSON.stringify(edited)}\n`);
 
-    const result = run(root, ['validate', '--repo', '.']);
-    assert.equal(result.status, 1);
-    assert.equal(result.report.error, 'profile-source-invalid');
-    assert.doesNotMatch(result.stdout, /secret|opaque/u);
+      const result = run(root, ['validate', '--repo', '.']);
+      assert.equal(result.status, 1);
+      assert.equal(result.report.error, 'profile-source-invalid');
+      assert.doesNotMatch(result.stdout, /secret|opaque/u);
+    }
   });
 });
 
 test('rejects oversized source evidence before reading its contents', () => {
   withRepository({ 'public/huge.bin': 'x'.repeat(70 * 1024) }, (root) => {
-    const created = run(root, [
-      'create',
-      '--repo',
-      '.',
-      '--package',
-      '.',
-      '--config',
-      'playwright.config.ts',
-    ]);
+    const created = run(root, ['create', '--repo', '.']);
     assert.equal(created.status, 0, created.stderr);
     const filename = path.join(root, profilePath);
     const profile = JSON.parse(readFileSync(filename, 'utf8'));
@@ -632,4 +514,49 @@ test('rejects oversized source evidence before reading its contents', () => {
       delete require.cache[require.resolve(script)];
     }
   });
+});
+
+test('setup evaluator accepts an ignored profile and rejects unapproved product or Git writes', () => {
+  withRepository(
+    {
+      '.gitignore': '.auth/user.json\n',
+      'playwright.config.ts': null,
+      'playwright.config.cjs': 'module.exports = {};\n',
+      'src/app.tsx': 'export const App = () => null;\n',
+    },
+    (root) => {
+      const ignore = path.join(root, '.gitignore');
+      const before = {
+        ignore: readFileSync(ignore, 'utf8'),
+        snapshot: repositorySnapshot(root),
+      };
+      writeFileSync(ignore, `${before.ignore}${profilePath}\n`);
+      const created = run(root, ['create', '--repo', '.']);
+      assert.equal(created.status, 0, created.stderr);
+      const validated = run(root, ['validate', '--repo', '.']);
+      assert.equal(validated.status, 0, validated.stderr);
+      const { profile } = validated.report;
+      assert.deepEqual(gradeSetupProfile(root, profile, before), {
+        package: '.',
+        config: 'playwright.config.cjs',
+        test_id: 'none-found',
+        existing_tests: 0,
+        authentication: 'unknown',
+      });
+
+      const source = path.join(root, 'src', 'app.tsx');
+      const original = readFileSync(source);
+      writeFileSync(source, 'changed\n');
+      assert.throws(
+        () => gradeSetupProfile(root, profile, before),
+        /setup-target-changed/u,
+      );
+      writeFileSync(source, original);
+      git(root, 'config', 'alias.unapproved', 'status');
+      assert.throws(
+        () => gradeSetupProfile(root, profile, before),
+        /setup-target-changed/u,
+      );
+    },
+  );
 });

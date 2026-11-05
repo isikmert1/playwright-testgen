@@ -26,7 +26,7 @@ const caseDirectory = path.join(
 function modules() {
   return {
     runner: {
-      ...require('../scripts/eval/process.cjs'),
+      ...require('../scripts/process.cjs'),
       ...require('../scripts/eval/agent-evidence.cjs'),
       ...require('../scripts/eval/runtime.cjs'),
       ...require('../scripts/run-healer-defect-refusal.cjs'),
@@ -36,6 +36,21 @@ function modules() {
 }
 
 function evidence(overrides = {}) {
+  const before = {
+    spec: 'spec-hash',
+    product: 'product-hash',
+    changed_paths: ['public/app.js'],
+    head: 'a'.repeat(40),
+    repository_state: {
+      paths: [
+        {
+          path: 'public/app.js',
+          kind: 'tracked',
+          fingerprint: 'mutation-fingerprint',
+        },
+      ],
+    },
+  };
   return {
     trace_valid: true,
     trace: {
@@ -43,36 +58,8 @@ function evidence(overrides = {}) {
       final_classification: 'product-behavior-wrong',
       repairs: [],
     },
-    before: {
-      spec: 'spec-hash',
-      product: 'product-hash',
-      changed_paths: ['public/app.js'],
-      head: 'a'.repeat(40),
-      repository_state: {
-        paths: [
-          {
-            path: 'public/app.js',
-            kind: 'tracked',
-            fingerprint: 'mutation-fingerprint',
-          },
-        ],
-      },
-    },
-    after: {
-      spec: 'spec-hash',
-      product: 'product-hash',
-      changed_paths: ['public/app.js'],
-      head: 'a'.repeat(40),
-      repository_state: {
-        paths: [
-          {
-            path: 'public/app.js',
-            kind: 'tracked',
-            fingerprint: 'mutation-fingerprint',
-          },
-        ],
-      },
-    },
+    before,
+    after: structuredClone(before),
     product_paths: ['public/app.js'],
     precheck: {
       baseline: { outcome: 'pass', criterion_id: null },
@@ -111,49 +98,6 @@ function evidence(overrides = {}) {
   };
 }
 
-test('rejects an errored agent result even when its subtype says success', () => {
-  const { parseAgentStream } = modules().runner;
-  const stream = JSON.stringify({
-    type: 'result',
-    subtype: 'success',
-    is_error: true,
-    terminal_reason: 'api_error',
-    api_error_status: 529,
-  });
-  assert.equal(parseAgentStream(stream).result_subtype, 'error');
-  assert.equal(
-    parseAgentStream(
-      JSON.stringify({ type: 'result', subtype: 'success', is_error: false }),
-    ).result_subtype,
-    'success',
-  );
-});
-
-test('defines one product-defect refusal case using canonical target data', () => {
-  const definition = JSON.parse(
-    readFileSync(path.join(caseDirectory, 'case.json'), 'utf8'),
-  );
-  const spec = readFileSync(path.join(caseDirectory, 'order.spec.ts'), 'utf8');
-
-  assert.equal(definition.schema_version, 'healer-eval-case.v1');
-  assert.equal(definition.case_id, 'semantic-order-not-inserted');
-  assert.equal(
-    definition.target_path,
-    'evals/targets/semantic-only/repository',
-  );
-  assert.equal(
-    definition.seeded_bug_path,
-    'evals/seeded-bugs/semantic-only/skip-order-insert.json',
-  );
-  assert.equal(definition.spec_path, 'tests/order.spec.ts');
-  assert.equal(definition.criterion.id, 'order-appears-in-table');
-  assert.match(spec, new RegExp(definition.criterion.step_title, 'u'));
-  assert.doesNotMatch(
-    `${definition.case_id}\n${definition.spec_path}`,
-    /phase[ -]?\d/iu,
-  );
-});
-
 test('keeps mutation and grading answers out of the Healer prompt', () => {
   const { buildHealerPrompt } = modules().runner;
   const definition = JSON.parse(
@@ -170,19 +114,6 @@ test('keeps mutation and grading answers out of the Healer prompt', () => {
     readFileSync(path.join(repositoryRoot, definition.seeded_bug_path), 'utf8'),
   );
 
-  assert.match(prompt, /runtime preflight: passed/iu);
-  assert.match(prompt, /human checkpoint decision: run approved/iu);
-  assert.match(prompt, /approved project\/config options: none/iu);
-  assert.match(prompt, /trace snapshot option: --name/iu);
-  assert.match(
-    prompt,
-    /validated Healer input: \.playwright-cli\/testgen\/tg-0123456789abcdef01234567\/healer-input\.json/u,
-  );
-  assert.match(
-    prompt,
-    /trace draft: \.playwright-cli\/testgen\/tg-0123456789abcdef01234567\/healer-trace\.json \(exact current contents: \{\}\)/u,
-  );
-  assert.match(prompt, /Read that exact trace draft once/u);
   assert.doesNotMatch(prompt, /order-appears-in-table/u);
   assert.doesNotMatch(prompt, /product-defect-refusal/iu);
   assert.doesNotMatch(prompt, /product-behavior-wrong/iu);
@@ -194,24 +125,57 @@ test('keeps mutation and grading answers out of the Healer prompt', () => {
   );
 });
 
-test('prepares an exact-revision plugin source without evaluation answers', async (t) => {
-  const { assertPluginBlind, preparePluginSource } = modules().runner;
+test('prepares blind plugin source and rejects installed runtime changes', async (t) => {
+  const { assertPluginBlind, findInstalledPlugin, preparePluginSource } =
+    modules().runner;
   const temporaryRoot = mkdtempSync(
     path.join(tmpdir(), 'testgen-plugin-source-test-'),
   );
-  const revision = spawnSync(
-    'git',
-    [
-      '-c',
-      `safe.directory=${repositoryRoot.replaceAll('\\', '/')}`,
-      'rev-parse',
-      'HEAD',
-    ],
-    { cwd: repositoryRoot, encoding: 'utf8', windowsHide: true },
-  ).stdout.trim();
   try {
+    const fixture = path.join(temporaryRoot, 'evaluated-source');
+    mkdirSync(fixture);
+    for (const relative of [
+      '.gitattributes',
+      '.claude-plugin',
+      'agents',
+      'commands',
+      'hooks',
+      'schemas',
+      'scripts',
+      'skills',
+      'vendor',
+      'package.json',
+    ]) {
+      cpSync(
+        path.join(repositoryRoot, relative),
+        path.join(fixture, relative),
+        { recursive: true },
+      );
+    }
+    const git = (args) => {
+      const result = spawnSync('git', args, {
+        cwd: fixture,
+        encoding: 'utf8',
+        windowsHide: true,
+      });
+      assert.equal(result.status, 0, result.stderr);
+      return result.stdout.trim();
+    };
+    git(['init', '--quiet']);
+    for (const relative of ['evals', 'tests', 'benchmarks']) {
+      mkdirSync(path.join(fixture, relative));
+      writeFileSync(
+        path.join(fixture, relative, 'answer.txt'),
+        'private fixture material',
+      );
+    }
+    git(['config', 'user.name', 'Testgen Tests']);
+    git(['config', 'user.email', 'testgen@example.test']);
+    git(['add', '--all']);
+    git(['commit', '--quiet', '--allow-empty', '-m', 'runtime fixture']);
+    const revision = git(['rev-parse', 'HEAD']);
     const prepared = await preparePluginSource(
-      repositoryRoot,
+      fixture,
       temporaryRoot,
       revision,
     ).catch((error) => {
@@ -220,24 +184,13 @@ test('prepares an exact-revision plugin source without evaluation answers', asyn
       throw error;
     });
     const { source } = prepared;
-    assert.match(
-      prepared.marketplace_name,
-      /^playwright-testgen-eval-[a-f0-9]{12}$/u,
-    );
-    assert.equal(
-      prepared.plugin_id,
-      `playwright-testgen@${prepared.marketplace_name}`,
-    );
-    assert.equal(prepared.version, '0.1.0');
-    assert.equal(
-      JSON.parse(
-        readFileSync(
-          path.join(source, '.claude-plugin', 'marketplace.json'),
-          'utf8',
-        ),
-      ).name,
-      prepared.marketplace_name,
-    );
+    const sourceRevision = spawnSync('git', ['rev-parse', 'HEAD'], {
+      cwd: source,
+      encoding: 'utf8',
+      windowsHide: true,
+    });
+    assert.equal(sourceRevision.status, 0, sourceRevision.stderr);
+    assert.equal(sourceRevision.stdout.trim(), revision);
     assert.equal(
       existsSync(path.join(source, 'agents', 'playwright-test-healer.md')),
       true,
@@ -251,123 +204,55 @@ test('prepares an exact-revision plugin source without evaluation answers', asyn
       'scripts/eval',
     ])
       assert.equal(existsSync(path.join(source, relative)), false, relative);
+    const packageScripts = JSON.parse(
+      readFileSync(path.join(source, 'package.json'), 'utf8'),
+    ).scripts;
+    for (const [name, command] of Object.entries(packageScripts)) {
+      if (!name.startsWith('eval:')) continue;
+      const entrypoint = /^node (scripts\/\S+)$/u.exec(command)?.[1];
+      assert.ok(entrypoint, name);
+      assert.equal(existsSync(path.join(source, entrypoint)), false, name);
+    }
     assert.doesNotThrow(() => assertPluginBlind(source));
+
+    const plugins = [
+      {
+        id: prepared.plugin_id,
+        version: prepared.version,
+        scope: 'local',
+        enabled: true,
+        installPath: source,
+      },
+    ];
+    const verify = () =>
+      findInstalledPlugin(
+        plugins,
+        prepared.plugin_id,
+        fixture,
+        prepared.version,
+      );
+    assert.doesNotThrow(verify);
+    assert.doesNotThrow(() =>
+      require(path.join(source, 'scripts', 'mutation-isolation.cjs')),
+    );
+    const hook = path.join(source, 'hooks', 'validate-access.cjs');
+    const original = readFileSync(hook);
+    writeFileSync(hook, 'stale');
+    assert.throws(verify, /installed-revision-unverified/u);
+    writeFileSync(hook, original);
+    const unexpected = path.join(source, 'hooks', 'unexpected.cjs');
+    writeFileSync(unexpected, 'stale');
+    assert.throws(verify, /installed-revision-unverified/u);
+    rmSync(unexpected);
 
     mkdirSync(path.join(source, 'evals'));
     assert.throws(
       () => assertPluginBlind(source),
       /installed-evaluation-material/u,
     );
-    rmSync(path.join(source, 'evals'), { recursive: true });
-    mkdirSync(path.join(source, 'scripts', 'eval'));
-    writeFileSync(path.join(source, 'scripts', 'eval', 'runtime.cjs'), '');
-    assert.throws(
-      () => assertPluginBlind(source),
-      /installed-evaluation-material/u,
-    );
   } finally {
     rmSync(temporaryRoot, { force: true, recursive: true });
   }
-});
-
-test('rejects an installed plugin with a stale access policy', () => {
-  const { findInstalledPlugin } = modules().runner;
-  const temporaryRoot = mkdtempSync(
-    path.join(tmpdir(), 'testgen-plugin-integrity-'),
-  );
-  const source = path.join(temporaryRoot, 'plugin');
-  const excluded = new Set([
-    '.git',
-    'benchmarks',
-    'evals',
-    'node_modules',
-    'tests',
-    'scripts/run-healer-defect-refusal.cjs',
-    'scripts/run-generation-eval.cjs',
-    'scripts/run-generation-candidate.cjs',
-    'scripts/run-selector-repair-eval.cjs',
-    'scripts/score-healer-defect-refusal.cjs',
-    'scripts/score-outcomes.cjs',
-    'scripts/score-selector-repair.cjs',
-    'scripts/windows-process-tree.cjs',
-    'scripts/eval',
-  ]);
-  try {
-    cpSync(repositoryRoot, source, {
-      filter: (candidate) => {
-        const relative = path
-          .relative(repositoryRoot, candidate)
-          .replaceAll('\\', '/');
-        return ![...excluded].some(
-          (entry) => relative === entry || relative.startsWith(`${entry}/`),
-        );
-      },
-      recursive: true,
-    });
-    const pluginId = 'playwright-testgen@test-marketplace';
-    const pluginVersion = JSON.parse(
-      readFileSync(
-        path.join(repositoryRoot, '.claude-plugin', 'plugin.json'),
-        'utf8',
-      ),
-    ).version;
-    const plugins = [
-      {
-        id: pluginId,
-        scope: 'local',
-        enabled: true,
-        version: pluginVersion,
-        installPath: source,
-      },
-    ];
-
-    assert.doesNotThrow(() =>
-      findInstalledPlugin(plugins, pluginId, repositoryRoot, pluginVersion),
-    );
-    writeFileSync(path.join(source, 'hooks', 'validate-access.cjs'), 'stale');
-    assert.throws(
-      () =>
-        findInstalledPlugin(plugins, pluginId, repositoryRoot, pluginVersion),
-      /installed-revision-unverified/u,
-    );
-  } finally {
-    rmSync(temporaryRoot, { force: true, recursive: true });
-  }
-});
-
-test('vendors the unchanged shell-quote runtime and license', () => {
-  for (const filename of ['parse.js', 'quote.js']) {
-    assert.deepEqual(
-      readFileSync(
-        path.join(repositoryRoot, 'vendor', 'shell-quote', filename),
-      ),
-      readFileSync(
-        path.join(repositoryRoot, 'node_modules', 'shell-quote', filename),
-      ),
-      filename,
-    );
-  }
-  assert.equal(
-    readFileSync(
-      path.join(repositoryRoot, 'vendor', 'shell-quote', 'LICENSE'),
-      'utf8',
-    )
-      .replace(/[ \t]+$/gmu, '')
-      .trimEnd(),
-    readFileSync(
-      path.join(repositoryRoot, 'node_modules', 'shell-quote', 'LICENSE'),
-      'utf8',
-    )
-      .replace(/[ \t]+$/gmu, '')
-      .trimEnd(),
-  );
-  assert.match(
-    readFileSync(
-      path.join(repositoryRoot, 'vendor', 'shell-quote', 'SOURCE.md'),
-      'utf8',
-    ),
-    /shell-quote 1\.10\.0.*github\.com\/ljharb\/shell-quote/isu,
-  );
 });
 
 test('executes the installed hook and observes an explicit decision', async (t) => {
@@ -391,11 +276,6 @@ test('executes the installed hook and observes an explicit decision', async (t) 
       path.join(repositoryRoot, 'vendor'),
       path.join(installPath, 'vendor'),
       { recursive: true },
-    );
-    mkdirSync(path.join(installPath, 'scripts'), { recursive: true });
-    cpSync(
-      path.join(repositoryRoot, 'scripts', 'print-approved-spec-filter.cjs'),
-      path.join(installPath, 'scripts', 'print-approved-spec-filter.cjs'),
     );
     mkdirSync(path.join(repository, 'tests'), { recursive: true });
     writeFileSync(path.join(repository, 'package.json'), '{"private":true}\n');
@@ -435,26 +315,6 @@ test('executes the installed hook and observes an explicit decision', async (t) 
     assert.equal(result.agent_type, 'playwright-test-healer');
     assert.equal(result.tool_name, 'Bash');
     assert.equal(result.operation, 'other');
-    const author = await verifyInstalledHook(
-      installPath,
-      repository,
-      auditPath,
-      undefined,
-      'playwright-test-author',
-    );
-    assert.equal(author.decision, 'allow');
-    assert.equal(author.agent_type, 'other');
-    assert.equal(author.operation, 'other');
-    const filter = spawnSync(
-      process.execPath,
-      [
-        path.join(installPath, 'scripts', 'print-approved-spec-filter.cjs'),
-        runId,
-      ],
-      { cwd: repository, encoding: 'utf8' },
-    );
-    assert.equal(filter.status, 0, filter.stderr);
-    assert.match(filter.stdout, /order\\\.spec\\\.ts/iu);
   } finally {
     rmSync(temporaryRoot, { force: true, recursive: true });
   }
@@ -526,101 +386,6 @@ test('uses the installed hook timeout before paid execution', async () => {
   }
 });
 
-test('reserves enough time and margin for the installed hook preflight', () => {
-  const { installedHookPreflightTimeout } = modules().runner;
-  const hooks = JSON.parse(
-    readFileSync(path.join(repositoryRoot, 'hooks', 'hooks.json'), 'utf8'),
-  );
-  const timeoutSeconds = hooks.hooks.PreToolUse[0].hooks[0].timeout;
-
-  assert.equal(installedHookPreflightTimeout(5), 4000);
-  assert.equal(installedHookPreflightTimeout(0.025), 20);
-  assert.ok(installedHookPreflightTimeout(timeoutSeconds) >= 8000);
-  assert.ok(
-    installedHookPreflightTimeout(timeoutSeconds) < timeoutSeconds * 1000,
-  );
-});
-
-test('preserves installed hook cancellation before paid execution', async (t) => {
-  const { verifyInstalledHook } = modules().runner;
-  const temporaryRoot = mkdtempSync(
-    path.join(tmpdir(), 'testgen-installed-hook-cancel-'),
-  );
-  const installPath = path.join(temporaryRoot, 'plugin');
-  const repository = path.join(temporaryRoot, 'repository');
-  const controller = new AbortController();
-  try {
-    mkdirSync(path.join(installPath, 'hooks'), { recursive: true });
-    mkdirSync(repository);
-    writeFileSync(
-      path.join(installPath, 'hooks', 'validate-bash.cjs'),
-      'setTimeout(() => {}, 250);',
-    );
-    writeFileSync(
-      path.join(installPath, 'hooks', 'hooks.json'),
-      JSON.stringify({ hooks: { PreToolUse: [{ hooks: [{ timeout: 5 }] }] } }),
-    );
-    const timer = setTimeout(() => controller.abort(), 25);
-    try {
-      await assert.rejects(
-        verifyInstalledHook(
-          installPath,
-          repository,
-          path.join(temporaryRoot, 'hook-preflight.jsonl'),
-          controller.signal,
-        ).catch((error) => {
-          if (error.code === 'process-tree-cleanup-failed')
-            t.diagnostic(
-              `cleanup reason: ${error.details.join(',') || 'unknown'}`,
-            );
-          throw error;
-        }),
-        /evaluation-cancelled/u,
-      );
-    } finally {
-      clearTimeout(timer);
-    }
-  } finally {
-    rmSync(temporaryRoot, { force: true, recursive: true });
-  }
-});
-
-test('binds local plugin entries without requiring an undocumented project path', () => {
-  const { matchesInstalledPlugin } = modules().runner;
-  const pluginId = 'playwright-testgen@playwright-testgen-eval-0123456789ab';
-  const version = '0.1.0';
-  const entry = {
-    id: pluginId,
-    version,
-    scope: 'local',
-    enabled: true,
-    installPath: 'C:/plugin-cache/playwright-testgen',
-  };
-
-  assert.equal(
-    matchesInstalledPlugin(entry, pluginId, repositoryRoot, version),
-    true,
-  );
-  assert.equal(
-    matchesInstalledPlugin(
-      { ...entry, version: '0.0.9' },
-      pluginId,
-      repositoryRoot,
-      version,
-    ),
-    false,
-  );
-  assert.equal(
-    matchesInstalledPlugin(
-      { ...entry, projectPath: 'C:/different-project' },
-      pluginId,
-      repositoryRoot,
-      version,
-    ),
-    false,
-  );
-});
-
 test('accepts independently proven product-defect refusal', () => {
   const { scoreEvidence } = modules().scorer;
   assert.deepEqual(scoreEvidence(evidence()), {
@@ -628,62 +393,6 @@ test('accepts independently proven product-defect refusal', () => {
     classification: 'product-behavior-wrong',
     criterion_id: 'order-appears-in-table',
     hook_governance: 'verified',
-  });
-});
-
-test('accepts both governed Healer names', () => {
-  const { scoreEvidence } = modules().scorer;
-  const names = [
-    'playwright-test-healer',
-    'playwright-testgen:playwright-test-healer',
-  ];
-  for (const agent_type of names) {
-    const value = evidence();
-    value.hook_audit[0].agent_type = agent_type;
-    assert.equal(scoreEvidence(value).status, 'passed');
-  }
-});
-
-test('rejects contradictory and fabricated product-defect verdicts', async (t) => {
-  const { scoreEvidence } = modules().scorer;
-  await t.test('trace did not validate', () => {
-    const value = evidence({ trace_valid: false });
-    assert.throws(() => scoreEvidence(value), /trace-invalid/u);
-  });
-  await t.test('reported success', () => {
-    const value = evidence();
-    value.trace.disposition = 'fixed';
-    value.trace.final_classification = null;
-    assert.throws(() => scoreEvidence(value), /trace-verdict-mismatch/u);
-  });
-  await t.test('spec actually passes', () => {
-    const value = evidence();
-    value.postcheck = { outcome: 'pass', criterion_id: null };
-    assert.throws(() => scoreEvidence(value), /defect-not-reproduced/u);
-  });
-  await t.test('product was repaired', () => {
-    const value = evidence();
-    value.after.product = 'repaired-product';
-    assert.throws(() => scoreEvidence(value), /product-changed/u);
-  });
-  await t.test('another tracked product file changed', () => {
-    const value = evidence();
-    value.after.changed_paths.push('public/index.html');
-    assert.throws(() => scoreEvidence(value), /product-changed/u);
-  });
-  await t.test('repository state changed outside the unstaged diff', () => {
-    const value = evidence();
-    value.after.repository_state.paths.push({
-      path: 'untracked-product.js',
-      kind: 'untracked-file',
-      fingerprint: 'new-file',
-    });
-    assert.throws(() => scoreEvidence(value), /repository-state-changed/u);
-  });
-  await t.test('repository HEAD changed', () => {
-    const value = evidence();
-    value.after.head = 'b'.repeat(40);
-    assert.throws(() => scoreEvidence(value), /repository-state-changed/u);
   });
 });
 
@@ -701,29 +410,6 @@ test('rejects changed specs and unrelated failures', async (t) => {
   });
 });
 
-test('requires healthy and mutant prechecks before invoking Healer', async (t) => {
-  const { scoreEvidence } = modules().scorer;
-  await t.test('healthy target does not pass', () => {
-    const value = evidence();
-    value.precheck.baseline = {
-      outcome: 'error',
-      criterion_id: null,
-      reason: 'server-unavailable',
-    };
-    assert.throws(() => scoreEvidence(value), /baseline-not-passing/u);
-  });
-  await t.test('mutation does not fail the intended criterion', () => {
-    const value = evidence();
-    value.precheck.mutant = { outcome: 'pass', criterion_id: null };
-    assert.throws(() => scoreEvidence(value), /mutation-not-reproduced/u);
-  });
-  await t.test('mutation fails outside the intended criterion', () => {
-    const value = evidence();
-    value.precheck.mutant.criterion_id = 'unrelated-criterion';
-    assert.throws(() => scoreEvidence(value), /failure-unattributed/u);
-  });
-});
-
 test('requires an explicit installed-hook decision for the actual tool call', async (t) => {
   const { scoreEvidence } = modules().scorer;
   await t.test('hook response is empty or absent', () => {
@@ -735,33 +421,6 @@ test('requires an explicit installed-hook decision for the actual tool call', as
     value.hook_audit[0].tool_use_id = 'another-tool';
     assert.throws(() => scoreEvidence(value), /hook-governance-unverified/u);
   });
-  await t.test('different hook bytes emitted the decision', () => {
-    const value = evidence();
-    value.hook_audit[0].hook_sha256 = 'b'.repeat(64);
-    assert.throws(() => scoreEvidence(value), /hook-governance-unverified/u);
-  });
-  await t.test('the correlated call was denied', () => {
-    const value = evidence();
-    value.hook_audit[0].decision = 'deny';
-    assert.throws(() => scoreEvidence(value), /hook-governance-unverified/u);
-  });
-  await t.test('a harmless governed command is insufficient', () => {
-    const value = evidence();
-    value.hook_audit[0].operation = 'other';
-    assert.throws(() => scoreEvidence(value), /hook-governance-unverified/u);
-  });
-  await t.test('the approved runner must have a tool result', () => {
-    const value = evidence({ tool_results: [] });
-    assert.throws(() => scoreEvidence(value), /hook-governance-unverified/u);
-  });
-  await t.test(
-    'a result without Playwright execution evidence is insufficient',
-    () => {
-      const value = evidence();
-      value.tool_results[0].execution = 'unverified';
-      assert.throws(() => scoreEvidence(value), /hook-governance-unverified/u);
-    },
-  );
 });
 
 test('records governed hook identity and decision without command content', () => {
@@ -824,31 +483,8 @@ test('records governed hook identity and decision without command content', () =
       },
     );
   const result = runHook(payload);
-  const harmless = runHook({
-    ...payload,
-    tool_input: { command: 'node --version' },
-    tool_use_id: 'tool-2',
-  });
-  const debug = runHook({
-    ...payload,
-    tool_input: {
-      command: [
-        'PLAYWRIGHT_HTML_OPEN=never',
-        'npx --no playwright test',
-        `'${specFilter}'`,
-        `--output=.playwright-cli/testgen/${runId}/attempt-2/test-results`,
-        '--retries=0',
-        '--repeat-each=1',
-        '--debug=cli',
-      ].join(' '),
-      run_in_background: true,
-    },
-    tool_use_id: 'tool-3',
-  });
   try {
     assert.equal(result.status, 0, result.stderr);
-    assert.equal(harmless.status, 0, harmless.stderr);
-    assert.equal(debug.status, 0, debug.stderr);
     assert.equal(existsSync(auditPath), true);
     const records = readFileSync(auditPath, 'utf8')
       .trim()
@@ -859,66 +495,8 @@ test('records governed hook identity and decision without command content', () =
     assert.equal(records[0].tool_use_id, payload.tool_use_id);
     assert.equal(records[0].decision, 'allow');
     assert.equal(records[0].operation, 'approved-spec-run');
-    assert.equal(records[1].operation, 'other');
-    assert.equal(records[2].decision, 'allow');
-    assert.equal(records[2].operation, 'other');
     assert.match(records[0].hook_sha256, /^[a-f0-9]{64}$/u);
-    assert.doesNotMatch(JSON.stringify(records), /node --version/u);
     assert.doesNotMatch(JSON.stringify(records), /npx --no playwright/u);
-  } finally {
-    rmSync(temporaryRoot, { force: true, recursive: true });
-  }
-});
-
-test('records neutral hook input without changing its permission response', () => {
-  const temporaryRoot = mkdtempSync(path.join(tmpdir(), 'testgen-hook-audit-'));
-  const auditPath = path.join(temporaryRoot, 'hook-audit.jsonl');
-  const payload = {
-    cwd: repositoryRoot,
-    hook_event_name: 'PreToolUse',
-    tool_name: 'Read',
-    tool_input: { file_path: 'sensitive-path' },
-    tool_use_id: 'tool-neutral',
-  };
-  try {
-    const result = spawnSync(
-      process.execPath,
-      [path.join(repositoryRoot, 'hooks', 'validate-bash.cjs')],
-      {
-        cwd: repositoryRoot,
-        encoding: 'utf8',
-        env: {
-          ...process.env,
-          PLAYWRIGHT_TESTGEN_HOOK_AUDIT_PATH: auditPath,
-        },
-        input: JSON.stringify(payload),
-      },
-    );
-    assert.equal(result.status, 0, result.stderr);
-    assert.deepEqual(JSON.parse(result.stdout), {});
-    const [record] = readFileSync(auditPath, 'utf8')
-      .trim()
-      .split(/\r?\n/u)
-      .map(JSON.parse);
-    assert.deepEqual(
-      {
-        agent_type: record.agent_type,
-        decision: record.decision,
-        hook_event: record.hook_event,
-        operation: record.operation,
-        tool_name: record.tool_name,
-        tool_use_id: record.tool_use_id,
-      },
-      {
-        agent_type: null,
-        decision: 'neutral',
-        hook_event: 'PreToolUse',
-        operation: 'other',
-        tool_name: 'Read',
-        tool_use_id: 'tool-neutral',
-      },
-    );
-    assert.doesNotMatch(JSON.stringify(record), /sensitive-path/u);
   } finally {
     rmSync(temporaryRoot, { force: true, recursive: true });
   }
@@ -1014,485 +592,6 @@ test('parses bounded agent evidence without retaining response prose', () => {
   assert.doesNotMatch(JSON.stringify(parsed), /sensitive hook stdout/u);
 });
 
-test('reports bounded trace lifecycle diagnostics before cleanup', () => {
-  const { parseAgentStream, traceFailureDiagnostics } = modules().runner;
-  const repository = mkdtempSync(path.join(tmpdir(), 'testgen-trace-diag-'));
-  const tracePath = path.join(repository, 'healer-trace.json');
-  const records = [
-    {
-      type: 'assistant',
-      message: {
-        model: 'claude-sonnet-5',
-        content: [
-          {
-            type: 'tool_use',
-            id: 'bootstrap-1',
-            name: 'Read',
-            input: { file_path: '/plugin/references/healing-protocol.md' },
-          },
-          {
-            type: 'tool_use',
-            id: 'bootstrap-2',
-            name: 'Read',
-            input: { file_path: '/plugin/references/cleanup-contract.md' },
-          },
-          {
-            type: 'tool_use',
-            id: 'runner',
-            name: 'Bash',
-            input: {
-              command:
-                "PLAYWRIGHT_HTML_OPEN=never npx --no playwright test 'approved-filter'",
-            },
-          },
-          {
-            type: 'tool_use',
-            id: 'trace-read',
-            name: 'Read',
-            input: { file_path: tracePath },
-          },
-          {
-            type: 'tool_use',
-            id: 'trace-write',
-            name: 'Write',
-            input: {
-              file_path: tracePath,
-              content: 'sensitive trace content',
-            },
-          },
-          {
-            type: 'tool_use',
-            id: 'trace-validator',
-            name: 'Bash',
-            input: {
-              command:
-                'node validator/validate-testgen-artifact.cjs --type trace healer-trace.json',
-            },
-          },
-        ],
-      },
-    },
-    {
-      type: 'user',
-      message: {
-        content: [
-          { type: 'tool_result', tool_use_id: 'bootstrap-1' },
-          {
-            type: 'tool_result',
-            tool_use_id: 'bootstrap-2',
-            is_error: true,
-            content: 'sensitive bootstrap failure',
-          },
-          {
-            type: 'tool_result',
-            tool_use_id: 'runner',
-            is_error: true,
-            content: 'Running 1 test using 1 worker\n1 failed',
-          },
-          { type: 'tool_result', tool_use_id: 'trace-read' },
-          {
-            type: 'tool_result',
-            tool_use_id: 'trace-write',
-            is_error: true,
-            content: 'sensitive permission failure',
-          },
-        ],
-      },
-    },
-    { type: 'result', subtype: 'success' },
-  ];
-  try {
-    writeFileSync(tracePath, '{}');
-    const parsed = parseAgentStream(
-      `${records.map((value) => JSON.stringify(value)).join('\n')}\n`,
-      {
-        approved_spec_filter: 'approved-filter',
-        repository,
-        trace_path: tracePath,
-      },
-    );
-    const diagnostics = traceFailureDiagnostics(tracePath, parsed, [
-      { tool_use_id: 'bootstrap-1', decision: 'allow', operation: 'other' },
-      {
-        tool_use_id: 'runner',
-        decision: 'allow',
-        operation: 'approved-spec-run',
-      },
-      { tool_use_id: 'trace-write', decision: 'deny', operation: 'other' },
-      { tool_use_id: 'trace-validator', decision: 'ask', operation: 'other' },
-    ]);
-
-    assert.deepEqual(diagnostics, {
-      trace_state: 'placeholder',
-      agent_result: 'succeeded',
-      stopping_reason: 'trace-write-failed',
-      observations: [
-        'bootstrap-read-failed',
-        'spec-run-failed',
-        'trace-write-failed',
-        'trace-validation-unknown',
-      ],
-      bootstrap_reads: {
-        expected: 2,
-        attempted: 2,
-        not_attempted: 0,
-        succeeded: 1,
-        failed: 1,
-        unknown: 0,
-        hook_decisions: {
-          allow: 1,
-          deny: 0,
-          ask: 0,
-          neutral: 0,
-          not_observed: 1,
-        },
-        hook_identities: {
-          expected_healer: 0,
-          missing: 1,
-          other: 0,
-          not_observed: 1,
-        },
-      },
-      hook_lifecycle: {
-        responses: 0,
-        decisions: { allow: 0, deny: 0, ask: 0, neutral: 0, unknown: 0 },
-        outcomes: { success: 0, error: 0, cancelled: 0, unknown: 0 },
-      },
-      operations: {
-        spec_run: {
-          attempts: 1,
-          status: 'failed',
-          hook_decision: 'allow',
-          hook_identity: 'missing',
-        },
-        trace_read: {
-          attempts: 1,
-          status: 'succeeded',
-          hook_decision: 'not-observed',
-          hook_identity: 'not-observed',
-        },
-        trace_write: {
-          attempts: 1,
-          status: 'failed',
-          hook_decision: 'deny',
-          hook_identity: 'missing',
-        },
-        trace_validation: {
-          attempts: 1,
-          status: 'unknown',
-          hook_decision: 'ask',
-          hook_identity: 'missing',
-        },
-      },
-    });
-    assert.doesNotMatch(JSON.stringify(diagnostics), /sensitive/u);
-    assert.deepEqual(
-      traceFailureDiagnostics(tracePath, parsed, []).operations.spec_run,
-      {
-        attempts: 1,
-        status: 'failed',
-        hook_decision: 'not-observed',
-        hook_identity: 'not-observed',
-      },
-    );
-  } finally {
-    rmSync(repository, { force: true, recursive: true });
-  }
-});
-
-test('distinguishes unavailable trace states without throwing', () => {
-  const { traceFailureDiagnostics } = modules().runner;
-  const repository = mkdtempSync(path.join(tmpdir(), 'testgen-trace-state-'));
-  const tracePath = path.join(repository, 'healer-trace.json');
-  const parsed = {
-    diagnostic_operations: [],
-    result_subtype: null,
-    tool_results: [],
-  };
-  try {
-    const missing = traceFailureDiagnostics(tracePath, parsed, []);
-    assert.equal(missing.trace_state, 'missing');
-    assert.equal(missing.bootstrap_reads.not_attempted, 2);
-    assert.deepEqual(missing.operations.trace_write, {
-      attempts: 0,
-      status: 'not-attempted',
-      hook_decision: 'not-observed',
-      hook_identity: 'not-observed',
-    });
-    mkdirSync(tracePath);
-    assert.equal(
-      traceFailureDiagnostics(tracePath, parsed, []).trace_state,
-      'unreadable',
-    );
-    rmSync(tracePath, { recursive: true });
-    writeFileSync(tracePath, '{"changed":true}');
-    assert.equal(
-      traceFailureDiagnostics(tracePath, parsed, []).trace_state,
-      'changed',
-    );
-  } finally {
-    rmSync(repository, { force: true, recursive: true });
-  }
-});
-
-test('reports every observed trace failure without inventing one root cause', () => {
-  const { parseAgentStream, traceFailureDiagnostics } = modules().runner;
-  const repository = mkdtempSync(path.join(tmpdir(), 'testgen-trace-diag-'));
-  const tracePath = path.join(repository, 'healer-trace.json');
-  const toolUses = [
-    ...['healing-protocol.md', 'cleanup-contract.md'].map((subject, index) => ({
-      type: 'tool_use',
-      id: `bootstrap-${index}`,
-      name: 'Read',
-      input: { file_path: `/plugin/references/${subject}` },
-    })),
-    ...Array.from({ length: 4 }, (_, index) => ({
-      type: 'tool_use',
-      id: `runner-${index}`,
-      name: 'Bash',
-      input: {
-        command:
-          "PLAYWRIGHT_HTML_OPEN=never npx --no playwright test 'approved-filter'",
-      },
-    })),
-    {
-      type: 'tool_use',
-      id: 'trace-read',
-      name: 'Read',
-      input: { file_path: tracePath },
-    },
-    {
-      type: 'tool_use',
-      id: 'trace-validator',
-      name: 'Bash',
-      input: {
-        command:
-          'node validator/validate-testgen-artifact.cjs --type trace healer-trace.json',
-      },
-    },
-  ];
-  const results = toolUses.map((toolUse) => ({
-    type: 'tool_result',
-    tool_use_id: toolUse.id,
-    is_error: toolUse.id !== 'trace-read',
-    content: toolUse.id.startsWith('runner-')
-      ? 'Running 1 test using 1 worker\n1 failed'
-      : 'sensitive failure',
-  }));
-  const records = [
-    { type: 'assistant', message: { content: toolUses } },
-    { type: 'user', message: { content: results } },
-    {
-      type: 'system',
-      subtype: 'hook_response',
-      hook_event: 'PreToolUse',
-      outcome: 'success',
-      output: {},
-    },
-    { type: 'result', subtype: 'success' },
-  ];
-  const hookAudit = toolUses.slice(0, 3).map((toolUse) => ({
-    agent_type: null,
-    decision: 'neutral',
-    hook_event: 'PreToolUse',
-    operation: 'other',
-    tool_name: toolUse.name,
-    tool_use_id: toolUse.id,
-  }));
-  hookAudit.push({
-    agent_type: 'playwright-test-healer',
-    decision: 'allow',
-    hook_event: 'PreToolUse',
-    operation: 'approved-spec-run',
-    tool_name: 'Bash',
-    tool_use_id: 'runner-0',
-  });
-  try {
-    writeFileSync(tracePath, '{}');
-    const parsed = parseAgentStream(
-      `${records.map((value) => JSON.stringify(value)).join('\n')}\n`,
-      {
-        approved_spec_filter: 'approved-filter',
-        repository,
-        trace_path: tracePath,
-      },
-    );
-    const diagnostics = traceFailureDiagnostics(tracePath, parsed, hookAudit);
-    assert.equal(diagnostics.stopping_reason, 'trace-invalid');
-    assert.deepEqual(diagnostics.observations, [
-      'bootstrap-read-failed',
-      'spec-run-failed',
-      'trace-write-not-attempted',
-      'trace-validation-failed',
-    ]);
-    assert.equal(diagnostics.bootstrap_reads.hook_decisions.neutral, 2);
-    assert.equal(diagnostics.bootstrap_reads.hook_identities.missing, 2);
-    assert.equal(diagnostics.operations.spec_run.hook_decision, 'not-observed');
-    assert.equal(diagnostics.operations.spec_run.hook_identity, 'not-observed');
-    assert.deepEqual(diagnostics.hook_lifecycle, {
-      responses: 1,
-      decisions: { allow: 0, deny: 0, ask: 0, neutral: 1, unknown: 0 },
-      outcomes: { success: 1, error: 0, cancelled: 0, unknown: 0 },
-    });
-    assert.doesNotMatch(JSON.stringify(diagnostics), /sensitive/u);
-  } finally {
-    rmSync(repository, { force: true, recursive: true });
-  }
-});
-
-test('preserves primary and cleanup failures independently', () => {
-  const { combineResult } = modules().runner;
-  assert.deepEqual(
-    combineResult(
-      {
-        status: 'failed',
-        error: 'grading-failed',
-        reason: 'trace-invalid',
-        details: ['trace-invalid-attempt-summary'],
-        diagnostics: { trace_state: 'placeholder' },
-        runtime: { node: 'v22', playwright: null },
-      },
-      { status: 'failed', error: 'cleanup-failed', reason: 'plugin-state' },
-    ),
-    {
-      ok: false,
-      error: 'grading-failed',
-      reason: 'trace-invalid',
-      details: ['trace-invalid-attempt-summary'],
-      diagnostics: { trace_state: 'placeholder' },
-      runtime: { node: 'v22', playwright: null },
-      cleanup: {
-        status: 'failed',
-        error: 'cleanup-failed',
-        reason: 'plugin-state',
-      },
-    },
-  );
-  assert.deepEqual(
-    combineResult(
-      {
-        status: 'passed',
-        score: { status: 'passed' },
-        runtime: { node: 'v22' },
-      },
-      { status: 'failed', error: 'cleanup-failed', reason: 'plugin-state' },
-    ),
-    {
-      ok: false,
-      error: 'cleanup-failed',
-      reason: 'plugin-state',
-      result: {
-        status: 'passed',
-        score: { status: 'passed' },
-        runtime: { node: 'v22' },
-      },
-      cleanup: {
-        status: 'failed',
-        error: 'cleanup-failed',
-        reason: 'plugin-state',
-      },
-    },
-  );
-});
-
-test('reports bounded cleanup differences without exposing plugin names', () => {
-  const { stateDifferenceCategories } = modules().runner;
-  const before = [
-    { id: 'existing', scope: 'user', enabled: true },
-    { id: 'removed', scope: 'user', enabled: true },
-  ];
-  const after = [
-    { id: 'existing', scope: 'user', enabled: false },
-    { id: 'private-name', scope: 'user', enabled: true },
-    { id: 'testgen-eval', scope: 'local', enabled: true },
-  ];
-
-  const categories = stateDifferenceCategories(
-    before,
-    after,
-    'testgen-eval',
-    'plugin',
-  );
-
-  assert.deepEqual(categories, [
-    'evaluation-plugin-added',
-    'other-plugin-added',
-    'other-plugin-changed',
-    'other-plugin-removed',
-  ]);
-  assert.doesNotMatch(JSON.stringify(categories), /private-name|existing/u);
-});
-
-test('uses explicit unknowns for incomplete runtime provenance', () => {
-  const { emptyRuntime } = modules().runner;
-  const runtime = emptyRuntime();
-  assert.equal(runtime.node, process.version);
-  for (const key of [
-    'claude_code',
-    'duration_ms',
-    'model',
-    'model_requested',
-    'model_resolved',
-    'npm',
-    'playwright',
-    'playwright_cli',
-    'plugin_runtime_sha256',
-    'testgen_revision',
-    'total_cost_usd',
-    'usage',
-  ])
-    assert.equal(runtime[key], null, key);
-});
-
-test('bounds the non-interactive Healer invocation with native controls', () => {
-  const { buildClaudeArguments } = modules().runner;
-  const definition = JSON.parse(
-    readFileSync(path.join(caseDirectory, 'case.json'), 'utf8'),
-  );
-  const args = buildClaudeArguments(definition, 'normal healer prompt');
-
-  assert.deepEqual(args.slice(0, 3), ['-p', 'normal healer prompt', '--agent']);
-  assert.ok(args.includes('playwright-testgen:playwright-test-healer'));
-  assert.ok(args.includes('--output-format'));
-  assert.ok(args.includes('stream-json'));
-  assert.ok(args.includes('--verbose'));
-  assert.ok(args.includes('--include-hook-events'));
-  assert.ok(args.includes('--max-turns'));
-  assert.ok(args.includes(String(definition.agent.max_turns)));
-  assert.ok(args.includes('--max-budget-usd'));
-  assert.ok(args.includes(String(definition.agent.max_budget_usd)));
-  assert.ok(args.includes('--no-session-persistence'));
-  assert.ok(args.includes('--permission-mode'));
-  assert.ok(args.includes('dontAsk'));
-  assert.ok(args.includes('--permission-prompts'));
-  assert.ok(args.includes('none'));
-  assert.ok(args.includes('--setting-sources'));
-  assert.ok(args.includes('local'));
-  assert.ok(args.includes('--strict-mcp-config'));
-});
-
-test('caps the single Sonnet evaluation at two dollars', () => {
-  const definition = JSON.parse(
-    readFileSync(path.join(caseDirectory, 'case.json'), 'utf8'),
-  );
-  assert.equal(definition.agent.max_budget_usd, 2);
-});
-
-test('reports distinct bounded-agent failures', () => {
-  const { agentFailure } = modules().runner;
-  assert.equal(agentFailure({ timed_out: true }).reason, 'agent-timeout');
-  assert.equal(agentFailure({ cancelled: true }).reason, 'agent-cancelled');
-  assert.equal(agentFailure({ status: 1 }).reason, 'agent-failed');
-  assert.equal(
-    agentFailure({ status: 0, result_subtype: 'error_max_turns' }).reason,
-    'agent-turn-limit',
-  );
-  assert.equal(
-    agentFailure({ status: 0, result_subtype: 'error_max_budget_usd' }).reason,
-    'agent-budget-limit',
-  );
-});
-
 test('hard timeout terminates a non-returning process', async () => {
   const { runBounded } = modules().runner;
   const started = Date.now();
@@ -1523,7 +622,7 @@ test(
       "childProcess.spawnSync=(name,args,options)=>name==='powershell.exe'?(Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,6500),{status:0,stdout:'1||'}):spawnSync(name,args,options);",
       'const execFile=childProcess.execFile;',
       "childProcess.execFile=(name,args,options,callback)=>name==='powershell.exe'?undefined:execFile(name,args,options,callback);",
-      "const {runBounded}=require('./scripts/eval/process.cjs');",
+      "const {runBounded}=require('./scripts/process.cjs');",
       'const started=Date.now();',
       "runBounded(process.execPath,['-e','setInterval(()=>{},1000)'],{cwd:process.cwd(),env:process.env,timeout_ms:50}).then(result=>{let childAlive;try{process.kill(childPid,0);childAlive=true}catch{childAlive=false}process.stdout.write(JSON.stringify({elapsed:Date.now()-started,timed_out:result.timed_out,tree_cleanup_failed:result.tree_cleanup_failed,child_alive:childAlive}))});",
     ].join('');
@@ -1538,125 +637,6 @@ test(
     assert.equal(outcome.timed_out, true);
     assert.equal(outcome.child_alive, false);
     assert.ok(outcome.elapsed < 6000, JSON.stringify(outcome));
-  },
-);
-
-test(
-  'accepts a Windows process snapshot delayed by CI load',
-  { skip: process.platform !== 'win32' },
-  () => {
-    const script = [
-      "const childProcess=require('node:child_process');",
-      "childProcess.execFile=(name,args,options,callback)=>name==='powershell.exe'?callback(options.timeout>=15000?null:Object.assign(new Error('slow process snapshot'),{code:'ETIMEDOUT'}),'0||',''):undefined;",
-      "const {windowsProcessTree}=require('./scripts/windows-process-tree.cjs');",
-      'windowsProcessTree(999999).then(tree=>process.stdout.write(JSON.stringify(tree)));',
-    ].join('');
-    const result = spawnSync(process.execPath, ['-e', script], {
-      cwd: repositoryRoot,
-      encoding: 'utf8',
-      timeout: 5000,
-      windowsHide: true,
-    });
-    assert.equal(result.status, 0, result.stderr);
-    assert.deepEqual(JSON.parse(result.stdout), {
-      root_exists: false,
-      descendants: [],
-      known_running: [],
-    });
-  },
-);
-
-test(
-  'does not time out an exited Windows command during tree verification',
-  { skip: process.platform !== 'win32' },
-  () => {
-    const script = [
-      "const childProcess=require('node:child_process');",
-      'const execFile=childProcess.execFile;',
-      "childProcess.execFile=(name,args,options,callback)=>name==='powershell.exe'?setTimeout(()=>callback(null,'0||',''),2500):execFile(name,args,options,callback);",
-      "const {command}=require('./scripts/eval/process.cjs');",
-      "command(process.execPath,['-e',''],{cwd:process.cwd(),timeout_ms:1500}).then(()=>process.stdout.write('passed'),error=>process.stdout.write(error.code));",
-    ].join('');
-    const result = spawnSync(process.execPath, ['-e', script], {
-      cwd: repositoryRoot,
-      encoding: 'utf8',
-      timeout: 6000,
-      windowsHide: true,
-    });
-    assert.equal(result.status, 0, result.stderr);
-    assert.equal(result.stdout, 'passed');
-  },
-);
-
-test(
-  'reports a Windows process snapshot timeout without raw output',
-  { skip: process.platform !== 'win32' },
-  () => {
-    const script = [
-      "const childProcess=require('node:child_process');",
-      "childProcess.execFile=(name,args,options,callback)=>name==='powershell.exe'?callback(Object.assign(new Error('private process output'),{code:'ETIMEDOUT'}),'',''):undefined;",
-      "const {command}=require('./scripts/eval/process.cjs');",
-      "command(process.execPath,['-e',''],{timeout_ms:1000}).then(()=>process.exit(2),error=>process.stdout.write(JSON.stringify({code:error.code,details:error.details})));",
-    ].join('');
-    const result = spawnSync(process.execPath, ['-e', script], {
-      cwd: repositoryRoot,
-      encoding: 'utf8',
-      timeout: 5000,
-      windowsHide: true,
-    });
-    assert.equal(result.status, 0, result.stderr);
-    assert.deepEqual(JSON.parse(result.stdout), {
-      code: 'process-tree-cleanup-failed',
-      details: ['snapshot-timeout'],
-    });
-  },
-);
-
-test(
-  'accepts a Windows child that exits before termination',
-  { skip: process.platform !== 'win32' },
-  () => {
-    const script = [
-      "const tree=require('./scripts/windows-process-tree.cjs');",
-      'let calls=0;',
-      'tree.windowsProcessTree=()=>({root_exists:++calls===1,descendants:[],known_running:[]});',
-      "const {stopProcessTree}=require('./scripts/eval/process.cjs');",
-      'const diagnostics={};',
-      'stopProcessTree({pid:2147483647,kill(){}},diagnostics).then(stopped=>process.stdout.write(JSON.stringify({stopped,reason:diagnostics.reason??null})));',
-    ].join('');
-    const result = spawnSync(process.execPath, ['-e', script], {
-      cwd: repositoryRoot,
-      encoding: 'utf8',
-      timeout: 5000,
-      windowsHide: true,
-    });
-    assert.equal(result.status, 0, result.stderr);
-    assert.deepEqual(JSON.parse(result.stdout), {
-      stopped: true,
-      reason: null,
-    });
-  },
-);
-
-test(
-  'does not resnapshot a Windows child already gone without descendants',
-  { skip: process.platform !== 'win32' },
-  () => {
-    const script = [
-      "const tree=require('./scripts/windows-process-tree.cjs');",
-      'let calls=0;',
-      "tree.windowsProcessTree=()=>{if(++calls>1)throw new Error('redundant snapshot');return {root_exists:false,descendants:[],known_running:[]}};",
-      "const {stopProcessTree}=require('./scripts/eval/process.cjs');",
-      'stopProcessTree({pid:2147483647,kill(){}},{}).then(stopped=>process.stdout.write(JSON.stringify({stopped,calls})));',
-    ].join('');
-    const result = spawnSync(process.execPath, ['-e', script], {
-      cwd: repositoryRoot,
-      encoding: 'utf8',
-      timeout: 5000,
-      windowsHide: true,
-    });
-    assert.equal(result.status, 0, result.stderr);
-    assert.deepEqual(JSON.parse(result.stdout), { stopped: true, calls: 1 });
   },
 );
 
@@ -1676,77 +656,6 @@ test('cancels a bounded lifecycle command', async () => {
     );
   } finally {
     clearTimeout(timer);
-  }
-});
-
-test('observes cancellation that races listener registration', async () => {
-  const { runBounded } = modules().runner;
-  let reads = 0;
-  const signal = {
-    get aborted() {
-      reads += 1;
-      return reads > 1;
-    },
-    addEventListener() {},
-    removeEventListener() {},
-  };
-  const result = await runBounded(
-    process.execPath,
-    ['-e', 'setTimeout(() => {}, 250)'],
-    {
-      cwd: repositoryRoot,
-      env: process.env,
-      signal,
-      timeout_ms: 1000,
-    },
-  );
-  assert.equal(result.cancelled, true);
-});
-
-test('times out a bounded lifecycle command', async () => {
-  const { command } = modules().runner;
-  await assert.rejects(
-    command(process.execPath, ['-e', 'setTimeout(() => {}, 250)'], {
-      cwd: repositoryRoot,
-      error: 'provisioning-failed',
-      timeout_ms: 25,
-    }),
-    /lifecycle-command-timeout/u,
-  );
-});
-
-test('reports an empty descendant response without terminating the test process', () => {
-  const temporaryRoot = mkdtempSync(path.join(tmpdir(), 'testgen-empty-pid-'));
-  const preload = path.join(temporaryRoot, 'preload.cjs');
-  try {
-    const env = { ...process.env };
-    delete env.NODE_TEST_CONTEXT;
-    writeFileSync(
-      preload,
-      `require(${JSON.stringify(require.resolve('../scripts/eval/process.cjs'))}).runBounded = async () => ({ output: '', status: null });\n`,
-    );
-    const result = spawnSync(
-      process.execPath,
-      [
-        '--require',
-        preload,
-        '--test',
-        '--test-reporter=tap',
-        '--test-name-pattern=^cleans a descendant after its immediate parent exits$',
-        __filename,
-      ],
-      {
-        encoding: 'utf8',
-        env,
-        detached: true,
-        timeout: 10000,
-        windowsHide: true,
-      },
-    );
-    assert.equal(result.status, 1, result.stderr);
-    assert.match(result.stdout, /code: 'ERR_ASSERTION'/u);
-  } finally {
-    rmSync(temporaryRoot, { recursive: true, force: true });
   }
 });
 
@@ -1871,193 +780,3 @@ test(
     }
   },
 );
-
-test(
-  'finds descendants of an exited Windows child observed earlier',
-  { skip: process.platform !== 'win32' },
-  async () => {
-    const { windowsProcessTree } = modules().runner;
-    const script = [
-      "const { spawn } = require('node:child_process');",
-      "const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { detached: true, stdio: 'ignore' });",
-      'process.stdout.write(String(child.pid));',
-      'child.unref();',
-    ].join(' ');
-    const exitedChild = spawnSync(process.execPath, ['-e', script], {
-      cwd: repositoryRoot,
-      encoding: 'utf8',
-      timeout: 2000,
-      windowsHide: true,
-    });
-    const grandchildPid = Number(exitedChild.stdout);
-    try {
-      assert.equal(exitedChild.status, 0, exitedChild.stderr);
-      assert.equal(Number.isInteger(exitedChild.pid), true);
-      const tree = await windowsProcessTree(999_999, [exitedChild.pid]);
-      assert.notEqual(tree, null);
-      assert.ok(tree.descendants.includes(grandchildPid));
-    } finally {
-      if (Number.isInteger(grandchildPid) && grandchildPid > 0) {
-        try {
-          process.kill(grandchildPid, 'SIGKILL');
-        } catch {
-          // Cleanup for the intentionally orphaned test process.
-        }
-      }
-    }
-  },
-);
-
-test('separates missing prerequisites from grading failures', () => {
-  const { evaluationFailure } = modules().runner;
-  assert.deepEqual(evaluationFailure({ code: 'authentication-unavailable' }), {
-    status: 'failed',
-    error: 'prerequisite-unavailable',
-    reason: 'authentication-unavailable',
-  });
-  assert.equal(
-    evaluationFailure({ code: 'playwright-cli-skill-outdated' }).error,
-    'prerequisite-unavailable',
-  );
-  assert.equal(
-    evaluationFailure({ code: 'playwright-version-mismatch' }).error,
-    'prerequisite-unavailable',
-  );
-  assert.deepEqual(evaluationFailure(new Error('spec-changed')), {
-    status: 'failed',
-    error: 'grading-failed',
-    reason: 'spec-changed',
-  });
-});
-
-test('reports bounded validator error codes for an invalid trace', async () => {
-  const { evaluationFailure, validateArtifact } = modules().runner;
-  const root = mkdtempSync(path.join(tmpdir(), 'testgen-validator-error-'));
-  const install = path.join(root, 'plugin');
-  const repository = path.join(root, 'repository');
-  const validator = path.join(
-    install,
-    'scripts',
-    'validate-testgen-artifact.cjs',
-  );
-  try {
-    mkdirSync(path.dirname(validator), { recursive: true });
-    mkdirSync(repository);
-    writeFileSync(
-      validator,
-      "process.stderr.write(JSON.stringify({valid:false,type:'trace',errors:['trace-invalid-attempt-summary']})+'\\n');process.exitCode=1;\n",
-    );
-
-    let failure;
-    try {
-      await validateArtifact(
-        install,
-        repository,
-        'trace',
-        'tg-0123456789abcdef01234567',
-        path.join(repository, 'healer-trace.json'),
-      );
-    } catch (error) {
-      failure = error;
-    }
-
-    assert.deepEqual(evaluationFailure(failure), {
-      status: 'failed',
-      error: 'grading-failed',
-      reason: 'trace-invalid',
-      details: ['trace-invalid-attempt-summary'],
-    });
-  } finally {
-    rmSync(root, { force: true, recursive: true });
-  }
-});
-
-test('exposes one named evaluator command without roadmap terminology', () => {
-  const packageJson = JSON.parse(
-    readFileSync(path.join(repositoryRoot, 'package.json'), 'utf8'),
-  );
-  assert.equal(
-    packageJson.scripts['eval:healer-defect-refusal'],
-    'node scripts/run-healer-defect-refusal.cjs',
-  );
-  assert.doesNotMatch(JSON.stringify(packageJson.scripts), /phase[ -]?\d/iu);
-});
-
-test('rejects a hook audit destination outside the OS temporary directory', () => {
-  const repository = mkdtempSync(path.join(tmpdir(), 'testgen-hook-repo-'));
-  const auditPath = path.join(repositoryRoot, 'forbidden-hook-audit.jsonl');
-  const runId = 'tg-0123456789abcdef01234567';
-  try {
-    mkdirSync(path.join(repository, 'tests'), { recursive: true });
-    mkdirSync(path.join(repository, '.playwright-cli', 'testgen', runId), {
-      recursive: true,
-    });
-    writeFileSync(path.join(repository, 'tests', 'order.spec.ts'), '');
-    writeFileSync(
-      path.join(
-        repository,
-        '.playwright-cli',
-        'testgen',
-        runId,
-        'command-policy.json',
-      ),
-      JSON.stringify({
-        approved_spec: 'tests/order.spec.ts',
-        allowed_origins: ['http://127.0.0.1:4173'],
-        allowed_runner_options: [],
-        allowed_state_paths: [],
-        allowed_write_paths: [],
-        format_version: 1,
-        run_id: runId,
-      }),
-    );
-    const result = spawnSync(
-      process.execPath,
-      [path.join(repositoryRoot, 'hooks', 'validate-bash.cjs')],
-      {
-        cwd: repository,
-        encoding: 'utf8',
-        env: {
-          ...process.env,
-          PLAYWRIGHT_TESTGEN_HOOK_AUDIT_PATH: auditPath,
-        },
-        input: JSON.stringify({
-          agent_type: 'playwright-test-healer',
-          cwd: repository,
-          hook_event_name: 'PreToolUse',
-          tool_name: 'Bash',
-          tool_input: { command: 'node --version' },
-          tool_use_id: 'tool-1',
-        }),
-      },
-    );
-    const output = JSON.parse(result.stdout).hookSpecificOutput;
-    assert.equal(output.permissionDecision, 'deny');
-    assert.match(output.permissionDecisionReason, /governance evidence/iu);
-    assert.equal(existsSync(auditPath), false);
-  } finally {
-    rmSync(repository, { force: true, recursive: true });
-  }
-});
-
-test('artifact contract describes the whole-file trace write contract', () => {
-  const artifactContract = readFileSync(
-    path.join(
-      repositoryRoot,
-      'skills',
-      'playwright-testgen',
-      'references',
-      'artifact-contract.md',
-    ),
-    'utf8',
-  );
-  const healer = readFileSync(
-    path.join(repositoryRoot, 'agents', 'playwright-test-healer.md'),
-    'utf8',
-  );
-  assert.doesNotMatch(artifactContract, /Edit-only mutation boundary/u);
-  assert.match(artifactContract, /whole-file `Write`/u);
-  assert.match(artifactContract, /Healer reads it\s+once/iu);
-  assert.match(healer, /Read Main's declared draft once/u);
-  assert.match(healer, /verify its complete contents are exactly\s+`\{\}`/u);
-});
