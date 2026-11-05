@@ -154,7 +154,7 @@ async function collectInstalledCase(definition, signal, options) {
       options.datasetDigest?.() ?? hashFiles(root, options.datasetPaths);
     result.testgen_revision = await evaluatedRevision(signal);
     const tooling = await preflight(signal, result);
-    result.node = process.version;
+    result.node = process.versions.node;
     result.platform = process.platform;
     state.temporaryRoot = mkdtempSync(
       path.join(tmpdir(), state.temporaryPrefix),
@@ -194,7 +194,7 @@ async function collectInstalledCase(definition, signal, options) {
       definition.origin,
       signal,
     );
-    await verifyBrowserReadiness(
+    result.browsers = await verifyBrowserReadiness(
       tooling,
       state.repository,
       definition.origin,

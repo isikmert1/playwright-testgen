@@ -48,6 +48,7 @@ const {
   startServer,
   validateArtifact,
   verifyInstalledHook,
+  verifyBrowserReadiness,
 } = require('./eval/runtime.cjs');
 
 const repositoryRoot = path.resolve(__dirname, '..');
@@ -425,6 +426,13 @@ async function evaluateInstalledHealer(signal, selectedDefinition) {
     state.server = await startServer(
       state.repository,
       definition.origin,
+      signal,
+    );
+    runtime.browsers = await verifyBrowserReadiness(
+      prerequisite,
+      state.repository,
+      definition.origin,
+      temporaryRoot,
       signal,
     );
     const before = {

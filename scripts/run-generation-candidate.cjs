@@ -16,6 +16,8 @@ const {
   cleanupEvaluation,
   runApprovedSpec,
   hashFile,
+  hostProvenance,
+  inspectRunnerBrowser,
   startServer,
 } = require('./eval/runtime.cjs');
 
@@ -105,6 +107,7 @@ async function executeCandidate(approval, signal, options = {}) {
       npm: null,
       playwright: null,
       platform: process.platform,
+      host: hostProvenance(),
     },
   };
   try {
@@ -176,6 +179,7 @@ async function executeCandidate(approval, signal, options = {}) {
       error: 'runner-browser-unavailable',
       signal,
     });
+    result.runtime.browser = await inspectRunnerBrowser(repository, signal);
     state.server = await startServer(
       repository,
       descriptor.start.origin,

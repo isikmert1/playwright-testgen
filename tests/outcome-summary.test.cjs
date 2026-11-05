@@ -4,12 +4,14 @@ const {
   cpSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } = require('node:fs');
 const { tmpdir } = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { runInNewContext } = require('node:vm');
 const {
   combineResult,
   evaluationFailure,
@@ -59,6 +61,15 @@ function trial(caseId, index) {
       playwright: '1.62.1',
       playwright_cli: '0.1.19',
       platform: 'win32',
+      host: { os_release: '10.0.26100', image: null, image_version: null },
+      browsers: {
+        runner: { engine: 'chromium', version: '155.0.1.0' },
+        exploration: {
+          engine: 'chromium',
+          channel: 'chrome',
+          version: '156.0.2.0',
+        },
+      },
       agent_limits: {
         name: 'test-agent',
         model: 'claude-sonnet-5',
@@ -73,6 +84,12 @@ function trial(caseId, index) {
               npm: '11.0.0',
               playwright: '1.62.1',
               platform: 'win32',
+              host: {
+                os_release: '10.0.26100',
+                image: null,
+                image_version: null,
+              },
+              browser: { engine: 'chromium', version: '155.0.1.0' },
             },
           }
         : {}),
@@ -435,6 +452,29 @@ test('scoring CLI fails critical integrity even for a complete cohort', () => {
   }
 });
 
+test('keeps dataset identity identical across path separator styles', () => {
+  const filename = path.resolve(__dirname, '../scripts/score-outcomes.cjs');
+  const source = readFileSync(filename, 'utf8');
+  const digest = (style) => {
+    const scorer = { exports: {} };
+    const simulatedPath = {
+      ...path,
+      join(first, ...parts) {
+        return path.isAbsolute(first)
+          ? path.join(first, ...parts.map((part) => part.replaceAll('\\', '/')))
+          : style.join(first, ...parts);
+      },
+    };
+    runInNewContext(source, {
+      __dirname: path.dirname(filename),
+      require: (name) => (name === 'node:path' ? simulatedPath : require(name)),
+      module: scorer,
+    });
+    return scorer.exports.datasetDigest();
+  };
+  assert.equal(digest(path.win32), digest(path.posix));
+});
+
 test('changes dataset identity when Windows evaluation cleanup changes', () => {
   const directory = mkdtempSync(path.join(tmpdir(), 'testgen-dataset-'));
   const repository = path.resolve(__dirname, '..');
@@ -484,6 +524,40 @@ test('refuses incompatible comparisons and catches a green candidate with weak a
     assertion_specificity: 0,
   };
   assert.equal(baseline.profiles.refusal.agent_limits?.max_budget_usd, 2);
+  const missingBrowser = attempts.map((value) => ({
+    ...value,
+    profile: { ...value.profile, browsers: {} },
+  }));
+  assert.equal(
+    summarizeOutcomeTrials(definitions, missingBrowser, 'dataset', 'revision')
+      .status,
+    'incomplete',
+  );
+  const changedBrowser = attempts.map((value) => ({
+    ...value,
+    profile: {
+      ...value.profile,
+      browsers: {
+        ...value.profile.browsers,
+        exploration: {
+          ...value.profile.browsers.exploration,
+          version: '157.0.0.0',
+        },
+      },
+    },
+  }));
+  assert.equal(
+    compareOutcomeSummaries(
+      baseline,
+      summarizeOutcomeTrials(
+        definitions,
+        changedBrowser,
+        'dataset',
+        'revision',
+      ),
+    ).status,
+    'incompatible',
+  );
   const changedLimits = attempts.map((value) => ({
     ...value,
     profile: {
@@ -591,6 +665,7 @@ test('requires independent execution and criterion review for a generated candid
         status: 'checkpoint',
         dataset_sha256: 'dataset',
         candidate_sha256: 'abc',
+        runtime: trial('generation', 1).profile,
         cleanup: { status: 'passed' },
       }),
     );
@@ -655,6 +730,14 @@ test('requires independent execution and criterion review for a generated candid
       }),
     );
     assert.equal(readTrial(directory, definition).complete, true);
+    assert.deepEqual(
+      readTrial(directory, definition).profile.browsers,
+      trial('generation', 1).profile.browsers,
+    );
+    assert.deepEqual(
+      readTrial(directory, definition).profile.host,
+      trial('generation', 1).profile.host,
+    );
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

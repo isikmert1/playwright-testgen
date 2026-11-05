@@ -12,7 +12,7 @@ const {
   rmSync,
   writeFileSync,
 } = require('node:fs');
-const { tmpdir } = require('node:os');
+const { release, tmpdir } = require('node:os');
 const path = require('node:path');
 const { exactPlaywrightFilter } = require('../../hooks/run-policy.cjs');
 const { currentHead } = require('../repository-snapshot.cjs');
@@ -186,6 +186,36 @@ function assertPluginBlind(source) {
     fail('installed-evaluation-material');
 }
 
+function hostProvenance() {
+  return {
+    os_release: release(),
+    image: process.env.ImageOS ?? null,
+    image_version: process.env.ImageVersion ?? null,
+  };
+}
+
+function browserIdentity(value) {
+  if (
+    !['chromium', 'firefox', 'webkit'].includes(value?.engine) ||
+    typeof value.version !== 'string' ||
+    !/^\d+(?:\.\d+){1,3}$/u.test(value.version)
+  )
+    fail('browser-identity-unverified');
+  return { engine: value.engine, version: value.version };
+}
+
+async function inspectRunnerBrowser(repository, signal) {
+  const output = await command(
+    process.execPath,
+    [
+      '-e',
+      "(async()=>{const browser=await require('playwright').chromium.launch();try{process.stdout.write(JSON.stringify({engine:browser.browserType().name(),version:browser.version()}))}finally{await browser.close()}})().catch(()=>{process.exitCode=1})",
+    ],
+    { cwd: repository, error: 'runner-browser-unavailable', signal },
+  );
+  return browserIdentity(readJsonOutput(output, 'browser-identity-unverified'));
+}
+
 async function verifyBrowserReadiness(
   tooling,
   repository,
@@ -193,14 +223,7 @@ async function verifyBrowserReadiness(
   temporaryRoot,
   signal,
 ) {
-  await command(
-    process.execPath,
-    [
-      '-e',
-      "require('playwright').chromium.launch().then(async (browser) => browser.close())",
-    ],
-    { cwd: repository, error: 'runner-browser-unavailable', signal },
-  );
+  const runner = await inspectRunnerBrowser(repository, signal);
   const session = `preflight-${randomBytes(8).toString('hex')}`;
   const directory = path.join(temporaryRoot, 'cli-preflight');
   mkdirSync(directory);
@@ -217,6 +240,7 @@ async function verifyBrowserReadiness(
       },
     );
   let failure = null;
+  let exploration;
   try {
     const launch = await invoke('open', [origin]);
     if (
@@ -226,6 +250,26 @@ async function verifyBrowserReadiness(
       launch.spawn_error != null
     )
       throw new Error('cli-browser-unavailable');
+    const identity = await invoke('run-code', [
+      'async (page) => ({ engine: page.context().browser().browserType().name(), version: page.context().browser().version() })',
+      '--json',
+    ]);
+    const sessions = await invoke('list', ['--json']);
+    if (identity.status !== 0 || sessions.status !== 0)
+      fail('browser-identity-unverified');
+    const metadata = browserIdentity(
+      readJsonOutput(
+        readJsonOutput(identity.output, 'browser-identity-unverified').result,
+        'browser-identity-unverified',
+      ),
+    );
+    const channel = readJsonOutput(
+      sessions.output,
+      'browser-identity-unverified',
+    ).browsers?.find((browser) => browser.name === session)?.browserType;
+    if (typeof channel !== 'string' || !/^[a-z][a-z0-9-]{0,39}$/u.test(channel))
+      fail('browser-identity-unverified');
+    exploration = { ...metadata, channel };
   } catch (error) {
     failure = error;
   }
@@ -241,6 +285,7 @@ async function verifyBrowserReadiness(
       failure == null ? [] : ['cli-browser-cleanup-failed'],
     );
   if (failure != null) throw failure;
+  return { runner, exploration };
 }
 
 function allTests(suites) {
@@ -427,6 +472,7 @@ function normalizedMarketplaceState(value) {
 async function preflight(signal, runtime) {
   if (!versionAtLeast(process.versions.node, '22.13.0'))
     fail('node-version-unsupported');
+  runtime.host = hostProvenance();
   const npmCli = process.env.npm_execpath;
   if (typeof npmCli !== 'string' || !existsSync(npmCli))
     fail('npm-unavailable');
@@ -1017,6 +1063,8 @@ module.exports = {
   verifyBrowserReadiness,
   evaluatedRevision,
   installPlugin,
+  hostProvenance,
+  inspectRunnerBrowser,
   findInstalledPlugin,
   hashFile,
   hashFiles,

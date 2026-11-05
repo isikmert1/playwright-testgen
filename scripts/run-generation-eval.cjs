@@ -132,6 +132,7 @@ async function collectCandidate(definition, signal, options = {}) {
     result.claude_code = runtime.claude_code;
     result.node = process.versions.node;
     result.npm = runtime.npm;
+    result.host = runtime.host;
     result.platform = process.platform;
     result.agent_limits = definition.agent;
     const source = await preparePluginSource(
@@ -209,7 +210,7 @@ async function collectCandidate(definition, signal, options = {}) {
       target.start.origin,
       signal,
     );
-    await verifyBrowserReadiness(
+    result.browsers = await verifyBrowserReadiness(
       tooling,
       state.repository,
       target.start.origin,

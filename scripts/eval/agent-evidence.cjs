@@ -536,7 +536,7 @@ function emptyRuntime() {
     model: null,
     model_requested: null,
     model_resolved: null,
-    node: process.version,
+    node: process.versions.node,
     npm: null,
     playwright: null,
     playwright_cli: null,

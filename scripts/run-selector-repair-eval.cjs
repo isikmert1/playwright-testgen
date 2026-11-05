@@ -36,6 +36,7 @@ const {
   startServer,
   validateArtifact,
   verifyInstalledHook,
+  verifyBrowserReadiness,
 } = require('./eval/runtime.cjs');
 const { buildHealerPrompt } = require('./run-healer-defect-refusal.cjs');
 const { scoreSelectorRepair } = require('./score-selector-repair.cjs');
@@ -156,6 +157,7 @@ async function evaluateRepair(definition, approvedDigest, signal) {
     result.claude_code = runtime.claude_code;
     result.node = process.versions.node;
     result.npm = runtime.npm;
+    result.host = runtime.host;
     result.platform = process.platform;
     result.agent_limits = definition.agent;
     const source = await preparePluginSource(
@@ -249,6 +251,13 @@ async function evaluateRepair(definition, approvedDigest, signal) {
     result.playwright = compatibility.playwright.version;
     result.playwright_cli = compatibility.playwright_cli.version;
     result.installed_runtime_sha256 = installed.runtime_sha256;
+    result.browsers = await verifyBrowserReadiness(
+      tooling,
+      state.repository,
+      descriptor.start.origin,
+      state.temporaryRoot,
+      signal,
+    );
 
     const runId = `tg-${randomBytes(12).toString('hex')}`;
     result.run_id = runId;

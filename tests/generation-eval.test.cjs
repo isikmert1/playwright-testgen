@@ -88,6 +88,52 @@ test('generation evidence rejects spec execution but allows collection', () => {
   );
 });
 
+test('browser readiness records actual browser identities and closes both browsers', async (t) => {
+  const repository = mkdtempSync(
+    path.join(tmpdir(), 'testgen-browser-identity-'),
+  );
+  t.after(() => rmSync(repository, { recursive: true, force: true }));
+  const browserModule = path.join(repository, 'node_modules', 'playwright');
+  mkdirSync(browserModule, { recursive: true });
+  writeFileSync(
+    path.join(browserModule, 'index.js'),
+    `exports.chromium = { launch: async () => ({
+      browserType: () => ({ name: () => 'chromium' }),
+      version: () => '155.0.1.0',
+      close: async () => require('node:fs').writeFileSync('runner-closed', '')
+    }) };`,
+  );
+  const cli = path.join(repository, 'cli.cjs');
+  writeFileSync(
+    cli,
+    `const fs = require('node:fs');
+    const session = process.argv[2].slice(3);
+    if (process.argv.includes('open')) fs.writeFileSync('session-open', session);
+    else if (process.argv.includes('run-code')) console.log(JSON.stringify({result: JSON.stringify({engine:'chromium',version:'156.0.2.0'})}));
+    else if (process.argv.includes('list')) console.log(JSON.stringify({browsers:[{name:session,browserType:'chrome'}]}));
+    else fs.unlinkSync('session-open');`,
+  );
+  const identities = await verifyBrowserReadiness(
+    { playwright_cli: cli },
+    repository,
+    'http://localhost:4173',
+    repository,
+  );
+  assert.deepEqual(identities, {
+    runner: { engine: 'chromium', version: '155.0.1.0' },
+    exploration: {
+      engine: 'chromium',
+      channel: 'chrome',
+      version: '156.0.2.0',
+    },
+  });
+  assert.equal(existsSync(path.join(repository, 'runner-closed')), true);
+  assert.equal(
+    existsSync(path.join(repository, 'cli-preflight', 'session-open')),
+    false,
+  );
+});
+
 test('cancelled browser preflight closes its partially opened session', async (t) => {
   const repository = mkdtempSync(path.join(tmpdir(), 'testgen-preflight-'));
   t.after(() => rmSync(repository, { recursive: true, force: true }));
@@ -95,7 +141,7 @@ test('cancelled browser preflight closes its partially opened session', async (t
   mkdirSync(browserModule, { recursive: true });
   writeFileSync(
     path.join(browserModule, 'index.js'),
-    'exports.chromium = { launch: async () => ({ close: async () => {} }) };',
+    "exports.chromium = { launch: async () => ({ browserType: () => ({ name: () => 'chromium' }), version: () => '155.0.1.0', close: async () => {} }) };",
   );
   const cli = path.join(repository, 'cli.cjs');
   writeFileSync(

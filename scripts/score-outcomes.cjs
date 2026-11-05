@@ -68,8 +68,10 @@ function datasetDigest() {
     'scripts/process.cjs',
   );
   const hash = createHash('sha256');
-  for (const relative of files.sort()) {
-    hash.update(relative.replaceAll('\\', '/'));
+  for (const relative of files
+    .map((file) => file.replaceAll('\\', '/'))
+    .sort()) {
+    hash.update(relative);
     hash.update('\0');
     hash.update(readFileSync(path.join(root, relative)));
     hash.update('\0');
@@ -103,6 +105,8 @@ function profile(result) {
     playwright: runtime.playwright ?? null,
     playwright_cli: runtime.playwright_cli ?? null,
     platform: runtime.platform ?? null,
+    host: runtime.host ?? null,
+    browsers: runtime.browsers ?? null,
     agent_limits: runtime.agent_limits ?? null,
   };
 }
@@ -425,16 +429,28 @@ function summarizeOutcomeTrials(
       distinct.size !== 1 ||
       recordedProfile == null ||
       Object.values(runtime).some((item) => item == null) ||
+      typeof runtime.host?.os_release !== 'string' ||
+      runtime.host.os_release.length === 0 ||
+      !['runner', 'exploration'].every((name) =>
+        ['engine', 'version'].every(
+          (key) =>
+            typeof runtime.browsers?.[name]?.[key] === 'string' &&
+            runtime.browsers[name][key].length > 0,
+        ),
+      ) ||
+      typeof runtime.browsers.exploration.channel !== 'string' ||
       typeof limits?.name !== 'string' ||
       typeof limits?.model !== 'string' ||
       !['max_turns', 'timeout_ms', 'max_budget_usd'].every(
         (key) => Number.isFinite(limits?.[key]) && limits[key] > 0,
       ) ||
       (definition.kind === 'generation' &&
-        ['node', 'npm', 'playwright', 'platform'].some(
+        (['node', 'npm', 'playwright', 'platform'].some(
           (key) =>
             typeof execution?.[key] !== 'string' || execution[key].length === 0,
-        )) ||
+        ) ||
+          typeof execution.host?.os_release !== 'string' ||
+          typeof execution.browser?.version !== 'string')) ||
       value.attempts.some((trial) => trial.testgen_revision !== revision)
     )
       profileCompatible = false;

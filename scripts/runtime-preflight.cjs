@@ -386,7 +386,7 @@ function runtimePreflight(options) {
 
   return {
     ok: true,
-    node: process.version,
+    node: process.versions.node,
     git_head: gitHead,
     playwright: {
       path: playwright.path,
