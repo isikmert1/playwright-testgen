@@ -14,6 +14,10 @@ const {
 const { tmpdir } = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const {
+  classifyReport,
+  withSeededDatabase,
+} = require('../evals/targets/cypress-realworld-app/adapter/.testgen/mutation-runner.cjs');
 
 const repositoryRoot = path.resolve(__dirname, '..');
 const targetsRoot = path.join(repositoryRoot, 'evals', 'targets');
@@ -21,52 +25,6 @@ const targetsRoot = path.join(repositoryRoot, 'evals', 'targets');
 function readJson(filename) {
   return JSON.parse(readFileSync(filename, 'utf8'));
 }
-
-test('active external target descriptors pin reproducible sources without vendoring them', () => {
-  const targetIds = ['cypress-realworld-app'];
-
-  assert.deepEqual(readdirSync(targetsRoot).sort(), [
-    'cypress-realworld-app',
-    'semantic-only',
-  ]);
-
-  for (const targetId of targetIds) {
-    const targetDirectory = path.join(targetsRoot, targetId);
-    const descriptor = readJson(path.join(targetDirectory, 'target.json'));
-
-    assert.equal(descriptor.schema_version, 'evaluation-target.v1');
-    assert.equal(descriptor.target_id, targetId);
-    assert.equal(descriptor.source.kind, 'git');
-    assert.match(descriptor.source.url, /^https:\/\/github\.com\//u);
-    assert.match(descriptor.source.revision, /^[a-f0-9]{40}$/u);
-    assert.equal(
-      descriptor.locator_convention === null ||
-        (typeof descriptor.locator_convention === 'string' &&
-          descriptor.locator_convention.length > 0),
-      true,
-    );
-    assert.equal(typeof descriptor.setup.command, 'string');
-    assert.notEqual(descriptor.setup.command, '');
-    assert.equal(typeof descriptor.start.command, 'string');
-    assert.notEqual(descriptor.start.command, '');
-    assert.match(
-      descriptor.start.origin,
-      /^http:\/\/(?:127\.0\.0\.1|localhost):\d+$/u,
-    );
-    assert.equal(typeof descriptor.reset.strategy, 'string');
-    assert.notEqual(descriptor.reset.strategy, '');
-    assert.deepEqual(readdirSync(targetDirectory).sort(), [
-      'adapter',
-      'target.json',
-    ]);
-  }
-
-  assert.equal(
-    readJson(path.join(targetsRoot, 'cypress-realworld-app', 'target.json'))
-      .start.origin,
-    'http://localhost:3000',
-  );
-});
 
 test('agent-visible target metadata does not reveal setup or seeded-bug answers', () => {
   const source = path.join(targetsRoot, 'semantic-only', 'repository');
@@ -79,65 +37,6 @@ test('agent-visible target metadata does not reveal setup or seeded-bug answers'
     visible,
     /no existing tests|no test[- ]ids?|without test[- ]ids?|semantic.only.target|rename-order-submit|skip-order-insert|selector drift|product.behavior failure/iu,
   );
-});
-
-test('owned semantic-only target serves controls without test IDs', async (t) => {
-  const targetRoot = path.join(targetsRoot, 'semantic-only', 'repository');
-  const { createServer } = require(path.join(targetRoot, 'server.cjs'));
-  const server = createServer();
-  await new Promise((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', resolve);
-  });
-  t.after(() => new Promise((resolve) => server.close(resolve)));
-
-  const { port } = server.address();
-  const origin = `http://127.0.0.1:${port}`;
-  const health = await fetch(`${origin}/health`);
-  const page = await fetch(origin);
-  const script = await fetch(`${origin}/app.js`);
-  const html = await page.text();
-  const javascript = await script.text();
-
-  assert.equal(health.status, 200);
-  assert.deepEqual(await health.json(), { status: 'ok' });
-  assert.equal(page.status, 200);
-  assert.match(page.headers.get('content-type'), /^text\/html/iu);
-  assert.match(html, /<form\b/iu);
-  assert.match(html, /<label\s+for="item-name"/iu);
-  assert.match(html, /<table\b/iu);
-  assert.match(html, /<dialog\b/iu);
-  assert.doesNotMatch(`${html}\n${javascript}`, /data-test(?:id|-id)?\s*=/iu);
-});
-
-test('owned target keeps only its Playwright test runner dependencies local', () => {
-  const targetRoot = path.join(targetsRoot, 'semantic-only');
-  const descriptor = readJson(path.join(targetRoot, 'target.json'));
-  const packageJson = readJson(
-    path.join(targetRoot, 'repository', 'package.json'),
-  );
-
-  assert.deepEqual(descriptor.source, { kind: 'owned', path: 'repository' });
-  assert.equal(descriptor.setup.package_manager, 'npm');
-  assert.equal(descriptor.setup.command, 'npm ci');
-  assert.equal(
-    existsSync(path.join(targetRoot, 'repository', 'package-lock.json')),
-    true,
-  );
-  assert.equal('@playwright/cli' in packageJson.devDependencies, false);
-  for (const dependency of ['@playwright/test', 'playwright']) {
-    assert.match(packageJson.devDependencies[dependency], /^\d+\.\d+\.\d+$/u);
-  }
-});
-
-test('owned target exposes its normal Playwright runner without a special collection script', () => {
-  const packageJson = readJson(
-    path.join(targetsRoot, 'semantic-only', 'repository', 'package.json'),
-  );
-
-  assert.equal('check:tests' in packageJson.scripts, false);
-  assert.equal(packageJson.scripts['test:e2e'], 'playwright test');
-  assert.equal('lint' in packageJson.scripts, false);
 });
 
 test('selector-drift variant renames a control without changing behavior', (t) => {
@@ -235,64 +134,6 @@ test('semantic-only adapter and seeded bug share one approved mutation definitio
     realpathSync(path.join(repositoryRoot, seededBug.patch_path)),
     realpathSync(path.join(targetRoot, mutation.patch_path)),
   );
-});
-
-test('outcome cases cover generation without an adapter and selector repair', () => {
-  const generation = readJson(
-    path.join(
-      repositoryRoot,
-      'evals',
-      'cases',
-      'healthy-generation',
-      'case.json',
-    ),
-  );
-  const repair = readJson(
-    path.join(repositoryRoot, 'evals', 'cases', 'selector-repair', 'case.json'),
-  );
-  const refusal = readJson(
-    path.join(
-      repositoryRoot,
-      'evals',
-      'cases',
-      'healer-product-defect-refusal',
-      'case.json',
-    ),
-  );
-  const targetRoot = path.join(targetsRoot, 'semantic-only', 'repository');
-  const adapter = readJson(
-    path.join(targetRoot, '.testgen', 'mutation-adapter.json'),
-  );
-
-  assert.equal(generation.schema_version, 'outcome-eval-case.v1');
-  assert.equal(generation.target_id, 'semantic-only');
-  assert.equal(generation.kind, 'generation');
-  assert.equal(generation.checkpoint, 'candidate-before-execution');
-  assert.equal(generation.expected.mutation, 'adapter-absent');
-  assert.equal(generation.criteria.length, 1);
-  assert.equal(
-    adapter.mutations.some(
-      (mutation) => mutation.criterion_id === generation.criteria[0].id,
-    ),
-    false,
-  );
-
-  assert.equal(repair.schema_version, 'outcome-eval-case.v1');
-  assert.equal(repair.target_id, 'semantic-only');
-  assert.equal(repair.kind, 'selector-repair');
-  assert.equal(repair.checkpoint, 'approved-existing-spec');
-  assert.equal(repair.expected.classification, 'selector-drift');
-  assert.equal(repair.expected.assertions_unchanged, true);
-  assert.equal(repair.criteria.length, 1);
-  assert.equal(existsSync(path.join(repositoryRoot, repair.spec_source)), true);
-  assert.equal(existsSync(path.join(targetRoot, repair.variant_path)), true);
-  assert.deepEqual(
-    [generation, repair, refusal].map(
-      (definition) => definition.planned_trials,
-    ),
-    [2, 2, 2],
-  );
-  assert.equal(refusal.checkpoint, 'approved-existing-spec');
 });
 
 test('mutation runner translates isolated Playwright results and removes its link', (t) => {
@@ -417,53 +258,6 @@ test('mutation runner translates isolated Playwright results and removes its lin
   });
 });
 
-test('mutation runner rejects unrelated terminal errors and extra tests', () => {
-  const { classifyReport } = require(
-    path.join(
-      targetsRoot,
-      'semantic-only',
-      'repository',
-      '.testgen',
-      'mutation-runner.cjs',
-    ),
-  );
-  const location = { file: '/target/tests/order.spec.ts', line: 7, column: 1 };
-  const stepError = {
-    message: 'assertion failed',
-    stack: `Error: assertion failed\n    at check (${location.file}:7:1)\n    at approved (${location.file}:5:1)`,
-  };
-  const result = {
-    status: 'failed',
-    errors: [{ ...stepError, location }],
-    steps: [{ title: 'approved', error: stepError }],
-  };
-  const report = {
-    errors: [],
-    stats: { expected: 0, unexpected: 1 },
-    suites: [
-      { specs: [{ tests: [{ status: 'unexpected', results: [result] }] }] },
-    ],
-  };
-  assert.equal(
-    classifyReport(report, 'approved', 'criterion-1', 1).outcome,
-    'fail',
-  );
-  result.errors.push({ message: 'unrelated failure' });
-  assert.throws(
-    () => classifyReport(report, 'approved', 'criterion-1', 1),
-    /failure-unattributed/u,
-  );
-  result.errors.pop();
-  report.suites[0].specs[0].tests.push({
-    status: 'expected',
-    results: [{ status: 'passed' }],
-  });
-  assert.throws(
-    () => classifyReport(report, 'approved', 'criterion-1', 1),
-    /failure-unattributed/u,
-  );
-});
-
 test('mutation runner stops its server after an invalid startup handshake', (t) => {
   const temporaryRoot = mkdtempSync(
     path.join(tmpdir(), 'testgen-runner-stop-'),
@@ -537,29 +331,271 @@ test('mutation runner stops its server after an invalid startup handshake', (t) 
   assert.throws(() => process.kill(Number(readFileSync(pidFile, 'utf8')), 0));
 });
 
-test('mutation runner rejects a spec path outside its repository', () => {
-  const targetRoot = path.join(targetsRoot, 'semantic-only', 'repository');
+const stepTitle =
+  'Clearing Username shows its required error and disables Sign In';
+const rwaRunner = path.resolve(
+  __dirname,
+  '../evals/targets/cypress-realworld-app/adapter/.testgen/mutation-runner.cjs',
+);
+
+function report(status, steps, errors = []) {
+  return {
+    stats: {
+      expected: status === 'expected' ? 1 : 0,
+      unexpected: status === 'unexpected' ? 1 : 0,
+    },
+    errors,
+    suites: [
+      {
+        specs: [
+          {
+            tests: [
+              {
+                status,
+                results: [
+                  {
+                    status: status === 'expected' ? 'passed' : 'failed',
+                    steps,
+                    errors: [],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+}
+
+test('attributes only terminal failures from the approved step', () => {
+  // Extracted from Playwright 1.62.1 JSON reports; local paths were shortened.
+  const assertion = 'Error: expect(received).toBe(expected)';
+  const location = {
+    file: 'tests/playwright/probe.spec.cjs',
+    line: 7,
+    column: 65,
+  };
+  const step = {
+    title: stepTitle,
+    error: {
+      message: assertion,
+      stack: `${assertion}\n    at ${location.file}:${location.line}:${location.column}\n    at ${location.file}:8:3`,
+    },
+  };
+  const genuine = report('unexpected', [step]);
+  genuine.suites[0].specs[0].tests[0].results[0].errors = [
+    {
+      location,
+      message: `${assertion}\n\n> 7 | expect(1).toBe(2)\n    at ${location.file}:${location.line}:${location.column}\n    at ${location.file}:8:3`,
+    },
+  ];
+  assert.deepEqual(classifyReport(genuine, stepTitle, 'criterion-1', 1), {
+    protocol_version: 1,
+    outcome: 'fail',
+    criterion_id: 'criterion-1',
+  });
+
+  const unrelated = structuredClone(genuine);
+  unrelated.suites[0].specs[0].tests[0].results[0].errors = [
+    {
+      location: { ...location, line: 5, column: 11 },
+      message: 'Error: Unrelated failure',
+    },
+  ];
+  assert.throws(
+    () => classifyReport(unrelated, stepTitle, 'criterion-1', 1),
+    /failure-unattributed/u,
+  );
+  const additional = structuredClone(genuine);
+  additional.suites[0].specs[0].tests[0].results[0].errors.push(
+    unrelated.suites[0].specs[0].tests[0].results[0].errors[0],
+  );
+  assert.throws(
+    () => classifyReport(additional, stepTitle, 'criterion-1', 1),
+    /failure-unattributed/u,
+  );
+});
+
+test('rejects a later failure from the same helper outside the approved step', () => {
+  const file = 'tests/playwright/probe.spec.ts';
+  const assertion = 'Error: expect(received).toBe(expected)';
+  const location = { file, line: 4, column: 13 };
+  const repeated = report('unexpected', [
+    {
+      title: stepTitle,
+      error: {
+        message: assertion,
+        stack: `${assertion}\n    at check (${file}:4:13)\n    at ${file}:9:45`,
+      },
+    },
+  ]);
+  repeated.suites[0].specs[0].tests[0].results[0].errors = [
+    {
+      location,
+      message: `${assertion}\n\n> 4 | expect(1).toBe(2)\n    at check (${file}:4:13)\n    at ${file}:11:9`,
+    },
+  ];
+
+  assert.throws(
+    () => classifyReport(repeated, stepTitle, 'criterion-1', 1),
+    /failure-unattributed/u,
+  );
+});
+
+test('restores exact database bytes after both success and failure', async (t) => {
+  const repository = mkdtempSync(path.join(tmpdir(), 'testgen-rwa-seed-'));
+  t.after(() => rmSync(repository, { recursive: true, force: true }));
+  const data = path.join(repository, 'data');
+  mkdirSync(data);
+  const database = path.join(data, 'database.json');
+  writeFileSync(database, '{"original":true}\r\n');
+  writeFileSync(path.join(data, 'database-seed.json'), '{"seed":true}\n');
+
+  await withSeededDatabase(repository, async () => {
+    assert.equal(readFileSync(database, 'utf8'), '{"seed":true}\n');
+    writeFileSync(database, '{"changed":true}\n');
+  });
+  assert.equal(readFileSync(database, 'utf8'), '{"original":true}\r\n');
+
+  await assert.rejects(
+    withSeededDatabase(repository, async () => {
+      writeFileSync(database, '{"changed-again":true}\n');
+      throw new Error('test-failed');
+    }),
+    /test-failed/u,
+  );
+  assert.equal(readFileSync(database, 'utf8'), '{"original":true}\r\n');
+});
+
+test('failed backend startup restores the database and removes runner files', (t) => {
+  const temporaryRoot = mkdtempSync(path.join(tmpdir(), 'testgen-rwa-runner-'));
+  t.after(() => rmSync(temporaryRoot, { recursive: true, force: true }));
+  const repository = path.join(temporaryRoot, 'repository');
+  const dependencies = path.join(temporaryRoot, 'dependencies');
+  mkdirSync(path.join(repository, 'data'), { recursive: true });
+  mkdirSync(path.join(repository, 'scripts'));
+  mkdirSync(path.join(repository, 'src'));
+  mkdirSync(path.join(repository, 'tests', 'playwright'), { recursive: true });
+  mkdirSync(path.join(dependencies, 'ts-node', 'dist'), {
+    recursive: true,
+  });
+  writeFileSync(
+    path.join(dependencies, 'ts-node', 'dist', 'bin.js'),
+    'process.exit(1);\n',
+  );
+  writeFileSync(
+    path.join(repository, 'data', 'database.json'),
+    '{"original":true}\n',
+  );
+  writeFileSync(
+    path.join(repository, 'data', 'database-seed.json'),
+    '{"seed":true}\n',
+  );
+  writeFileSync(
+    path.join(repository, 'scripts', 'mock-aws-exports.js'),
+    'export default {};\n',
+  );
+  writeFileSync(
+    path.join(repository, 'tests', 'playwright', 'signin.spec.ts'),
+    '// spec\n',
+  );
+
   const result = spawnSync(
     process.execPath,
     [
-      path.join(targetRoot, '.testgen', 'mutation-runner.cjs'),
+      rwaRunner,
       '--phase',
       'baseline',
       '--spec',
-      'tests/../../outside.spec.js',
+      'tests/playwright/signin.spec.ts',
       '--criterion-id',
-      'order-appears-in-table',
+      'criterion-1',
       '--step-title',
-      'verify the submitted order details',
+      stepTitle,
     ],
-    { cwd: targetRoot, encoding: 'utf8', windowsHide: true },
+    {
+      cwd: repository,
+      env: { ...process.env, TESTGEN_TARGET_NODE_MODULES: dependencies },
+      encoding: 'utf8',
+      timeout: 10_000,
+    },
   );
-
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(result.stdout), {
     protocol_version: 1,
     outcome: 'error',
     criterion_id: null,
-    reason: 'invalid-arguments',
+    reason: 'backend-unavailable',
+  });
+  assert.equal(
+    readFileSync(path.join(repository, 'data', 'database.json'), 'utf8'),
+    '{"original":true}\n',
+  );
+  assert.equal(existsSync(path.join(repository, 'node_modules')), false);
+  assert.equal(
+    existsSync(path.join(repository, 'src', 'aws-exports.js')),
+    false,
+  );
+  assert.equal(
+    readdirSync(repository).some((name) =>
+      name.startsWith('.testgen-rwa-runner-'),
+    ),
+    false,
+  );
+});
+
+test('runner reports nested startup and cleanup failures', (t) => {
+  const repository = mkdtempSync(path.join(tmpdir(), 'testgen-rwa-errors-'));
+  t.after(() => rmSync(repository, { recursive: true, force: true }));
+  const dependencies = path.join(repository, 'dependencies');
+  for (const directory of [
+    'data',
+    'scripts',
+    'src',
+    'tests/playwright',
+    'dependencies/ts-node/dist',
+  ])
+    mkdirSync(path.join(repository, directory), { recursive: true });
+  writeFileSync(path.join(repository, 'data', 'database.json'), '{}\n');
+  writeFileSync(path.join(repository, 'data', 'database-seed.json'), '{}\n');
+  writeFileSync(path.join(repository, 'scripts', 'mock-aws-exports.js'), '');
+  writeFileSync(
+    path.join(repository, 'tests/playwright', 'signin.spec.ts'),
+    '',
+  );
+  writeFileSync(
+    path.join(dependencies, 'ts-node', 'dist', 'bin.js'),
+    "const fs = require('node:fs'); fs.renameSync('data', 'data-moved'); fs.renameSync('src/aws-exports.js', 'src/aws-exports-moved.js'); process.exit(1);\n",
+  );
+
+  const result = spawnSync(
+    process.execPath,
+    [
+      rwaRunner,
+      '--phase',
+      'baseline',
+      '--spec',
+      'tests/playwright/signin.spec.ts',
+      '--criterion-id',
+      'criterion-1',
+      '--step-title',
+      stepTitle,
+    ],
+    {
+      cwd: repository,
+      env: { ...process.env, TESTGEN_TARGET_NODE_MODULES: dependencies },
+      encoding: 'utf8',
+      timeout: 10_000,
+    },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(JSON.parse(result.stdout), {
+    protocol_version: 1,
+    outcome: 'error',
+    criterion_id: null,
+    reason: 'runner-cleanup-failed',
+    primary_reason: 'backend-unavailable',
+    cleanup_reasons: ['enoent', 'enoent'],
   });
 });

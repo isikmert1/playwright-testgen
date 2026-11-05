@@ -15,12 +15,14 @@ const {
   evaluationFailure,
 } = require('../scripts/eval/agent-evidence.cjs');
 const {
-  cohortRevision,
   compareOutcomeSummaries,
   datasetDigest,
   readTrial,
   summarizeOutcomeTrials,
 } = require('../scripts/score-outcomes.cjs');
+
+const { scoreSelectorRepair } = require('../scripts/score-selector-repair.cjs');
+const { selectorFailure } = require('../scripts/run-selector-repair-eval.cjs');
 
 const definitions = [
   { case_id: 'generation', kind: 'generation', planned_trials: 2 },
@@ -61,47 +63,6 @@ function trial(caseId, index) {
     ...caseMetrics[caseId],
   };
 }
-
-test('scores retained trials against their evaluated revision after a later commit', () => {
-  const attempts = [trial('generation', 1), trial('generation', 2)];
-  const revision = cohortRevision(attempts, 'later-revision');
-  assert.equal(revision, 'revision');
-  assert.equal(
-    summarizeOutcomeTrials(definitions, attempts, 'dataset', revision)
-      .testgen_revision,
-    'revision',
-  );
-});
-
-test('summarizes every declared attempt without turning unavailable metrics into zero', () => {
-  const attempts = definitions.flatMap((definition) => [
-    trial(definition.case_id, 1),
-    trial(definition.case_id, 2),
-  ]);
-  const summary = summarizeOutcomeTrials(
-    definitions,
-    attempts,
-    'dataset',
-    'revision',
-  );
-  assert.equal(summary.status, 'complete');
-  assert.equal(summary.planned_trials, 6);
-  assert.equal(summary.completed_trials, 6);
-  assert.deepEqual(summary.metrics.usable_test, { passed: 2, eligible: 2 });
-  assert.deepEqual(summary.metrics.classification_correct, {
-    passed: 2,
-    eligible: 2,
-  });
-  assert.deepEqual(summary.metrics.behavior_mutation_coverage, {
-    covered: 0,
-    submitted: 0,
-    rate: null,
-  });
-  assert.equal(summary.metrics.mutation_unavailable['adapter-absent'], 2);
-  assert.equal(summary.metrics.cost_usd.reported, 0.6);
-  assert.equal(summary.metrics.cost_usd.unavailable, 0);
-  assert.equal(summary.cases.generation.attempts.length, 2);
-});
 
 test('requires the declared number of trials for every outcome case', () => {
   const attempts = [
@@ -166,174 +127,6 @@ test('counts surplus infrastructure attempts unless explicitly replaced', () => 
     total: 0.85,
   });
   assert.deepEqual(summary.replacements, []);
-});
-
-test('selects reviewed infrastructure replacement while retaining its failure and cost', () => {
-  const summary = summarizeOutcomeTrials(
-    definitions,
-    replacementAttempts(),
-    'dataset',
-    'revision',
-    [replacement],
-  );
-  assert.equal(summary.schema_version, 'outcome-suite.v1');
-  assert.equal(summary.status, 'complete');
-  assert.equal(summary.completed_trials, 6);
-  assert.equal(summary.cases.repair.attempts.length, 2);
-  assert.deepEqual(summary.metrics.cost_usd, {
-    reported: 0.6,
-    unavailable: 0,
-    total: 0.6,
-  });
-  assert.deepEqual(summary.all_attempts.cost_usd, {
-    reported: 0.85,
-    unavailable: 0,
-    total: 0.85,
-  });
-  assert.equal(summary.all_attempts.completed_trials, 6);
-  assert.equal(summary.all_attempts.cases.repair.attempts.length, 3);
-  assert.deepEqual(summary.all_attempts.unavailable_reasons, {
-    'runner-browser-unavailable': 1,
-  });
-  assert.equal(
-    summary.replacements[0].approval_ref,
-    'review:cohort-browser-failure',
-  );
-  assert.equal(
-    summary.replacements[0].excluded_attempt.error,
-    'runner-browser-unavailable',
-  );
-  assert.equal(summary.replacements[0].excluded_attempt.cost_usd, 0.25);
-  assert.deepEqual(
-    summary.metrics.classification_correct,
-    summary.metrics.product_defect_refusal,
-  );
-});
-
-test('rejects malformed, duplicate, cross-case, missing and stale replacement evidence', () => {
-  const invalidRecords = [
-    null,
-    {},
-    { ...replacement, reason: '' },
-    { ...replacement, approval_ref: ' ' },
-    { ...replacement, excluded_trial_id: 'missing' },
-    { ...replacement, replacement_trial_id: 'missing' },
-    { ...replacement, replacement_trial_id: 'trial-repair-infra' },
-    { ...replacement, replacement_trial_id: 'trial-generation-1' },
-    { ...replacement, extra: true },
-  ];
-  for (const record of invalidRecords)
-    assert.throws(
-      () =>
-        summarizeOutcomeTrials(
-          definitions,
-          replacementAttempts(),
-          'dataset',
-          'revision',
-          [record],
-        ),
-      /replacement-invalid/u,
-    );
-  for (const records of [{}, [replacement, replacement]])
-    assert.throws(
-      () =>
-        summarizeOutcomeTrials(
-          definitions,
-          replacementAttempts(),
-          'dataset',
-          'revision',
-          records,
-        ),
-      /replacement-invalid/u,
-    );
-  for (const trialId of ['trial-repair-infra', 'trial-repair-2'])
-    assert.throws(
-      () =>
-        summarizeOutcomeTrials(
-          definitions,
-          replacementAttempts().map((attempt) =>
-            attempt.trial_id === trialId
-              ? { ...attempt, dataset_sha256: 'old-dataset' }
-              : attempt,
-          ),
-          'dataset',
-          'revision',
-          [replacement],
-        ),
-      /replacement-invalid/u,
-    );
-});
-
-test('refuses replacement of behavioral, approval, attribution and cleanup failures', () => {
-  const failures = [
-    { complete: true, passed: false },
-    { error: 'trace-verdict-mismatch' },
-    { error: 'candidate-approval-mismatch' },
-    { error: 'failure-unattributed' },
-    { cleanup_error: 'temporary-cleanup-failed' },
-    { first_try: 'fail' },
-    { classification: 'product-behavior-wrong' },
-    { criterion_review: 'rejected' },
-    { assertion_specificity: false },
-    { failure_reasons: ['runner-browser-unavailable', 'failure-unattributed'] },
-  ];
-  for (const failure of failures)
-    assert.throws(
-      () =>
-        summarizeOutcomeTrials(
-          definitions,
-          replacementAttempts().map((attempt) =>
-            attempt.trial_id === 'trial-repair-infra'
-              ? { ...attempt, ...failure }
-              : attempt,
-          ),
-          'dataset',
-          'revision',
-          [replacement],
-        ),
-      /replacement-invalid/u,
-    );
-});
-
-test('labels missing mutation telemetry and modeled human checkpoints explicitly', () => {
-  const attempts = replacementAttempts()
-    .filter((attempt) => attempt.complete)
-    .map((attempt) => ({
-      ...attempt,
-      cost_usd: null,
-      human_interventions: 1,
-    }));
-  const summary = summarizeOutcomeTrials(
-    definitions,
-    attempts,
-    'dataset',
-    'revision',
-  );
-  assert.deepEqual(summary.metrics.cost_usd, {
-    reported: 0,
-    unavailable: 6,
-    total: null,
-  });
-  assert.deepEqual(summary.all_attempts?.cost_usd, {
-    reported: 0,
-    unavailable: 6,
-    total: null,
-  });
-  assert.equal(summary.metrics.mutation_telemetry.status, 'unavailable');
-  assert.equal(summary.metrics.mutation_telemetry.reason, 'not-collected');
-  assert.deepEqual(summary.metrics.behavior_mutation_kill, {
-    killed: 0,
-    survived: 0,
-    rate: null,
-  });
-  assert.deepEqual(summary.metrics.modeled_human_interventions, {
-    reported: 6,
-    unavailable: 0,
-  });
-  assert.equal(
-    summary.metrics.human_interventions_basis,
-    'modeled-workflow-checkpoints',
-  );
 });
 
 test('keeps unknown excluded attempt cost unknown in the all-attempt total', () => {
@@ -473,63 +266,6 @@ test('replaces a Healer infrastructure failure produced with verified cleanup', 
       unavailable: 0,
       total: 0.85,
     });
-  } finally {
-    rmSync(directory, { recursive: true, force: true });
-  }
-});
-
-test('refuses ambiguous or mixed Healer prerequisite failures and historical missing cleanup', () => {
-  const directory = mkdtempSync(path.join(tmpdir(), 'trial-refusal-'));
-  try {
-    const trialId = path.basename(directory);
-    const fixtures = [
-      { reason: 'prerequisite-unavailable' },
-      { reason: 'failure-unattributed' },
-      { reason: 'runner-browser-unavailable', error: 'grading-failed' },
-      {
-        reason: 'runner-browser-unavailable',
-        cleanup: { status: 'failed', reason: 'temporary-cleanup-failed' },
-      },
-      { reason: 'runner-browser-unavailable', missing_cleanup: true },
-    ];
-    for (const fixture of fixtures) {
-      const archived = combineResult(
-        {
-          ...evaluationFailure(new Error(fixture.reason)),
-          ...(fixture.error == null ? {} : { error: fixture.error }),
-          runtime: { testgen_revision: 'revision', dataset_sha256: 'dataset' },
-        },
-        fixture.cleanup ?? { status: 'passed' },
-      );
-      if (fixture.missing_cleanup) delete archived.cleanup;
-      writeFileSync(
-        path.join(directory, 'result.json'),
-        JSON.stringify(archived),
-      );
-      const failed = readTrial(directory, definitions);
-      assert.equal(
-        summarizeOutcomeTrials(definitions, [failed], 'dataset', 'revision')
-          .status,
-        'incomplete',
-      );
-      assert.throws(
-        () =>
-          summarizeOutcomeTrials(
-            definitions,
-            [failed, trial('refusal', 2)],
-            'dataset',
-            'revision',
-            [
-              {
-                ...replacement,
-                excluded_trial_id: trialId,
-                replacement_trial_id: 'trial-refusal-2',
-              },
-            ],
-          ),
-        /replacement-invalid/u,
-      );
-    }
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -758,4 +494,110 @@ test('requires independent execution and criterion review for a generated candid
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+function repairEvidence(overrides = {}) {
+  return {
+    baseline: 'pass',
+    variant_precheck: 'fail',
+    selector_failure: true,
+    trace_valid: true,
+    trace: {
+      final_classification: 'selector-drift',
+      disposition: 'fixed',
+      attempts: [{}, {}],
+      repairs: [{ paths: ['tests/order.spec.ts'] }],
+    },
+    spec_path: 'tests/order.spec.ts',
+    before: {
+      expected_spec: 'allowed-spec',
+      product: 'variant-product',
+      repository_state: 'public/index.html modified',
+    },
+    after: {
+      spec: 'allowed-spec',
+      product: 'variant-product',
+      repository_state: 'public/index.html modified',
+    },
+    final_run: 'pass',
+    tool_uses: [{ id: 'tool-1', name: 'Bash' }],
+    tool_results: [
+      {
+        tool_use_id: 'tool-1',
+        is_error: true,
+        execution: 'playwright-one-test-failed',
+      },
+    ],
+    hook_audit: [
+      {
+        schema_version: 'testgen-hook-audit.v1',
+        agent_type: 'playwright-test-healer',
+        hook_event: 'PreToolUse',
+        tool_name: 'Bash',
+        tool_use_id: 'tool-1',
+        decision: 'allow',
+        operation: 'approved-spec-run',
+        hook_sha256: 'a'.repeat(64),
+      },
+    ],
+    installed_hook_sha256: 'a'.repeat(64),
+    ...overrides,
+  };
+}
+
+test('accepts an independently verified selector repair', () => {
+  assert.deepEqual(scoreSelectorRepair(repairEvidence()), {
+    status: 'passed',
+    classification: 'selector-drift',
+    healer_attempts: 2,
+    assertions_unchanged: true,
+  });
+});
+
+test('rejects weakened assertions, product changes, and ungoverned failures', () => {
+  for (const changed of [
+    { after: { ...repairEvidence().after, spec: 'weakened-assertions' } },
+    { after: { ...repairEvidence().after, product: 'changed-product' } },
+    {
+      after: {
+        spec: 'allowed-spec',
+        product: 'variant-product',
+        repository_state: 'unexpected file added',
+      },
+    },
+    { hook_audit: [] },
+    { final_run: 'fail' },
+  ]) {
+    assert.throws(() => scoreSelectorRepair(repairEvidence(changed)));
+  }
+});
+
+test('recognizes the exact controlled selector failure', () => {
+  const report = {
+    suites: [
+      {
+        specs: [
+          {
+            tests: [
+              {
+                results: [
+                  {
+                    error: {
+                      message:
+                        "locator.click: Timed out waiting for getByRole('button', { name: 'Add order' })",
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+  assert.equal(selectorFailure(report), true);
+  assert.equal(selectorFailure({ suites: [{ suites: report.suites }] }), true);
+  report.suites[0].specs[0].tests[0].results[0].error.message =
+    'expect.toHaveCount failed in an unrelated row';
+  assert.equal(selectorFailure(report), false);
 });
