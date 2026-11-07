@@ -778,7 +778,7 @@ test('still requires confirmation after a repair', () => {
   });
 });
 
-test('rejects attempts after a terminal product-behavior finding', () => {
+test('rejects attempts after terminal classifications or repeated failures without progress', () => {
   withRepository((repository) => {
     const artifact = trace();
     artifact.attempts.unshift(productFindingAttempt());
@@ -793,6 +793,29 @@ test('rejects attempts after a terminal product-behavior finding', () => {
 
     assert.equal(result.status, 1);
     assert.match(result.stderr, /attempt-after-terminal-classification/iu);
+
+    const stalled = repairedTrace(['tests/account.spec.ts']);
+    stalled.attempts = [1, 2, 3].map((number) => ({
+      ...stalled.attempts[0],
+      number,
+      kind: number === 1 ? 'verification-run' : 'confirmation-run',
+    }));
+    stalled.disposition = 'unresolved-after-healing';
+    stalled.next_owner = 'human';
+    stalled.escalation = 'No new evidence supports another attempt';
+    const stalledPath = writeArtifact(repository, 'healer-trace.json', stalled);
+    const rejected = validate(repository, 'trace', stalledPath);
+    assert.equal(rejected.status, 1);
+    assert.match(rejected.stderr, /attempt-after-no-progress/iu);
+    stalled.attempts[1].evidence_summary = 'New evidence from the current run';
+    writeArtifact(repository, 'healer-trace.json', stalled);
+    const progressed = validate(repository, 'trace', stalledPath);
+    assert.equal(progressed.status, 0, progressed.stderr);
+    stalled.attempts[1].evidence_summary = stalled.attempts[0].evidence_summary;
+    stalled.attempts.pop();
+    writeArtifact(repository, 'healer-trace.json', stalled);
+    const stopped = validate(repository, 'trace', stalledPath);
+    assert.equal(stopped.status, 0, stopped.stderr);
   });
 });
 
