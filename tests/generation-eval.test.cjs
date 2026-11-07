@@ -1,12 +1,15 @@
 const assert = require('node:assert/strict');
+const { createHash } = require('node:crypto');
 const {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } = require('node:fs');
 const { setTimeout: delay } = require('node:timers/promises');
+const { EventEmitter } = require('node:events');
 const { tmpdir } = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
@@ -18,7 +21,41 @@ const {
   scorePlaywrightReport,
   verifyBrowserReadiness,
 } = require('../scripts/eval/runtime.cjs');
-const { cleanupEvaluation } = require('../scripts/eval/runtime.cjs');
+
+function freshModule(t, filename) {
+  const resolved = require.resolve(filename);
+  const previous = require.cache[resolved];
+  delete require.cache[resolved];
+  t.after(() => {
+    if (previous == null) delete require.cache[resolved];
+    else require.cache[resolved] = previous;
+  });
+  return require(resolved);
+}
+
+test('cancelled startup rejects late readiness and handles late spawn errors', async (t) => {
+  const child = new EventEmitter();
+  const stopping = Promise.withResolvers();
+  t.mock.method(require('node:child_process'), 'fork', () => child);
+  t.mock.method(
+    require('../scripts/process.cjs'),
+    'stopProcessTree',
+    () => stopping.promise,
+  );
+  const { startServer } = freshModule(t, '../scripts/eval/runtime.cjs');
+  const origin = 'http://127.0.0.1:4173';
+  const state = { repository: __dirname };
+  const controller = new AbortController();
+  const pending = startServer(state, origin, controller.signal);
+  controller.abort();
+  child.emit('message', { type: 'ready', origin });
+  stopping.resolve(true);
+  await assert.rejects(pending, { code: 'evaluation-cancelled' });
+  assert.equal(state.server, null);
+  assert.doesNotThrow(() =>
+    child.emit('error', new Error('late-spawn-failure')),
+  );
+});
 
 test('generation evidence rejects spec execution but allows collection', () => {
   const stream = (command) =>
@@ -176,29 +213,177 @@ test('cancelled browser preflight closes its partially opened session', async (t
   assert.equal(existsSync(resource), false);
 });
 
-test('generation cleanup removes only its owned temporary directory', async (t) => {
+test('cleanup removes only owned scratch after resources are released', async (t) => {
   const temporaryRoot = mkdtempSync(
     path.join(tmpdir(), 'testgen-generation-evaluation-'),
   );
   t.after(() => rmSync(temporaryRoot, { force: true, recursive: true }));
+  let stopped = false;
+  let uninstalls = 0;
+  t.mock.method(
+    require('../scripts/process.cjs'),
+    'stopProcessTree',
+    async () => stopped,
+  );
+  t.mock.method(
+    require('../scripts/process.cjs'),
+    'command',
+    async (_name, args) => {
+      if (args[1] === 'uninstall') uninstalls += 1;
+      else if (!stopped) throw new Error('marketplace-cleanup-failed');
+      return '';
+    },
+  );
+  const { cleanupEvaluation } = freshModule(t, '../scripts/eval/runtime.cjs');
   const state = {
-    marketplace_added: false,
-    plugin_installed: false,
-    repository: null,
-    server: null,
+    server: { pid: 12345 },
+    repository: temporaryRoot,
+    plugin_installed: true,
+    plugin_id: 'fixture-plugin',
+    marketplace_added: true,
+    marketplace_name: 'fixture-marketplace',
     temporaryRoot,
     temporaryPrefix: 'testgen-generation-evaluation-',
   };
   const refused = await cleanupEvaluation({
-    ...state,
+    temporaryRoot,
     temporaryPrefix: 'another-evaluator-',
   });
   assert.equal(refused.status, 'failed');
   assert.equal(existsSync(temporaryRoot), true);
-  const cleanup = await cleanupEvaluation(state);
-
-  assert.equal(cleanup.status, 'passed');
+  const failed = await cleanupEvaluation(state);
+  assert.equal(failed.status, 'failed');
+  assert.equal(existsSync(temporaryRoot), true);
+  assert.equal(failed.temporary_root, temporaryRoot);
+  assert.equal(failed.server_pid, state.server.pid);
+  stopped = true;
+  assert.equal((await cleanupEvaluation(state)).status, 'passed');
+  assert.equal(uninstalls, 1);
   assert.equal(existsSync(temporaryRoot), false);
+});
+
+function candidateFixture(t, command) {
+  const resultsRoot = mkdtempSync(
+    path.join(tmpdir(), 'testgen-candidate-test-'),
+  );
+  t.after(() => rmSync(resultsRoot, { recursive: true, force: true }));
+  const definition = require('../evals/cases/healthy-generation/case.json');
+  const trialId = 'trial-0123456789abcdef';
+  const runId = 'tg-' + 'a'.repeat(24);
+  const directory = path.join(resultsRoot, trialId);
+  mkdirSync(directory);
+  const spec = 'candidate bytes';
+  const digest = createHash('sha256').update(spec).digest('hex');
+  writeFileSync(
+    path.join(directory, path.basename(definition.spec_path)),
+    spec,
+  );
+  writeFileSync(
+    path.join(directory, 'handoff.json'),
+    JSON.stringify({ run_id: runId, spec_path: definition.spec_path }),
+  );
+  writeFileSync(
+    path.join(directory, 'result.json'),
+    JSON.stringify({
+      case_id: definition.case_id,
+      trial_id: trialId,
+      status: 'checkpoint',
+      cleanup: { status: 'passed' },
+      dataset_sha256: 'dataset',
+      candidate_executed: false,
+      run_id: runId,
+      candidate_sha256: digest,
+    }),
+  );
+  t.mock.method(require('../scripts/process.cjs'), 'command', command);
+  const previousNpm = process.env.npm_execpath;
+  process.env.npm_execpath = __filename;
+  t.after(() => {
+    if (previousNpm == null) delete process.env.npm_execpath;
+    else process.env.npm_execpath = previousNpm;
+  });
+  const { executeCandidate } = freshModule(
+    t,
+    '../scripts/run-generation-candidate.cjs',
+  );
+  const options = { resultsRoot, datasetDigest: () => 'dataset' };
+  const approval = { trialId, digest };
+  return {
+    run: () => executeCandidate(approval, undefined, options),
+    directory,
+  };
+}
+
+test('candidate execution reserves one running record before any concurrent start', async (t) => {
+  const gate = Promise.withResolvers();
+  const { run, directory } = candidateFixture(t, async () => {
+    await gate.promise;
+    throw new Error('synthetic-stop');
+  });
+  const attempts = Promise.allSettled([run(), run()]);
+  let results;
+  try {
+    const running = JSON.parse(
+      readFileSync(path.join(directory, 'execution.json'), 'utf8'),
+    );
+    assert.equal(running.status, 'running');
+  } finally {
+    gate.resolve();
+    results = await attempts;
+  }
+  assert.deepEqual(
+    results.map((result) => result.status),
+    ['fulfilled', 'rejected'],
+  );
+  assert.equal(results[1].reason.message, 'candidate-approval-mismatch');
+});
+
+test('failed execution finalization preserves its valid running reservation', async (t) => {
+  const fs = require('node:fs');
+  const originalWrite = fs.writeFileSync;
+  let writes = 0;
+  t.mock.method(fs, 'writeFileSync', (filename, content, options) => {
+    if (
+      path.basename(filename).startsWith('execution.json') &&
+      ++writes === 2
+    ) {
+      originalWrite(filename, '{', options);
+      throw new Error('simulated-disk-write-failure');
+    }
+    return originalWrite(filename, content, options);
+  });
+  const { run, directory } = candidateFixture(t, async () => {
+    throw new Error('synthetic-stop');
+  });
+  await assert.rejects(run(), /simulated-disk-write-failure/u);
+  const retained = JSON.parse(
+    readFileSync(path.join(directory, 'execution.json'), 'utf8'),
+  );
+  assert.equal(retained.status, 'running');
+});
+
+test('unverified command cleanup retains its target and recovery PID', async (t) => {
+  const { run } = candidateFixture(t, async () => {
+    require('../scripts/process.cjs').assertProcessStopped({
+      tree_cleanup_failed: true,
+      tree_cleanup_reason: 'snapshot-unavailable',
+      tree_cleanup_pid: 12345,
+    });
+  });
+  const result = await run();
+  const retained = result.cleanup.temporary_root;
+  if (retained != null)
+    t.after(() => {
+      assert.equal(path.dirname(retained), path.resolve(tmpdir()));
+      assert.ok(
+        path.basename(retained).startsWith('testgen-candidate-evaluation-'),
+      );
+      rmSync(retained, { recursive: true, force: true });
+    });
+  assert.equal(result.error, 'process-tree-cleanup-failed');
+  assert.equal(result.cleanup.status, 'failed');
+  assert.equal(result.cleanup.process_pid, 12345);
+  assert.equal(existsSync(retained), true);
 });
 
 function report(status) {

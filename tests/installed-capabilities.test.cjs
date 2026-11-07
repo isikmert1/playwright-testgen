@@ -584,6 +584,12 @@ function grade(output, host = {}) {
 test('requires a behavioral test body rather than title-only coverage claims', () => {
   const { stream } = fixture();
   assert.equal(grade(stream()).status, 'passed');
+  const child = JSON.stringify({
+    type: 'result',
+    subtype: 'success',
+    parent_tool_use_id: 'child',
+  });
+  assert.equal(grade(`${stream()}\n${child}`).status, 'passed');
   const titleOnly =
     "test('submitting an order adds one matching Pending row', async () => {});";
   assert.ok(

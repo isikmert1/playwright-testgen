@@ -21,6 +21,7 @@ const {
 const {
   executable,
   runBounded,
+  assertProcessStopped,
   lifecycleCancellation,
 } = require('./process.cjs');
 
@@ -183,7 +184,11 @@ function gradeDiscovery(output, host) {
     .filter((record) => record.type === 'user')
     .flatMap((record) => record.message?.content ?? [])
     .filter((block) => block?.type === 'tool_result');
-  const last = records.filter((record) => record.type === 'result').at(-1);
+  const last = records
+    .filter(
+      (record) => record.type === 'result' && record.parent_tool_use_id == null,
+    )
+    .at(-1);
   const response = last?.structured_output;
   const relative = (filename) =>
     typeof filename === 'string'
@@ -423,6 +428,7 @@ async function collectDiscovery(definition, signal, options) {
             'open',
           ).length > 0;
         const elapsed = Date.now() - started;
+        assertProcessStopped(agent);
         writeFileSync(path.join(resultDirectory, 'agent.jsonl'), agent.output);
         const parsed = parseAgentStream(agent.output);
         const grade = gradeDiscovery(agent.output, {
@@ -437,7 +443,6 @@ async function collectDiscovery(definition, signal, options) {
         });
         closeObserved = grade.host_evidence?.browser_close_observed === true;
         if (
-          agent.tree_cleanup_failed ||
           agent.timed_out ||
           agent.cancelled ||
           agent.output_overflow ||

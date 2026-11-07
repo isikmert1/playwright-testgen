@@ -185,10 +185,17 @@ test('public CI summary excludes private evidence and preserves runner and clean
     runtime.host = recordedHost;
     assert.equal(summarize(1).status, 1);
     result.cleanup.status = 'failed';
+    result.cleanup.temporary_root = 'PRIVATE-EVIDENCE';
+    result.cleanup.server_pid = 12345;
+    result.cleanup.process_pid = 67890;
     const failed = summarize(0);
     assert.equal(failed.status, 1);
     assert.equal(JSON.parse(failed.stdout).status, 'failed');
     assert.equal(failed.stderr, '');
+    assert.doesNotMatch(
+      failed.stdout,
+      /PRIVATE-EVIDENCE|temporary_root|server_pid|process_pid/u,
+    );
     result.cleanup.status = 'passed';
     runtime.claude_code = { private_notes: 'PRIVATE-EVIDENCE' };
     const malformed = summarize(0);

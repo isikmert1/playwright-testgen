@@ -21,6 +21,7 @@ const {
   EvaluationError,
   LIFECYCLE_COMMAND_TIMEOUT_MS,
   SAFE_ERROR_CODE,
+  assertProcessStopped,
   command,
   executable,
   fail,
@@ -243,6 +244,7 @@ async function verifyBrowserReadiness(
   let exploration;
   try {
     const launch = await invoke('open', [origin]);
+    assertProcessStopped(launch);
     if (
       launch.status !== 0 ||
       launch.timed_out ||
@@ -255,6 +257,8 @@ async function verifyBrowserReadiness(
       '--json',
     ]);
     const sessions = await invoke('list', ['--json']);
+    assertProcessStopped(identity);
+    assertProcessStopped(sessions);
     if (identity.status !== 0 || sessions.status !== 0)
       fail('browser-identity-unverified');
     const metadata = browserIdentity(
@@ -275,15 +279,16 @@ async function verifyBrowserReadiness(
   }
   const close = await invoke('close', [], null);
   if (
+    close.tree_cleanup_failed ||
     close.status !== 0 ||
     close.timed_out ||
     close.cancelled ||
     close.spawn_error != null
-  )
-    failure = new EvaluationError(
-      failure?.code ?? failure?.message ?? 'cli-browser-cleanup-failed',
-      failure == null ? [] : ['cli-browser-cleanup-failed'],
-    );
+  ) {
+    failure ??= new EvaluationError('cli-browser-cleanup-failed');
+    failure.cleanup_error = 'cli-browser-cleanup-failed';
+    failure.cleanup_pid ??= close.tree_cleanup_pid;
+  }
   if (failure != null) throw failure;
   return { runner, exploration };
 }
@@ -357,8 +362,8 @@ async function runApprovedSpec(
       verify_process_tree: true,
     },
   );
+  assertProcessStopped(run);
   if (
-    run.tree_cleanup_failed ||
     run.timed_out ||
     run.cancelled ||
     run.output_overflow ||
@@ -631,8 +636,7 @@ async function validateArtifact(
       verify_process_tree: true,
     },
   );
-  if (result.tree_cleanup_failed)
-    fail('process-tree-cleanup-failed', [result.tree_cleanup_reason]);
+  assertProcessStopped(result);
   if (result.cancelled) fail('evaluation-cancelled');
   if (result.timed_out) fail('lifecycle-command-timeout');
   if (result.status !== 0) {
@@ -656,9 +660,10 @@ async function validateArtifact(
   if (report.valid !== true) fail(`${type}-invalid`);
 }
 
-function startServer(repository, origin, signal) {
+function startServer(state, origin, signal) {
   if (signal?.aborted)
     return Promise.reject(new EvaluationError('evaluation-cancelled'));
+  const repository = state.repository;
   const expected = new URL(origin);
   const child = fork(path.join(repository, 'server.cjs'), [], {
     cwd: repository,
@@ -666,65 +671,44 @@ function startServer(repository, origin, signal) {
     stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
     windowsHide: true,
   });
+  state.server = child;
   return new Promise((resolve, reject) => {
     let settled = false;
-    let cancelling = false;
-    const timer = setTimeout(async () => {
-      const stopped = await stopProcessTree(child);
-      if (!stopped) {
-        finish(new EvaluationError('process-tree-cleanup-failed'));
-        return;
-      }
-      finish(new EvaluationError('target-server-unavailable'));
-    }, 5000);
+    let stopping = false;
+    const timer = setTimeout(
+      () => void stop('target-server-unavailable'),
+      5000,
+    );
     const finish = (error) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      child.removeAllListeners('error');
       child.removeAllListeners('exit');
       child.removeAllListeners('message');
       signal?.removeEventListener('abort', cancel);
       if (error != null) reject(error);
       else resolve(child);
     };
-    const cancel = async () => {
-      if (cancelling) return;
-      cancelling = true;
+    const stop = async (reason) => {
+      if (stopping || settled) return;
+      stopping = true;
       const stopped = await stopProcessTree(child);
-      finish(
-        new EvaluationError(
-          stopped ? 'evaluation-cancelled' : 'process-tree-cleanup-failed',
-        ),
+      if (stopped) state.server = null;
+      const error = new EvaluationError(
+        stopped ? reason : 'process-tree-cleanup-failed',
       );
+      if (!stopped) error.cleanup_pid = child.pid;
+      finish(error);
     };
+    const cancel = () => void stop('evaluation-cancelled');
     signal?.addEventListener('abort', cancel, { once: true });
     if (signal?.aborted) void cancel();
-    child.once('error', () =>
-      finish(new EvaluationError('target-server-unavailable')),
-    );
-    child.once('exit', () => {
-      void stopProcessTree(child).then((stopped) =>
-        finish(
-          new EvaluationError(
-            stopped
-              ? 'target-server-unavailable'
-              : 'process-tree-cleanup-failed',
-          ),
-        ),
-      );
-    });
+    child.once('error', () => void stop('target-server-unavailable'));
+    child.once('exit', () => void stop('target-server-unavailable'));
     child.once('message', (message) => {
+      if (stopping) return;
       if (message?.type !== 'ready' || message.origin !== origin) {
-        void stopProcessTree(child).then((stopped) =>
-          finish(
-            new EvaluationError(
-              stopped
-                ? 'target-server-unavailable'
-                : 'process-tree-cleanup-failed',
-            ),
-          ),
-        );
+        void stop('target-server-unavailable');
         return;
       }
       finish(null);
@@ -884,8 +868,7 @@ async function runRuntimePreflight(
       verify_process_tree: true,
     },
   );
-  if (result.tree_cleanup_failed)
-    fail('process-tree-cleanup-failed', [result.tree_cleanup_reason]);
+  assertProcessStopped(result);
   if (result.cancelled) fail('evaluation-cancelled');
   if (result.timed_out) fail('runtime-preflight-timeout');
   if (result.output_overflow || result.spawn_error != null)
@@ -952,11 +935,26 @@ async function installPlugin(state, source, tooling, signal) {
   return { installed, compatibility };
 }
 
+function recordProcessCleanupFailure(state, error) {
+  if (
+    error?.code !== 'process-tree-cleanup-failed' &&
+    error?.cleanup_error !== 'cli-browser-cleanup-failed'
+  )
+    return;
+  if (error.cleanup_pid != null && error.cleanup_pid === state.server?.pid)
+    return;
+  state.process_cleanup_failed = true;
+  state.process_pid = error.cleanup_pid ?? state.process_pid;
+}
+
 async function cleanupEvaluation(state) {
   const failures = [];
   const details = [];
-  if (state.server != null && !(await stopProcessTree(state.server)))
-    failures.push('server-cleanup-failed');
+  if (state.process_cleanup_failed) failures.push('process-cleanup-unverified');
+  const serverStopped =
+    state.server == null || (await stopProcessTree(state.server));
+  if (!serverStopped) failures.push('server-cleanup-failed');
+  else state.server = null;
   if (
     state.repository != null &&
     state.plugin_installed &&
@@ -968,7 +966,9 @@ async function cleanupEvaluation(state) {
         ['plugin', 'uninstall', state.plugin_id, '--scope', 'local'],
         { cwd: state.repository, error: 'plugin-uninstall-failed' },
       );
+      state.plugin_installed = false;
     } catch (error) {
+      recordProcessCleanupFailure(state, error);
       failures.push(error.code ?? 'plugin-uninstall-failed');
     }
   }
@@ -990,7 +990,9 @@ async function cleanupEvaluation(state) {
         ],
         { cwd: state.repository, error: 'marketplace-cleanup-failed' },
       );
+      state.marketplace_added = false;
     } catch (error) {
+      recordProcessCleanupFailure(state, error);
       failures.push(error.code ?? 'marketplace-cleanup-failed');
     }
   }
@@ -1017,6 +1019,7 @@ async function cleanupEvaluation(state) {
         details.push(...marketplaceChanges);
       }
     } catch (error) {
+      recordProcessCleanupFailure(state, error);
       failures.push(error.code ?? 'plugin-state-unavailable');
     }
   }
@@ -1033,7 +1036,8 @@ async function cleanupEvaluation(state) {
           .startsWith(state.temporaryPrefix ?? 'testgen-healer-evaluation-')
       )
         failures.push('temporary-path-invalid');
-      else rmSync(candidate, { force: true, recursive: true });
+      else if (failures.length === 0)
+        rmSync(candidate, { force: true, recursive: true });
     }
   } catch {
     failures.push('temporary-cleanup-failed');
@@ -1048,6 +1052,16 @@ async function cleanupEvaluation(state) {
         status: 'failed',
         error: 'cleanup-failed',
         reason: failures.join(','),
+        ...(state.temporaryRoot == null
+          ? {}
+          : {
+              temporary_target: 'retained',
+              temporary_root: state.temporaryRoot,
+            }),
+        ...(serverStopped ? {} : { server_pid: state.server.pid }),
+        ...(state.process_pid == null
+          ? {}
+          : { process_pid: state.process_pid }),
         ...(details.length === 0
           ? {}
           : { details: [...new Set(details)].sort().slice(0, 12) }),
@@ -1055,6 +1069,7 @@ async function cleanupEvaluation(state) {
 }
 
 module.exports = {
+  recordProcessCleanupFailure,
   assertPluginBlind,
   cleanupEvaluation,
   allTests,

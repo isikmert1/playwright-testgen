@@ -15,6 +15,7 @@ const { exactPlaywrightFilter } = require('../hooks/run-policy.cjs');
 const {
   executable,
   runBounded,
+  assertProcessStopped,
   lifecycleCancellation,
 } = require('./process.cjs');
 const {
@@ -26,6 +27,7 @@ const {
 } = require('./eval/agent-evidence.cjs');
 const {
   cleanupEvaluation,
+  recordProcessCleanupFailure,
   verifyBrowserReadiness,
   evaluatedRevision,
   installPlugin,
@@ -205,11 +207,7 @@ async function collectCandidate(definition, signal, options = {}) {
       signal,
       'playwright-test-author',
     );
-    state.server = await startServer(
-      state.repository,
-      target.start.origin,
-      signal,
-    );
+    await startServer(state, target.start.origin, signal);
     result.browsers = await verifyBrowserReadiness(
       tooling,
       state.repository,
@@ -245,6 +243,7 @@ async function collectCandidate(definition, signal, options = {}) {
         verify_process_tree: true,
       },
     );
+    assertProcessStopped(agent);
     writeFileSync(path.join(resultDirectory, 'agent.jsonl'), agent.output);
     const parsed = parseAgentStream(agent.output);
     result.execution_attempts = authorExecutionAttempts(agent.output);
@@ -262,7 +261,6 @@ async function collectCandidate(definition, signal, options = {}) {
     result.duration_ms = parsed.runtime.duration_ms ?? null;
     result.usage = parsed.runtime.usage ?? null;
     if (
-      agent.tree_cleanup_failed ||
       agent.timed_out ||
       agent.cancelled ||
       agent.output_overflow ||
@@ -306,6 +304,7 @@ async function collectCandidate(definition, signal, options = {}) {
     result.candidate_sha256 = hashFile(candidatePath);
     result.status = 'checkpoint';
   } catch (error) {
+    recordProcessCleanupFailure(state, error);
     result.error = evaluationFailure(error).reason ?? error.message;
     if (error.details?.length > 0) result.details = error.details;
   } finally {

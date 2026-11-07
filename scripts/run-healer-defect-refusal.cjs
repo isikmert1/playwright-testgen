@@ -22,6 +22,7 @@ const {
   fail,
   lifecycleCancellation,
   runBounded,
+  assertProcessStopped,
 } = require('./process.cjs');
 const {
   agentFailure,
@@ -34,6 +35,7 @@ const {
 } = require('./eval/agent-evidence.cjs');
 const {
   cleanupEvaluation,
+  recordProcessCleanupFailure,
   evaluatedRevision,
   installPlugin,
   hashFile,
@@ -150,8 +152,7 @@ async function runTarget(
       verify_process_tree: true,
     },
   );
-  if (result.tree_cleanup_failed)
-    fail('process-tree-cleanup-failed', [result.tree_cleanup_reason]);
+  assertProcessStopped(result);
   if (result.cancelled) fail('evaluation-cancelled');
   if (result.timed_out) fail('target-runner-timeout');
   if (
@@ -423,11 +424,7 @@ async function evaluateInstalledHealer(signal, selectedDefinition) {
       path.join(temporaryRoot, 'hook-preflight-audit.jsonl'),
       signal,
     );
-    state.server = await startServer(
-      state.repository,
-      definition.origin,
-      signal,
-    );
+    await startServer(state, definition.origin, signal);
     runtime.browsers = await verifyBrowserReadiness(
       prerequisite,
       state.repository,
@@ -468,6 +465,7 @@ async function evaluateInstalledHealer(signal, selectedDefinition) {
         verify_process_tree: true,
       },
     );
+    assertProcessStopped(agent);
     const parsedAgent = parseAgentStream(agent.output, {
       repository: state.repository,
       trace_path: tracePath,
@@ -487,8 +485,6 @@ async function evaluateInstalledHealer(signal, selectedDefinition) {
     Object.assign(runtime, parsedAgent.runtime, {
       model_resolved: parsedAgent.runtime.model ?? null,
     });
-    if (agent.tree_cleanup_failed)
-      fail('agent-process-tree-cleanup-failed', [agent.tree_cleanup_reason]);
     if (
       agent.timed_out ||
       agent.cancelled ||
@@ -519,6 +515,7 @@ async function evaluateInstalledHealer(signal, selectedDefinition) {
         signal,
       );
     } catch (error) {
+      recordProcessCleanupFailure(state, error);
       primary = {
         ...evaluationFailure(error),
         diagnostics: failureDiagnostics,
@@ -563,6 +560,7 @@ async function evaluateInstalledHealer(signal, selectedDefinition) {
       runtime: { ...runtime },
     };
   } catch (error) {
+    recordProcessCleanupFailure(state, error);
     primary = {
       ...evaluationFailure(error),
       ...(failureDiagnostics == null

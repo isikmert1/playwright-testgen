@@ -16,6 +16,7 @@ const {
   command,
   executable,
   runBounded,
+  assertProcessStopped,
   lifecycleCancellation,
 } = require('./process.cjs');
 const {
@@ -24,6 +25,7 @@ const {
 } = require('./eval/agent-evidence.cjs');
 const {
   cleanupEvaluation,
+  recordProcessCleanupFailure,
   allTests,
   runApprovedSpec,
   evaluatedRevision,
@@ -196,11 +198,7 @@ async function evaluateRepair(definition, approvedDigest, signal) {
         ? targetPackage.bin
         : targetPackage.bin.playwright,
     );
-    state.server = await startServer(
-      state.repository,
-      descriptor.start.origin,
-      signal,
-    );
+    await startServer(state, descriptor.start.origin, signal);
     const baseline = await runApprovedSpec(
       state.repository,
       playwrightCli,
@@ -362,6 +360,7 @@ async function evaluateRepair(definition, approvedDigest, signal) {
         verify_process_tree: true,
       },
     );
+    assertProcessStopped(agent);
     writeFileSync(path.join(resultDirectory, 'agent.jsonl'), agent.output);
     const parsed = parseAgentStream(agent.output, {
       repository: state.repository,
@@ -377,7 +376,6 @@ async function evaluateRepair(definition, approvedDigest, signal) {
       (hook) => hook.outcome === 'error',
     ).length;
     if (
-      agent.tree_cleanup_failed ||
       agent.timed_out ||
       agent.cancelled ||
       agent.output_overflow ||
@@ -457,6 +455,7 @@ async function evaluateRepair(definition, approvedDigest, signal) {
     }
     result.status = 'complete';
   } catch (error) {
+    recordProcessCleanupFailure(state, error);
     result.error = /^[a-z][a-z0-9-]{0,79}$/u.test(
       error?.code ?? error?.message ?? '',
     )

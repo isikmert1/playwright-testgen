@@ -18,6 +18,7 @@ const {
   executable,
   lifecycleCancellation,
   runBounded,
+  assertProcessStopped,
 } = require('./process.cjs');
 const { hashFile, hashFiles, validateArtifact } = require('./eval/runtime.cjs');
 const { parse: parseShell } = require('shell-quote');
@@ -658,6 +659,7 @@ async function runCheckpoint(
         verify_process_tree: true,
       },
     );
+    assertProcessStopped(invocation);
     writeFileSync(
       path.join(resultDirectory, `exchange-${exchanges.length + 1}.jsonl`),
       invocation.output,
@@ -697,7 +699,6 @@ async function runCheckpoint(
     result.model_requested = definition.agent.model;
     result.model_resolved = resolvedModel;
     if (
-      invocation.tree_cleanup_failed ||
       invocation.timed_out ||
       invocation.cancelled ||
       invocation.output_overflow ||

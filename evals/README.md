@@ -21,6 +21,8 @@ Mutation runners must execute only the approved spec, attribute failures to its
 approved criterion, and stop every server they start. The outer checker handles
 timeout and cancellation cleanup.
 
+Failed cleanup retains the temporary target for manual recovery.
+
 ## Before running
 
 Run commands from the plugin root. Installed workflow checks need an
@@ -106,6 +108,9 @@ Review the exact spec and approve its SHA-256 before running it:
 ```sh
 npm run eval:candidate -- --trial-id <id> --approved-sha256 <digest>
 ```
+
+An interrupted candidate execution blocks rerunning that trial; preserve its
+execution record for review.
 
 The unchanged candidate runs in a fresh target. An independent reviewer must
 check whether its assertions prove `notebook-details-visible` and record the
