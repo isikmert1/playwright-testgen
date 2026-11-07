@@ -21,6 +21,7 @@ const {
 const {
   executable,
   runBounded,
+  assertProcessStopped,
   lifecycleCancellation,
 } = require('./process.cjs');
 
@@ -427,6 +428,7 @@ async function collectDiscovery(definition, signal, options) {
             'open',
           ).length > 0;
         const elapsed = Date.now() - started;
+        assertProcessStopped(agent);
         writeFileSync(path.join(resultDirectory, 'agent.jsonl'), agent.output);
         const parsed = parseAgentStream(agent.output);
         const grade = gradeDiscovery(agent.output, {
@@ -441,7 +443,6 @@ async function collectDiscovery(definition, signal, options) {
         });
         closeObserved = grade.host_evidence?.browser_close_observed === true;
         if (
-          agent.tree_cleanup_failed ||
           agent.timed_out ||
           agent.cancelled ||
           agent.output_overflow ||

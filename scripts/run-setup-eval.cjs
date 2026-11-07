@@ -18,6 +18,7 @@ const {
 const {
   executable,
   runBounded,
+  assertProcessStopped,
   lifecycleCancellation,
 } = require('./process.cjs');
 const {
@@ -204,10 +205,10 @@ async function setupBeforeAuthor({
     timeout_ms: definition.setup.timeout_ms,
     verify_process_tree: true,
   });
+  assertProcessStopped(run);
   writeFileSync(path.join(resultDirectory, 'setup-agent.jsonl'), run.output);
   const parsed = parseAgentStream(run.output);
   if (
-    run.tree_cleanup_failed ||
     run.timed_out ||
     run.cancelled ||
     run.output_overflow ||
