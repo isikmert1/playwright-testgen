@@ -557,14 +557,32 @@ test('parses bounded agent evidence without retaining response prose', () => {
     },
     {
       type: 'result',
-      subtype: 'success',
+      subtype: 'error_max_turns',
       duration_ms: 1234,
       total_cost_usd: 0.5,
       usage: { input_tokens: 10, output_tokens: 20 },
     },
   ];
+  const childResults = ['delegation-1', 42].map((parent_tool_use_id) => ({
+    type: 'result',
+    subtype: 'success',
+    parent_tool_use_id,
+    duration_ms: 99,
+    total_cost_usd: 9,
+    usage: { input_tokens: 999 },
+  }));
   const parsed = parseAgentStream(
-    `${records.map((value) => JSON.stringify(value)).join('\n')}\n`,
+    [
+      ...records,
+      {
+        type: 'assistant',
+        parent_tool_use_id: 'delegation-1',
+        message: { model: 'claude-haiku-4-5', content: [] },
+      },
+      ...childResults,
+    ]
+      .map((value) => JSON.stringify(value))
+      .join('\n'),
   );
 
   assert.deepEqual(parsed.tool_uses, [{ id: 'tool-1', name: 'Bash' }]);
@@ -581,6 +599,7 @@ test('parses bounded agent evidence without retaining response prose', () => {
     total_cost_usd: 0.5,
     usage: { input_tokens: 10, output_tokens: 20 },
   });
+  assert.equal(parsed.result_subtype, 'error_max_turns');
   assert.deepEqual(parsed.hook_lifecycle, [
     { event: 'PreToolUse', outcome: 'success', decision: 'allow' },
     { event: 'PreToolUse', outcome: 'error', decision: 'deny' },

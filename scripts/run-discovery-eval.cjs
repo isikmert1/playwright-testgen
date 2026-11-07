@@ -183,7 +183,11 @@ function gradeDiscovery(output, host) {
     .filter((record) => record.type === 'user')
     .flatMap((record) => record.message?.content ?? [])
     .filter((block) => block?.type === 'tool_result');
-  const last = records.filter((record) => record.type === 'result').at(-1);
+  const last = records
+    .filter(
+      (record) => record.type === 'result' && record.parent_tool_use_id == null,
+    )
+    .at(-1);
   const response = last?.structured_output;
   const relative = (filename) =>
     typeof filename === 'string'

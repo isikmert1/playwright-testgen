@@ -179,15 +179,16 @@ function parseAgentStream(output, context = {}) {
       typeof record.parent_tool_use_id === 'string'
         ? record.parent_tool_use_id
         : null;
+    const root = record.parent_tool_use_id == null;
     if (
-      parent == null &&
+      root &&
       typeof record.session_id === 'string' &&
       ((record.type === 'system' && record.subtype === 'init') ||
         record.type === 'result')
     )
       sessions.add(record.session_id);
     if (record.type === 'assistant') {
-      if (typeof record.message?.model === 'string')
+      if (root && typeof record.message?.model === 'string')
         runtime.model = record.message.model;
       for (const block of record.message?.content ?? []) {
         if (
@@ -259,7 +260,7 @@ function parseAgentStream(output, context = {}) {
         decision,
       });
     }
-    if (record.type === 'result') {
+    if (record.type === 'result' && root) {
       resultSubtype =
         record.subtype === 'success' && record.is_error === true
           ? 'error'
