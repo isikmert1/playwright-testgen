@@ -127,6 +127,23 @@ test('checkpoint review proves scoped assertions independently of comments and h
     gradeCheckpoint(definition, snapshot(exactText), evidence()).status,
     'passed',
   );
+  assert.equal(
+    gradeCheckpoint(
+      definition,
+      snapshot(exactText.replace('await expect(dialog).toBeVisible();', '')),
+      evidence(),
+    ).status,
+    'passed',
+  );
+  assert.throws(
+    () =>
+      gradeCheckpoint(
+        definition,
+        snapshot(spec.replace('await expect(dialog).toBeVisible();', '')),
+        evidence(),
+      ),
+    /candidate-assertions-invalid/u,
+  );
   assert.throws(
     () => snapshot(exactText.replace(', { exact: true }', '')),
     /candidate-assertions-invalid/u,

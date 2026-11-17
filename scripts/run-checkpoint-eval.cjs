@@ -359,7 +359,9 @@ function gradeCheckpoint(definition, snapshot, evidence, previous = null) {
     (item) => item.step_title === criterion.step_title,
   );
   const visible = assertions.some(
-    (item) => item.target === 'dialog' && item.matcher === 'toBeVisible',
+    (item) =>
+      ['dialog', 'exact-text'].includes(item.target) &&
+      item.matcher === 'toBeVisible',
   );
   const contentVerified = assertions.some(
     (item) =>
