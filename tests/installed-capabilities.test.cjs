@@ -68,6 +68,7 @@ function evidence(overrides = {}) {
     author_spec_writes: 1,
     author_handoff_writes: 1,
     main_spec_writes: 0,
+    main_handoff_writes: 0,
     handoff_validations: 1,
     main_handoff_validations: 1,
     author_handoff_validations: 1,
@@ -275,8 +276,11 @@ test('deterministic checkpoint replay resumes twice and gates skip on the revise
   let executeBeforeApproval = false;
   let staleMainValidation = false;
   let resumedAgent = 'fixture-author';
+  let mainHandoffWriteAt = 0;
+  let secondExchangeModel = 'claude-sonnet-5-5';
   async function invoke(args) {
     calls += 1;
+    const model = calls === 2 ? secondExchangeModel : 'claude-sonnet-5-5';
     budgets.push(args[args.indexOf('--max-budget-usd') + 1]);
     assert.equal(args.includes('--no-session-persistence'), false);
     if (calls > 1)
@@ -320,7 +324,7 @@ test('deterministic checkpoint replay resumes twice and gates skip on the revise
       records.push({
         type: 'assistant',
         message: {
-          model: 'claude-sonnet-5-5',
+          model,
           content: [
             {
               type: 'tool_use',
@@ -418,7 +422,7 @@ test('deterministic checkpoint replay resumes twice and gates skip on the revise
         records.push({
           type: 'assistant',
           message: {
-            model: 'claude-sonnet-5-5',
+            model,
             content: [
               {
                 type: 'text',
@@ -433,7 +437,7 @@ test('deterministic checkpoint replay resumes twice and gates skip on the revise
       records.push({
         type: 'assistant',
         message: {
-          model: 'claude-sonnet-5-5',
+          model,
           content: [
             {
               type: 'text',
@@ -442,6 +446,45 @@ test('deterministic checkpoint replay resumes twice and gates skip on the revise
           ],
         },
       });
+    }
+    if (calls === mainHandoffWriteAt) {
+      const validationIndex = records.findIndex((record) =>
+        record.message?.content?.some(
+          (block) => block.id === 'main-validation',
+        ),
+      );
+      records.splice(
+        validationIndex < 0 ? records.length - 1 : validationIndex,
+        0,
+        {
+          type: 'assistant',
+          message: {
+            content: [
+              {
+                type: 'tool_use',
+                id: 'main-handoff',
+                name: 'Write',
+                input: {
+                  file_path: `.playwright-cli/testgen/${runId}/handoff.json`,
+                  content: JSON.stringify(handoff),
+                },
+              },
+            ],
+          },
+        },
+        {
+          type: 'user',
+          message: {
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'main-handoff',
+                is_error: false,
+              },
+            ],
+          },
+        },
+      );
     }
     records.push({
       type: 'result',
@@ -496,6 +539,24 @@ test('deterministic checkpoint replay resumes twice and gates skip on the revise
     /checkpoint-role-boundary-violated/u,
   );
   assert.equal(calls, 2);
+  resumedAgent = 'fixture-author';
+  for (mainHandoffWriteAt of [2, 3]) {
+    calls = 0;
+    await assert.rejects(
+      runCheckpoint(context, definition, invoke),
+      /checkpoint-role-boundary-violated/u,
+    );
+    assert.equal(calls, mainHandoffWriteAt);
+  }
+  calls = 0;
+  mainHandoffWriteAt = 0;
+  secondExchangeModel = 'claude-sonnet-5';
+  await assert.rejects(
+    runCheckpoint(context, definition, invoke),
+    /checkpoint-model-mismatch/u,
+  );
+  assert.equal(calls, 2);
+  assert.equal(context.result.model_resolved, 'claude-sonnet-5');
 });
 
 test('failed Author exchange restores only its policy-owned browser session after cancellation', async (t) => {

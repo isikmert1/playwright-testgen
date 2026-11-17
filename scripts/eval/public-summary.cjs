@@ -120,11 +120,26 @@ const provenanceComplete = [
   ...Object.values(summary.browsers.exploration),
   ...Object.values(summary.limits),
 ].every((value) => value != null);
+const expectedRuntime = {
+  claude_code: process.env.EVALUATION_CLAUDE_CODE,
+  node: process.env.EVALUATION_NODE,
+  npm: process.env.EVALUATION_NPM,
+  playwright: process.env.EVALUATION_PLAYWRIGHT,
+  playwright_cli: process.env.EVALUATION_PLAYWRIGHT_CLI,
+  platform: 'linux',
+};
+const profileMatches =
+  summary.model_requested === process.env.EVALUATION_MODEL &&
+  summary.model_resolved === process.env.EVALUATION_MODEL &&
+  Object.entries(expectedRuntime).every(
+    ([key, expected]) => expected != null && summary.runtime[key] === expected,
+  );
 if (
   summary.case != null &&
   runnerExit === 0 &&
   gradePassed &&
   provenanceComplete &&
+  profileMatches &&
   summary.cleanup === 'passed' &&
   result.case_id === cases[selectedCase] &&
   result.trial_id === trialId &&

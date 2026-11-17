@@ -52,6 +52,13 @@ jobs:
     runs-on: ubuntu-24.04
     environment: agent-evaluations
     timeout-minutes: 20
+    env:
+      EVALUATION_MODEL: claude-sonnet-5-5
+      EVALUATION_NODE: 24.22.1
+      EVALUATION_NPM: 11.19.1
+      EVALUATION_CLAUDE_CODE: 2.1.285
+      EVALUATION_PLAYWRIGHT: 1.62.1
+      EVALUATION_PLAYWRIGHT_CLI: 0.1.19
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -59,10 +66,10 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
-          node-version: 24.22.1
+          node-version: ${{ env.EVALUATION_NODE }}
           cache: npm
       - run: npm ci
-      - run: npm install --global npm@11.19.1 @anthropic-ai/claude-code@2.1.285 @playwright/cli@0.1.19
+      - run: npm install --global "npm@$EVALUATION_NPM" "@anthropic-ai/claude-code@$EVALUATION_CLAUDE_CODE" "@playwright/cli@$EVALUATION_PLAYWRIGHT_CLI"
       - run: claude plugin validate . --strict
       - run: claude plugin validate .claude-plugin/plugin.json --strict
       - name: Verify a failed grade blocks the job
@@ -92,7 +99,7 @@ jobs:
           results="$RUNNER_TEMP/testgen-evaluation"
           mkdir -p "$results" "$CLAUDE_CONFIG_DIR"
           evaluation_exit=0
-          npm run "$script" -- --model claude-sonnet-5-5 --max-budget-usd 2 \
+          npm run "$script" -- --model "$EVALUATION_MODEL" --max-budget-usd 2 \
             --results-dir "$results" > "$results/runner.log" 2>&1 || evaluation_exit=$?
           printf '%s\n' "$evaluation_exit" > "$RUNNER_TEMP/evaluation-exit"
           exit "$evaluation_exit"

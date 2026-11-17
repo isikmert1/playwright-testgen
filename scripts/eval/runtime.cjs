@@ -83,7 +83,9 @@ function hashFile(filename) {
 
 function hashFiles(repository, relativePaths) {
   const hash = createHash('sha256');
-  for (const relative of [...relativePaths].sort()) {
+  for (const relative of relativePaths
+    .map((value) => value.replaceAll('\\', '/'))
+    .sort()) {
     hash.update(relative);
     hash.update('\0');
     hash.update(readFileSync(path.join(repository, relative)));

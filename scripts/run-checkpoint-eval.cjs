@@ -313,6 +313,7 @@ function gradeCheckpoint(definition, snapshot, evidence, previous = null) {
       'healer_delegations',
       'explorer_delegations',
       'main_spec_writes',
+      'main_handoff_writes',
     ].some((field) => evidence[field] !== 0)
   )
     throw new Error('checkpoint-role-boundary-violated');
@@ -556,6 +557,7 @@ function checkpointEvidence(
       (block) => owned(block) && completed(block),
     ).length,
     main_spec_writes: specWrites.filter((block) => !owned(block)).length,
+    main_handoff_writes: handoffWrites.filter((block) => !owned(block)).length,
     handoff_validations: validation.length,
     main_handoff_validations: validation.filter(
       (block) => block.parent_tool_use_id == null,
@@ -749,6 +751,8 @@ async function runCheckpoint(
       parsed.result_subtype !== 'success'
     )
       throw new Error('checkpoint-agent-failed');
+    if (resolvedModel !== definition.agent.model)
+      throw new Error('checkpoint-model-mismatch');
     if (typeof parsed.session_id !== 'string' || parsed.session_id === '')
       throw new Error('checkpoint-session-unverified');
     if (sessionId != null && sessionId !== parsed.session_id)
@@ -828,6 +832,7 @@ async function runCheckpoint(
         'healer_delegations',
         'explorer_delegations',
         'main_spec_writes',
+        'main_handoff_writes',
         'author_delegations',
       ].some((field) => finalEvidence[field] !== 0)
     )

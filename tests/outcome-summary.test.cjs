@@ -128,6 +128,9 @@ test('public CI summary excludes private evidence and preserves runner and clean
   const revision = 'a'.repeat(40);
   const runtime = {
     ...trial('refusal', 1).profile,
+    claude_code: '2.1.285',
+    node: '24.22.1',
+    npm: '11.19.1',
     platform: 'linux',
     host: {
       os_release: '6.11.0-1018-azure',
@@ -136,11 +139,12 @@ test('public CI summary excludes private evidence and preserves runner and clean
     },
     testgen_revision: revision,
     dataset_sha256: 'b'.repeat(64),
-    model_requested: 'claude-sonnet-5',
-    model_resolved: 'claude-sonnet-5',
+    model_requested: 'claude-sonnet-5-5',
+    model_resolved: 'claude-sonnet-5-5',
     total_cost_usd: 0.2,
     private_notes: 'PRIVATE-EVIDENCE',
   };
+  runtime.agent_limits.model = 'claude-sonnet-5-5';
   const result = {
     ok: true,
     case_id: 'semantic-order-not-inserted',
@@ -159,7 +163,19 @@ test('public CI summary excludes private evidence and preserves runner and clean
         'healer-defect-refusal',
         String(exitCode),
       ],
-      { encoding: 'utf8', env: { ...process.env, GITHUB_SHA: revision } },
+      {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          GITHUB_SHA: revision,
+          EVALUATION_MODEL: 'claude-sonnet-5-5',
+          EVALUATION_NODE: '24.22.1',
+          EVALUATION_NPM: '11.19.1',
+          EVALUATION_CLAUDE_CODE: '2.1.285',
+          EVALUATION_PLAYWRIGHT: '1.62.1',
+          EVALUATION_PLAYWRIGHT_CLI: '0.1.19',
+        },
+      },
     );
   };
   try {
@@ -168,12 +184,25 @@ test('public CI summary excludes private evidence and preserves runner and clean
     const summary = JSON.parse(passed.stdout);
     assert.equal(summary.status, 'passed');
     assert.equal(summary.completed_trials, 1);
-    assert.equal(summary.model_resolved, 'claude-sonnet-5');
+    assert.equal(summary.model_resolved, 'claude-sonnet-5-5');
     assert.equal(summary.browsers.exploration.version, '156.0.2.0');
     assert.doesNotMatch(
       passed.stdout,
       /PRIVATE-EVIDENCE|private_notes|diagnostics/u,
     );
+    runtime.model_resolved = 'claude-sonnet-5';
+    const wrongModel = summarize(0);
+    assert.equal(wrongModel.status, 1);
+    assert.equal(
+      JSON.parse(wrongModel.stdout).model_resolved,
+      'claude-sonnet-5',
+    );
+    runtime.model_resolved = 'claude-sonnet-5-5';
+    runtime.node = '24.13.0';
+    const wrongRuntime = summarize(0);
+    assert.equal(wrongRuntime.status, 1);
+    assert.equal(JSON.parse(wrongRuntime.stdout).runtime.node, '24.13.0');
+    runtime.node = '24.22.1';
     const recordedHost = runtime.host;
     const canary = 'sk-ant-api03-PRIVACY-CANARY-NOT-A-REAL-KEY';
     for (const field of Object.keys(recordedHost)) {
@@ -547,6 +576,18 @@ test('scoring CLI fails critical integrity even for a complete cohort', () => {
 });
 
 test('keeps dataset identity identical across path separator styles', () => {
+  const { hashFiles } = require('../scripts/eval/runtime.cjs');
+  const repository = path.resolve(__dirname, '..');
+  assert.equal(
+    hashFiles(repository, [
+      'scripts/process.cjs',
+      'scripts/eval/agent-evidence.cjs',
+    ]),
+    hashFiles(repository, [
+      'scripts/process.cjs',
+      'scripts\\eval\\agent-evidence.cjs',
+    ]),
+  );
   const filename = path.resolve(__dirname, '../scripts/score-outcomes.cjs');
   const source = readFileSync(filename, 'utf8');
   const digest = (style) => {
