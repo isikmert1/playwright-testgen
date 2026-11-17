@@ -83,6 +83,9 @@ try {
 }
 
 const payload = result?.result ?? result;
+const latestCheckpoint = Array.isArray(result?.checkpoints)
+  ? result.checkpoints.at(-1)
+  : null;
 const runtime = payload?.runtime ?? result;
 const host = runtime?.host;
 const kernelRelease =
@@ -127,6 +130,10 @@ const summary = {
   checkpoint_stage: text(
     result?.checkpoint_stage,
     /^(?:initial|adjust|skip)$/u,
+  ),
+  main_handoff_validation_failure: text(
+    latestCheckpoint?.evidence?.main_handoff_validation_failure,
+    /^(?:not-observed|tool-result-unverified|out-of-order|shell-operators|unsupported-launcher|identity-mismatch)$/u,
   ),
   cost_usd: number(runtime?.total_cost_usd ?? runtime?.cost_usd),
   elapsed_ms: number(result?.elapsed_ms),

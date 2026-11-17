@@ -518,26 +518,53 @@ function checkpointEvidence(
     .filter((message) => message.event_index === finalIndex)
     .map((message) => message.text)
     .join('\n');
+  const validatorScript =
+    /(?:^|[\\/])scripts[\\/]validate-testgen-artifact\.cjs$/u;
+  let mainValidationFailure = 'not-observed';
   const validation = commands.filter((block) => {
+    const reject = (reason) => {
+      if (
+        block.parent_tool_use_id == null &&
+        block.input.command.includes('validate-testgen-artifact.cjs')
+      ) {
+        let invocation;
+        try {
+          invocation = parseShell(block.input.command, (name) => `$${name}`);
+        } catch {
+          return false;
+        }
+        if (
+          /(?:^|[\\/])node(?:\.exe)?$/u.test(invocation[0] ?? '') &&
+          validatorScript.test(invocation[1] ?? '')
+        )
+          mainValidationFailure = reason;
+      }
+      return false;
+    };
+    if (!completed(block)) return reject('tool-result-unverified');
     if (
-      !completed(block) ||
       !Number.isInteger(finalIndex) ||
       (block.parent_tool_use_id == null &&
         block.event_index <= candidateWrittenAt) ||
       block.event_index >= finalIndex
     )
-      return false;
+      return reject('out-of-order');
     const tokens = parseShell(block.input.command, (name) => `$${name}`);
-    return (
-      tokens.every((token) => typeof token === 'string') &&
-      /^node(?:\.exe)?$/u.test(tokens[0] ?? '') &&
-      /(?:^|[\\/])scripts[\\/]validate-testgen-artifact\.cjs$/u.test(
-        tokens[1] ?? '',
-      ) &&
-      tokens[tokens.indexOf('--type') + 1] === 'handoff' &&
-      tokens[tokens.indexOf('--run-id') + 1] === snapshot?.run_id
-    );
+    if (!tokens.every((token) => typeof token === 'string'))
+      return reject('shell-operators');
+    if (!/^node(?:\.exe)?$/u.test(tokens[0] ?? ''))
+      return reject('unsupported-launcher');
+    if (
+      !validatorScript.test(tokens[1] ?? '') ||
+      tokens[tokens.indexOf('--type') + 1] !== 'handoff' ||
+      tokens[tokens.indexOf('--run-id') + 1] !== snapshot?.run_id
+    )
+      return reject('identity-mismatch');
+    return true;
   });
+  const mainValidations = validation.filter(
+    (block) => block.parent_tool_use_id == null,
+  ).length;
   const browserCommand = (block, action) =>
     owned(block) &&
     completed(block) &&
@@ -560,9 +587,9 @@ function checkpointEvidence(
     main_spec_writes: specWrites.filter((block) => !owned(block)).length,
     main_handoff_writes: handoffWrites.filter((block) => !owned(block)).length,
     handoff_validations: validation.length,
-    main_handoff_validations: validation.filter(
-      (block) => block.parent_tool_use_id == null,
-    ).length,
+    main_handoff_validations: mainValidations,
+    main_handoff_validation_failure:
+      mainValidations > 0 ? null : mainValidationFailure,
     author_handoff_validations: validation.filter(owned).length,
     browser_sessions_opened: commands.filter((block) =>
       browserCommand(block, 'open'),
