@@ -130,7 +130,7 @@ test('public CI summary excludes private evidence and preserves runner and clean
     ...trial('refusal', 1).profile,
     claude_code: '2.1.285',
     node: '24.22.1',
-    npm: '11.19.1',
+    npm: '11.21.2',
     platform: 'linux',
     host: {
       os_release: '6.11.0-1018-azure',
@@ -170,7 +170,7 @@ test('public CI summary excludes private evidence and preserves runner and clean
           GITHUB_SHA: revision,
           EVALUATION_MODEL: 'claude-sonnet-5-5',
           EVALUATION_NODE: '24.22.1',
-          EVALUATION_NPM: '11.19.1',
+          EVALUATION_NPM: '11.21.2',
           EVALUATION_CLAUDE_CODE: '2.1.285',
           EVALUATION_PLAYWRIGHT: '1.62.1',
           EVALUATION_PLAYWRIGHT_CLI: '0.1.19',
