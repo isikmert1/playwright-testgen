@@ -21,6 +21,7 @@ const {
 const {
   executable,
   runBounded,
+  assertProcessStopped,
   lifecycleCancellation,
 } = require('./process.cjs');
 
@@ -126,7 +127,7 @@ function discoveryPrompt(definition, runtime) {
     `discovery_id: ${runtime.discovery_id}`,
     `approved origin: ${definition.origin}`,
     'The application and exploration browser are ready. No authentication is needed; approved state paths: none. Data is in-memory and resets when the application restarts.',
-    'Human scope: order submission (order-submission) and bulk cancellation of orders (bulk-cancellation). Inspect existing behavioral tests and relevant source before proposing scenarios for these goals.',
+    'Human scope: order-submission means submitting an order adds exactly one matching row with the submitted item, quantity, and Pending status. Bulk-cancellation means cancelling several orders. Inspect existing behavioral tests and relevant source; limit proposals to these requested outcomes.',
     'State-changing browser exploration is not approved. Each Bash call starts at the repository root. Respect the normal discovery policy and Explorer read/time limits.',
     'Return the normal complete proposal fields and Discovery summary in the supplied structured shape. Also classify each scoped goal using observed coverage, intended or uncertain expectation evidence, concise references, and unresolved questions. An empty proposals array represents no supported proposal; retain the scope, limitations, evidence gaps and request for narrower scope in questions.',
     'Stop after discovery and your exact session cleanup. Scenario selection and Author work are not requested.',
@@ -183,7 +184,11 @@ function gradeDiscovery(output, host) {
     .filter((record) => record.type === 'user')
     .flatMap((record) => record.message?.content ?? [])
     .filter((block) => block?.type === 'tool_result');
-  const last = records.filter((record) => record.type === 'result').at(-1);
+  const last = records
+    .filter(
+      (record) => record.type === 'result' && record.parent_tool_use_id == null,
+    )
+    .at(-1);
   const response = last?.structured_output;
   const relative = (filename) =>
     typeof filename === 'string'
@@ -423,6 +428,7 @@ async function collectDiscovery(definition, signal, options) {
             'open',
           ).length > 0;
         const elapsed = Date.now() - started;
+        assertProcessStopped(agent);
         writeFileSync(path.join(resultDirectory, 'agent.jsonl'), agent.output);
         const parsed = parseAgentStream(agent.output);
         const grade = gradeDiscovery(agent.output, {
@@ -437,7 +443,6 @@ async function collectDiscovery(definition, signal, options) {
         });
         closeObserved = grade.host_evidence?.browser_close_observed === true;
         if (
-          agent.tree_cleanup_failed ||
           agent.timed_out ||
           agent.cancelled ||
           agent.output_overflow ||

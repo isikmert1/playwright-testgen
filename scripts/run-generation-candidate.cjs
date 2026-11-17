@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+const { randomBytes } = require('node:crypto');
 const {
   copyFileSync,
   cpSync,
@@ -7,6 +8,8 @@ const {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
+  rmSync,
   writeFileSync,
 } = require('node:fs');
 const { tmpdir } = require('node:os');
@@ -14,8 +17,11 @@ const path = require('node:path');
 const { command, lifecycleCancellation } = require('./process.cjs');
 const {
   cleanupEvaluation,
+  recordProcessCleanupFailure,
   runApprovedSpec,
   hashFile,
+  hostProvenance,
+  inspectRunnerBrowser,
   startServer,
 } = require('./eval/runtime.cjs');
 
@@ -61,6 +67,7 @@ async function executeCandidate(approval, signal, options = {}) {
   );
   const candidateResult = readJson(path.join(trialDirectory, 'result.json'));
   const handoff = readJson(path.join(trialDirectory, 'handoff.json'));
+  const executionPath = path.join(trialDirectory, 'execution.json');
   if (
     candidateResult.case_id !== definition.case_id ||
     candidateResult.trial_id !== approval.trialId ||
@@ -74,8 +81,7 @@ async function executeCandidate(approval, signal, options = {}) {
     handoff.spec_path !== definition.spec_path ||
     hashFile(candidatePath) !== approval.digest ||
     (candidateResult.candidate_sha256 != null &&
-      candidateResult.candidate_sha256 !== approval.digest) ||
-    existsSync(path.join(trialDirectory, 'execution.json'))
+      candidateResult.candidate_sha256 !== approval.digest)
   )
     throw new Error('candidate-approval-mismatch');
 
@@ -85,9 +91,7 @@ async function executeCandidate(approval, signal, options = {}) {
     plugin_state_before: null,
     repository: null,
     server: null,
-    temporaryRoot: mkdtempSync(
-      path.join(tmpdir(), 'testgen-candidate-evaluation-'),
-    ),
+    temporaryRoot: null,
     temporaryPrefix: 'testgen-candidate-evaluation-',
   };
   const result = {
@@ -105,9 +109,27 @@ async function executeCandidate(approval, signal, options = {}) {
       npm: null,
       playwright: null,
       platform: process.platform,
+      host: hostProvenance(),
     },
   };
   try {
+    writeFileSync(
+      executionPath,
+      `${JSON.stringify({ ...result, status: 'running' }, null, 2)}\n`,
+      { flag: 'wx', mode: 0o600 },
+    );
+  } catch (error) {
+    throw new Error(
+      error.code === 'EEXIST'
+        ? 'candidate-approval-mismatch'
+        : 'candidate-execution-unavailable',
+      { cause: error },
+    );
+  }
+  try {
+    state.temporaryRoot = mkdtempSync(
+      path.join(tmpdir(), 'testgen-candidate-evaluation-'),
+    );
     const source = path.join(
       root,
       'evals',
@@ -176,11 +198,8 @@ async function executeCandidate(approval, signal, options = {}) {
       error: 'runner-browser-unavailable',
       signal,
     });
-    state.server = await startServer(
-      repository,
-      descriptor.start.origin,
-      signal,
-    );
+    result.runtime.browser = await inspectRunnerBrowser(repository, signal);
+    await startServer(state, descriptor.start.origin, signal);
     const reportPath = path.join(state.temporaryRoot, 'playwright-report.json');
     const { outcome } = await runApprovedSpec(
       repository,
@@ -203,6 +222,7 @@ async function executeCandidate(approval, signal, options = {}) {
     result.first_try = outcome;
     result.status = 'complete';
   } catch (error) {
+    recordProcessCleanupFailure(state, error);
     result.error = /^[a-z][a-z0-9-]{0,79}$/u.test(
       error?.code ?? error?.message ?? '',
     )
@@ -212,10 +232,16 @@ async function executeCandidate(approval, signal, options = {}) {
     result.cleanup = await cleanupEvaluation(state);
     if (result.cleanup.status !== 'passed') result.status = 'incomplete';
     result.elapsed_ms = Date.now() - startedAt;
-    writeFileSync(
-      path.join(trialDirectory, 'execution.json'),
-      `${JSON.stringify(result, null, 2)}\n`,
-    );
+    const temporary = `${executionPath}.${randomBytes(6).toString('hex')}.tmp`;
+    try {
+      writeFileSync(temporary, `${JSON.stringify(result, null, 2)}\n`, {
+        flag: 'wx',
+        mode: 0o600,
+      });
+      renameSync(temporary, executionPath);
+    } finally {
+      rmSync(temporary, { force: true });
+    }
   }
   return result;
 }

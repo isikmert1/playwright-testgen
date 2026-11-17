@@ -179,15 +179,16 @@ function parseAgentStream(output, context = {}) {
       typeof record.parent_tool_use_id === 'string'
         ? record.parent_tool_use_id
         : null;
+    const root = record.parent_tool_use_id == null;
     if (
-      parent == null &&
+      root &&
       typeof record.session_id === 'string' &&
       ((record.type === 'system' && record.subtype === 'init') ||
         record.type === 'result')
     )
       sessions.add(record.session_id);
     if (record.type === 'assistant') {
-      if (typeof record.message?.model === 'string')
+      if (root && typeof record.message?.model === 'string')
         runtime.model = record.message.model;
       for (const block of record.message?.content ?? []) {
         if (
@@ -225,10 +226,21 @@ function parseAgentStream(output, context = {}) {
           block?.type === 'tool_result' &&
           typeof block.tool_use_id === 'string'
         ) {
+          const identity =
+            context.include_private_evidence === true
+              ? record.tool_use_result
+              : null;
           toolResults.push({
             tool_use_id: block.tool_use_id,
             is_error: block.is_error === true,
             execution: classifyToolResult(block),
+            ...(typeof identity?.agentId === 'string'
+              ? { agent_id: identity.agentId }
+              : {}),
+            ...(identity?.success === true &&
+            typeof identity.resumedAgentId === 'string'
+              ? { resumed_agent_id: identity.resumedAgentId }
+              : {}),
           });
         }
       }
@@ -259,7 +271,7 @@ function parseAgentStream(output, context = {}) {
         decision,
       });
     }
-    if (record.type === 'result') {
+    if (record.type === 'result' && root) {
       resultSubtype =
         record.subtype === 'success' && record.is_error === true
           ? 'error'
@@ -536,7 +548,7 @@ function emptyRuntime() {
     model: null,
     model_requested: null,
     model_resolved: null,
-    node: process.version,
+    node: process.versions.node,
     npm: null,
     playwright: null,
     playwright_cli: null,

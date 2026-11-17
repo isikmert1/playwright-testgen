@@ -14,6 +14,7 @@ const { evaluationFailure } = require('./agent-evidence.cjs');
 const { executable, fail } = require('../process.cjs');
 const {
   cleanupEvaluation,
+  recordProcessCleanupFailure,
   verifyBrowserReadiness,
   evaluatedRevision,
   installPlugin,
@@ -154,7 +155,7 @@ async function collectInstalledCase(definition, signal, options) {
       options.datasetDigest?.() ?? hashFiles(root, options.datasetPaths);
     result.testgen_revision = await evaluatedRevision(signal);
     const tooling = await preflight(signal, result);
-    result.node = process.version;
+    result.node = process.versions.node;
     result.platform = process.platform;
     state.temporaryRoot = mkdtempSync(
       path.join(tmpdir(), state.temporaryPrefix),
@@ -189,12 +190,8 @@ async function collectInstalledCase(definition, signal, options) {
       options.role,
     );
     result.installed_hook_sha256 = installed.hook_sha256;
-    state.server = await startServer(
-      state.repository,
-      definition.origin,
-      signal,
-    );
-    await verifyBrowserReadiness(
+    await startServer(state, definition.origin, signal);
+    result.browsers = await verifyBrowserReadiness(
       tooling,
       state.repository,
       definition.origin,
@@ -218,8 +215,11 @@ async function collectInstalledCase(definition, signal, options) {
       }),
     );
   } catch (error) {
+    recordProcessCleanupFailure(state, error);
     Object.assign(result, evaluationFailure(error));
   } finally {
+    if (result.host_restoration?.browser_session === 'failed')
+      state.process_cleanup_failed = true;
     result.cleanup = await cleanupEvaluation(state);
     if (result.cleanup.status !== 'passed') result.status = 'failed';
     result.elapsed_ms = Date.now() - startedAt;

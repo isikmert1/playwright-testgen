@@ -16,6 +16,29 @@ the wrong outcome, or passing without exercising the behavior they claim to
 cover. Testgen separates authorship from execution and keeps browser evidence,
 written intent, and meaningful assertions connected throughout the run.
 
+## Evidence and comparative claims
+
+Testgen aims to reduce misleading green tests and repairs that hide product
+defects. Comparative gains in test quality, reliability, cost, or speed have
+not been established.
+
+Public comparisons will use matched tasks, pinned model and tool versions,
+equivalent resource budgets, clean target state, and repeated trials. Testgen
+will be compared against separate Claude Code workflows using the official
+Playwright CLI skill, Playwright's test agents, and Playwright MCP.
+
+We will measure:
+
+- Useful-test success: passing healthy behavior and detecting relevant seeded
+  defects, with independent assertion review.
+- Correct repairs and defect refusal, repeated-run stability, and unsafe changes.
+- Setup effort, actual human interventions, tokens, reported model cost, and
+  elapsed time, including cost and time per useful test.
+
+Reports must include failed and incomplete attempts, variation across trials,
+and grading and coverage limits. A green test alone does not establish useful
+coverage. See [Evaluations](evals/README.md) for current checks and evidence limits.
+
 ## How it works
 
 1. Testgen checks the project's existing Playwright runtime and running app.

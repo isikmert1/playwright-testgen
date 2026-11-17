@@ -135,6 +135,25 @@ function validateAttempts(attempts, criteria, errors) {
     );
     if (terminalIndex >= 0 && terminalIndex !== attempts.length - 1)
       errors.push('trace-attempt-after-terminal-classification');
+    // shortcut: progress compares normalized text; paraphrases need human review.
+    const noProgressIndex = attempts.findIndex((attempt, index) => {
+      const previous = attempts[index - 1];
+      return (
+        isObject(attempt) &&
+        isObject(previous) &&
+        ['fail', 'blocked'].includes(attempt.outcome) &&
+        ['fail', 'blocked'].includes(previous.outcome) &&
+        ['failure_signature', 'hypothesis', 'evidence_summary'].every(
+          (field) =>
+            typeof attempt[field] === 'string' &&
+            typeof previous[field] === 'string' &&
+            attempt[field].replace(/\s+/gu, ' ').trim() ===
+              previous[field].replace(/\s+/gu, ' ').trim(),
+        )
+      );
+    });
+    if (noProgressIndex >= 0 && noProgressIndex !== attempts.length - 1)
+      errors.push('trace-attempt-after-no-progress');
     const passingNonDebugIndex = attempts.findIndex(
       (attempt) =>
         isObject(attempt) &&

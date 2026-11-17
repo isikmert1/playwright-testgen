@@ -4,26 +4,32 @@ const { createHash, randomBytes } = require('node:crypto');
 const {
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   writeFileSync,
 } = require('node:fs');
 const { tmpdir } = require('node:os');
 const path = require('node:path');
-const { exactPlaywrightFilter } = require('../hooks/run-policy.cjs');
+const { exactPlaywrightFilter, samePath } = require('../hooks/run-policy.cjs');
 const {
   command,
   executable,
   runBounded,
+  assertProcessStopped,
+  fail,
   lifecycleCancellation,
 } = require('./process.cjs');
 const {
   buildClaudeArguments,
+  evaluationFailure,
   parseAgentStream,
 } = require('./eval/agent-evidence.cjs');
 const {
   cleanupEvaluation,
+  recordProcessCleanupFailure,
   allTests,
   runApprovedSpec,
   evaluatedRevision,
@@ -36,6 +42,7 @@ const {
   startServer,
   validateArtifact,
   verifyInstalledHook,
+  verifyBrowserReadiness,
 } = require('./eval/runtime.cjs');
 const { buildHealerPrompt } = require('./run-healer-defect-refusal.cjs');
 const { scoreSelectorRepair } = require('./score-selector-repair.cjs');
@@ -111,6 +118,54 @@ function approvedSpec(args, definition) {
   return args[1];
 }
 
+async function validateRepairTrace(
+  installPath,
+  repository,
+  runId,
+  resultDirectory,
+  signal,
+) {
+  const tracePath = path.join(
+    repository,
+    '.playwright-cli/testgen',
+    runId,
+    'healer-trace.json',
+  );
+  if (existsSync(tracePath)) {
+    const stat = lstatSync(tracePath);
+    if (
+      !stat.isFile() ||
+      stat.nlink !== 1 ||
+      stat.size > 512 * 1024 ||
+      !samePath(
+        realpathSync(tracePath),
+        path.join(
+          realpathSync(repository),
+          '.playwright-cli/testgen',
+          runId,
+          'healer-trace.json',
+        ),
+      )
+    )
+      fail('trace-evidence-unavailable');
+    copyFileSync(tracePath, path.join(resultDirectory, 'healer-trace.json'));
+  }
+  try {
+    await validateArtifact(
+      installPath,
+      repository,
+      'trace',
+      runId,
+      tracePath,
+      signal,
+    );
+  } catch (error) {
+    if (error.code !== 'trace-invalid') throw error;
+    return { trace: null, validation_error: evaluationFailure(error) };
+  }
+  return { trace: readJson(tracePath), validation_error: null };
+}
+
 async function evaluateRepair(definition, approvedDigest, signal) {
   const startedAt = Date.now();
   const descriptor = readJson(
@@ -156,6 +211,7 @@ async function evaluateRepair(definition, approvedDigest, signal) {
     result.claude_code = runtime.claude_code;
     result.node = process.versions.node;
     result.npm = runtime.npm;
+    result.host = runtime.host;
     result.platform = process.platform;
     result.agent_limits = definition.agent;
     const source = await preparePluginSource(
@@ -194,11 +250,7 @@ async function evaluateRepair(definition, approvedDigest, signal) {
         ? targetPackage.bin
         : targetPackage.bin.playwright,
     );
-    state.server = await startServer(
-      state.repository,
-      descriptor.start.origin,
-      signal,
-    );
+    await startServer(state, descriptor.start.origin, signal);
     const baseline = await runApprovedSpec(
       state.repository,
       playwrightCli,
@@ -249,6 +301,13 @@ async function evaluateRepair(definition, approvedDigest, signal) {
     result.playwright = compatibility.playwright.version;
     result.playwright_cli = compatibility.playwright_cli.version;
     result.installed_runtime_sha256 = installed.runtime_sha256;
+    result.browsers = await verifyBrowserReadiness(
+      tooling,
+      state.repository,
+      descriptor.start.origin,
+      state.temporaryRoot,
+      signal,
+    );
 
     const runId = `tg-${randomBytes(12).toString('hex')}`;
     result.run_id = runId;
@@ -353,6 +412,7 @@ async function evaluateRepair(definition, approvedDigest, signal) {
         verify_process_tree: true,
       },
     );
+    assertProcessStopped(agent);
     writeFileSync(path.join(resultDirectory, 'agent.jsonl'), agent.output);
     const parsed = parseAgentStream(agent.output, {
       repository: state.repository,
@@ -368,7 +428,6 @@ async function evaluateRepair(definition, approvedDigest, signal) {
       (hook) => hook.outcome === 'error',
     ).length;
     if (
-      agent.tree_cleanup_failed ||
       agent.timed_out ||
       agent.cancelled ||
       agent.output_overflow ||
@@ -378,23 +437,15 @@ async function evaluateRepair(definition, approvedDigest, signal) {
       result.hook_errors !== 0
     )
       throw new Error('healer-run-failed');
-    const tracePath = path.join(runDirectory, 'healer-trace.json');
-    let traceValid = true;
-    try {
-      await validateArtifact(
-        installed.installPath,
-        state.repository,
-        'trace',
-        runId,
-        tracePath,
-        signal,
-      );
-    } catch {
-      traceValid = false;
-    }
-    const trace = traceValid ? readJson(tracePath) : null;
-    if (traceValid)
-      copyFileSync(tracePath, path.join(resultDirectory, 'healer-trace.json'));
+    const { trace, validation_error } = await validateRepairTrace(
+      installed.installPath,
+      state.repository,
+      runId,
+      resultDirectory,
+      signal,
+    );
+    if (validation_error != null)
+      result.trace_validation_error = validation_error;
     copyFileSync(
       specPath,
       path.join(resultDirectory, 'repaired-order.spec.ts'),
@@ -432,7 +483,7 @@ async function evaluateRepair(definition, approvedDigest, signal) {
         baseline: baseline.outcome,
         variant_precheck: precheck.outcome,
         selector_failure: result.selector_failure,
-        trace_valid: traceValid,
+        trace_valid: trace != null,
         trace,
         spec_path: definition.spec_path,
         before,
@@ -448,6 +499,7 @@ async function evaluateRepair(definition, approvedDigest, signal) {
     }
     result.status = 'complete';
   } catch (error) {
+    recordProcessCleanupFailure(state, error);
     result.error = /^[a-z][a-z0-9-]{0,79}$/u.test(
       error?.code ?? error?.message ?? '',
     )
@@ -490,4 +542,5 @@ module.exports = {
   expectedSelectorRepair,
   evaluateRepair,
   selectorFailure,
+  validateRepairTrace,
 };

@@ -12,7 +12,7 @@ const {
   rmSync,
   writeFileSync,
 } = require('node:fs');
-const { tmpdir } = require('node:os');
+const { release, tmpdir } = require('node:os');
 const path = require('node:path');
 const { exactPlaywrightFilter } = require('../../hooks/run-policy.cjs');
 const { currentHead } = require('../repository-snapshot.cjs');
@@ -21,6 +21,7 @@ const {
   EvaluationError,
   LIFECYCLE_COMMAND_TIMEOUT_MS,
   SAFE_ERROR_CODE,
+  assertProcessStopped,
   command,
   executable,
   fail,
@@ -82,7 +83,9 @@ function hashFile(filename) {
 
 function hashFiles(repository, relativePaths) {
   const hash = createHash('sha256');
-  for (const relative of [...relativePaths].sort()) {
+  for (const relative of relativePaths
+    .map((value) => value.replaceAll('\\', '/'))
+    .sort()) {
     hash.update(relative);
     hash.update('\0');
     hash.update(readFileSync(path.join(repository, relative)));
@@ -186,6 +189,36 @@ function assertPluginBlind(source) {
     fail('installed-evaluation-material');
 }
 
+function hostProvenance() {
+  return {
+    os_release: release(),
+    image: process.env.ImageOS ?? null,
+    image_version: process.env.ImageVersion ?? null,
+  };
+}
+
+function browserIdentity(value) {
+  if (
+    !['chromium', 'firefox', 'webkit'].includes(value?.engine) ||
+    typeof value.version !== 'string' ||
+    !/^\d+(?:\.\d+){1,3}$/u.test(value.version)
+  )
+    fail('browser-identity-unverified');
+  return { engine: value.engine, version: value.version };
+}
+
+async function inspectRunnerBrowser(repository, signal) {
+  const output = await command(
+    process.execPath,
+    [
+      '-e',
+      "(async()=>{const browser=await require('playwright').chromium.launch();try{process.stdout.write(JSON.stringify({engine:browser.browserType().name(),version:browser.version()}))}finally{await browser.close()}})().catch(()=>{process.exitCode=1})",
+    ],
+    { cwd: repository, error: 'runner-browser-unavailable', signal },
+  );
+  return browserIdentity(readJsonOutput(output, 'browser-identity-unverified'));
+}
+
 async function verifyBrowserReadiness(
   tooling,
   repository,
@@ -193,14 +226,7 @@ async function verifyBrowserReadiness(
   temporaryRoot,
   signal,
 ) {
-  await command(
-    process.execPath,
-    [
-      '-e',
-      "require('playwright').chromium.launch().then(async (browser) => browser.close())",
-    ],
-    { cwd: repository, error: 'runner-browser-unavailable', signal },
-  );
+  const runner = await inspectRunnerBrowser(repository, signal);
   const session = `preflight-${randomBytes(8).toString('hex')}`;
   const directory = path.join(temporaryRoot, 'cli-preflight');
   mkdirSync(directory);
@@ -217,8 +243,10 @@ async function verifyBrowserReadiness(
       },
     );
   let failure = null;
+  let exploration;
   try {
     const launch = await invoke('open', [origin]);
+    assertProcessStopped(launch);
     if (
       launch.status !== 0 ||
       launch.timed_out ||
@@ -226,21 +254,45 @@ async function verifyBrowserReadiness(
       launch.spawn_error != null
     )
       throw new Error('cli-browser-unavailable');
+    const identity = await invoke('run-code', [
+      'async (page) => ({ engine: page.context().browser().browserType().name(), version: page.context().browser().version() })',
+      '--json',
+    ]);
+    const sessions = await invoke('list', ['--json']);
+    assertProcessStopped(identity);
+    assertProcessStopped(sessions);
+    if (identity.status !== 0 || sessions.status !== 0)
+      fail('browser-identity-unverified');
+    const metadata = browserIdentity(
+      readJsonOutput(
+        readJsonOutput(identity.output, 'browser-identity-unverified').result,
+        'browser-identity-unverified',
+      ),
+    );
+    const channel = readJsonOutput(
+      sessions.output,
+      'browser-identity-unverified',
+    ).browsers?.find((browser) => browser.name === session)?.browserType;
+    if (typeof channel !== 'string' || !/^[a-z][a-z0-9-]{0,39}$/u.test(channel))
+      fail('browser-identity-unverified');
+    exploration = { ...metadata, channel };
   } catch (error) {
     failure = error;
   }
   const close = await invoke('close', [], null);
   if (
+    close.tree_cleanup_failed ||
     close.status !== 0 ||
     close.timed_out ||
     close.cancelled ||
     close.spawn_error != null
-  )
-    failure = new EvaluationError(
-      failure?.code ?? failure?.message ?? 'cli-browser-cleanup-failed',
-      failure == null ? [] : ['cli-browser-cleanup-failed'],
-    );
+  ) {
+    failure ??= new EvaluationError('cli-browser-cleanup-failed');
+    failure.cleanup_error = 'cli-browser-cleanup-failed';
+    failure.cleanup_pid ??= close.tree_cleanup_pid;
+  }
   if (failure != null) throw failure;
+  return { runner, exploration };
 }
 
 function allTests(suites) {
@@ -312,8 +364,8 @@ async function runApprovedSpec(
       verify_process_tree: true,
     },
   );
+  assertProcessStopped(run);
   if (
-    run.tree_cleanup_failed ||
     run.timed_out ||
     run.cancelled ||
     run.output_overflow ||
@@ -427,6 +479,7 @@ function normalizedMarketplaceState(value) {
 async function preflight(signal, runtime) {
   if (!versionAtLeast(process.versions.node, '22.13.0'))
     fail('node-version-unsupported');
+  runtime.host = hostProvenance();
   const npmCli = process.env.npm_execpath;
   if (typeof npmCli !== 'string' || !existsSync(npmCli))
     fail('npm-unavailable');
@@ -585,34 +638,38 @@ async function validateArtifact(
       verify_process_tree: true,
     },
   );
-  if (result.tree_cleanup_failed)
-    fail('process-tree-cleanup-failed', [result.tree_cleanup_reason]);
+  assertProcessStopped(result);
   if (result.cancelled) fail('evaluation-cancelled');
   if (result.timed_out) fail('lifecycle-command-timeout');
-  if (result.status !== 0) {
-    let details = [];
-    try {
-      const report = JSON.parse(result.error_output.trim());
-      if (
-        report.valid === false &&
-        report.type === type &&
-        Array.isArray(report.errors)
-      )
-        details = report.errors;
-    } catch {
-      details = [];
-    }
-    throw new EvaluationError(`${type}-invalid`, details);
-  }
   if (result.output_overflow || result.spawn_error != null)
-    fail(`${type}-invalid`);
-  const report = readJsonOutput(result.output.trim(), `${type}-invalid`);
-  if (report.valid !== true) fail(`${type}-invalid`);
+    fail('artifact-validator-execution-failed');
+  let report;
+  try {
+    report = JSON.parse(
+      (result.status === 0 ? result.output : result.error_output).trim(),
+    );
+  } catch {
+    fail(
+      result.status === 0
+        ? 'artifact-validator-report-invalid'
+        : 'artifact-validator-execution-failed',
+    );
+  }
+  if (
+    report?.type !== type ||
+    typeof report.valid !== 'boolean' ||
+    (report.valid === false && !Array.isArray(report.errors))
+  )
+    fail('artifact-validator-report-invalid');
+  if (report.valid === false)
+    throw new EvaluationError(`${type}-invalid`, report.errors);
+  if (result.status !== 0) fail('artifact-validator-execution-failed');
 }
 
-function startServer(repository, origin, signal) {
+function startServer(state, origin, signal) {
   if (signal?.aborted)
     return Promise.reject(new EvaluationError('evaluation-cancelled'));
+  const repository = state.repository;
   const expected = new URL(origin);
   const child = fork(path.join(repository, 'server.cjs'), [], {
     cwd: repository,
@@ -620,65 +677,44 @@ function startServer(repository, origin, signal) {
     stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
     windowsHide: true,
   });
+  state.server = child;
   return new Promise((resolve, reject) => {
     let settled = false;
-    let cancelling = false;
-    const timer = setTimeout(async () => {
-      const stopped = await stopProcessTree(child);
-      if (!stopped) {
-        finish(new EvaluationError('process-tree-cleanup-failed'));
-        return;
-      }
-      finish(new EvaluationError('target-server-unavailable'));
-    }, 5000);
+    let stopping = false;
+    const timer = setTimeout(
+      () => void stop('target-server-unavailable'),
+      5000,
+    );
     const finish = (error) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      child.removeAllListeners('error');
       child.removeAllListeners('exit');
       child.removeAllListeners('message');
       signal?.removeEventListener('abort', cancel);
       if (error != null) reject(error);
       else resolve(child);
     };
-    const cancel = async () => {
-      if (cancelling) return;
-      cancelling = true;
+    const stop = async (reason) => {
+      if (stopping || settled) return;
+      stopping = true;
       const stopped = await stopProcessTree(child);
-      finish(
-        new EvaluationError(
-          stopped ? 'evaluation-cancelled' : 'process-tree-cleanup-failed',
-        ),
+      if (stopped) state.server = null;
+      const error = new EvaluationError(
+        stopped ? reason : 'process-tree-cleanup-failed',
       );
+      if (!stopped) error.cleanup_pid = child.pid;
+      finish(error);
     };
+    const cancel = () => void stop('evaluation-cancelled');
     signal?.addEventListener('abort', cancel, { once: true });
     if (signal?.aborted) void cancel();
-    child.once('error', () =>
-      finish(new EvaluationError('target-server-unavailable')),
-    );
-    child.once('exit', () => {
-      void stopProcessTree(child).then((stopped) =>
-        finish(
-          new EvaluationError(
-            stopped
-              ? 'target-server-unavailable'
-              : 'process-tree-cleanup-failed',
-          ),
-        ),
-      );
-    });
+    child.once('error', () => void stop('target-server-unavailable'));
+    child.once('exit', () => void stop('target-server-unavailable'));
     child.once('message', (message) => {
+      if (stopping) return;
       if (message?.type !== 'ready' || message.origin !== origin) {
-        void stopProcessTree(child).then((stopped) =>
-          finish(
-            new EvaluationError(
-              stopped
-                ? 'target-server-unavailable'
-                : 'process-tree-cleanup-failed',
-            ),
-          ),
-        );
+        void stop('target-server-unavailable');
         return;
       }
       finish(null);
@@ -752,6 +788,9 @@ async function verifyInstalledHook(
   agentType = 'playwright-test-healer',
 ) {
   const toolUseId = `hook-preflight-${randomBytes(8).toString('hex')}`;
+  const expectedDecision = agentType.endsWith('playwright-test-explorer')
+    ? 'deny'
+    : 'allow';
   const payload = {
     agent_type: agentType,
     cwd: repository,
@@ -785,7 +824,7 @@ async function verifyInstalledHook(
     error: 'installed-hook-unavailable',
   });
   const response = readJsonOutput(output, 'installed-hook-unavailable');
-  if (response?.hookSpecificOutput?.permissionDecision !== 'allow')
+  if (response?.hookSpecificOutput?.permissionDecision !== expectedDecision)
     fail('installed-hook-unavailable');
   const record = readHookAudit(auditPath).find(
     (entry) => entry.tool_use_id === toolUseId,
@@ -794,7 +833,7 @@ async function verifyInstalledHook(
     record?.agent_type !==
       (agentType === 'playwright-test-healer' ? agentType : 'other') ||
     record.tool_name !== payload.tool_name ||
-    record.decision !== 'allow' ||
+    record.decision !== expectedDecision ||
     record.operation !== 'other' ||
     record.hook_sha256 !== hashFile(hookPath)
   )
@@ -838,8 +877,7 @@ async function runRuntimePreflight(
       verify_process_tree: true,
     },
   );
-  if (result.tree_cleanup_failed)
-    fail('process-tree-cleanup-failed', [result.tree_cleanup_reason]);
+  assertProcessStopped(result);
   if (result.cancelled) fail('evaluation-cancelled');
   if (result.timed_out) fail('runtime-preflight-timeout');
   if (result.output_overflow || result.spawn_error != null)
@@ -906,11 +944,26 @@ async function installPlugin(state, source, tooling, signal) {
   return { installed, compatibility };
 }
 
+function recordProcessCleanupFailure(state, error) {
+  if (
+    error?.code !== 'process-tree-cleanup-failed' &&
+    error?.cleanup_error !== 'cli-browser-cleanup-failed'
+  )
+    return;
+  if (error.cleanup_pid != null && error.cleanup_pid === state.server?.pid)
+    return;
+  state.process_cleanup_failed = true;
+  state.process_pid = error.cleanup_pid ?? state.process_pid;
+}
+
 async function cleanupEvaluation(state) {
   const failures = [];
   const details = [];
-  if (state.server != null && !(await stopProcessTree(state.server)))
-    failures.push('server-cleanup-failed');
+  if (state.process_cleanup_failed) failures.push('process-cleanup-unverified');
+  const serverStopped =
+    state.server == null || (await stopProcessTree(state.server));
+  if (!serverStopped) failures.push('server-cleanup-failed');
+  else state.server = null;
   if (
     state.repository != null &&
     state.plugin_installed &&
@@ -922,7 +975,9 @@ async function cleanupEvaluation(state) {
         ['plugin', 'uninstall', state.plugin_id, '--scope', 'local'],
         { cwd: state.repository, error: 'plugin-uninstall-failed' },
       );
+      state.plugin_installed = false;
     } catch (error) {
+      recordProcessCleanupFailure(state, error);
       failures.push(error.code ?? 'plugin-uninstall-failed');
     }
   }
@@ -944,7 +999,9 @@ async function cleanupEvaluation(state) {
         ],
         { cwd: state.repository, error: 'marketplace-cleanup-failed' },
       );
+      state.marketplace_added = false;
     } catch (error) {
+      recordProcessCleanupFailure(state, error);
       failures.push(error.code ?? 'marketplace-cleanup-failed');
     }
   }
@@ -971,6 +1028,7 @@ async function cleanupEvaluation(state) {
         details.push(...marketplaceChanges);
       }
     } catch (error) {
+      recordProcessCleanupFailure(state, error);
       failures.push(error.code ?? 'plugin-state-unavailable');
     }
   }
@@ -987,7 +1045,8 @@ async function cleanupEvaluation(state) {
           .startsWith(state.temporaryPrefix ?? 'testgen-healer-evaluation-')
       )
         failures.push('temporary-path-invalid');
-      else rmSync(candidate, { force: true, recursive: true });
+      else if (failures.length === 0)
+        rmSync(candidate, { force: true, recursive: true });
     }
   } catch {
     failures.push('temporary-cleanup-failed');
@@ -1002,6 +1061,16 @@ async function cleanupEvaluation(state) {
         status: 'failed',
         error: 'cleanup-failed',
         reason: failures.join(','),
+        ...(state.temporaryRoot == null
+          ? {}
+          : {
+              temporary_target: 'retained',
+              temporary_root: state.temporaryRoot,
+            }),
+        ...(serverStopped ? {} : { server_pid: state.server.pid }),
+        ...(state.process_pid == null
+          ? {}
+          : { process_pid: state.process_pid }),
         ...(details.length === 0
           ? {}
           : { details: [...new Set(details)].sort().slice(0, 12) }),
@@ -1009,6 +1078,7 @@ async function cleanupEvaluation(state) {
 }
 
 module.exports = {
+  recordProcessCleanupFailure,
   assertPluginBlind,
   cleanupEvaluation,
   allTests,
@@ -1017,6 +1087,8 @@ module.exports = {
   verifyBrowserReadiness,
   evaluatedRevision,
   installPlugin,
+  hostProvenance,
+  inspectRunnerBrowser,
   findInstalledPlugin,
   hashFile,
   hashFiles,

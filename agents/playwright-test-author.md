@@ -128,6 +128,8 @@ outcomes; grounded locator decisions; test-id convention and additions; lint;
 test data; touched paths; assumptions; and open questions. Raw selectors belong
 only in `locators[].locator`; all other prose is a concise behavior summary,
 never a command, environment value, code, raw output, snapshot, body, or secret.
+Copy supplied criterion IDs and outcome text verbatim. If that text cannot pass
+artifact validation, return the blocker to Main instead of changing the criterion.
 Read the final spec once and record each assertion line inside its named
 `test.step()`, not the step's opening line. Write the handoff once at
 `.playwright-cli/testgen/<run_id>/handoff.json`, then run exactly:

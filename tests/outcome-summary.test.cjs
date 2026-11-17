@@ -4,12 +4,15 @@ const {
   cpSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } = require('node:fs');
 const { tmpdir } = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
+const { runInNewContext } = require('node:vm');
 const {
   combineResult,
   evaluationFailure,
@@ -22,7 +25,10 @@ const {
 } = require('../scripts/score-outcomes.cjs');
 
 const { scoreSelectorRepair } = require('../scripts/score-selector-repair.cjs');
-const { selectorFailure } = require('../scripts/run-selector-repair-eval.cjs');
+const {
+  selectorFailure,
+  validateRepairTrace,
+} = require('../scripts/run-selector-repair-eval.cjs');
 
 const definitions = [
   { case_id: 'generation', kind: 'generation', planned_trials: 2 },
@@ -59,6 +65,15 @@ function trial(caseId, index) {
       playwright: '1.62.1',
       playwright_cli: '0.1.19',
       platform: 'win32',
+      host: { os_release: '10.0.26100', image: null, image_version: null },
+      browsers: {
+        runner: { engine: 'chromium', version: '155.0.1.0' },
+        exploration: {
+          engine: 'chromium',
+          channel: 'chrome',
+          version: '156.0.2.0',
+        },
+      },
       agent_limits: {
         name: 'test-agent',
         model: 'claude-sonnet-5',
@@ -73,6 +88,12 @@ function trial(caseId, index) {
               npm: '11.0.0',
               playwright: '1.62.1',
               platform: 'win32',
+              host: {
+                os_release: '10.0.26100',
+                image: null,
+                image_version: null,
+              },
+              browser: { engine: 'chromium', version: '155.0.1.0' },
             },
           }
         : {}),
@@ -98,6 +119,125 @@ test('requires the declared number of trials for every outcome case', () => {
   );
   assert.equal(summary.completed_trials, 6);
   assert.equal(summary.status, 'incomplete');
+});
+
+test('public CI summary excludes private evidence and preserves runner and cleanup failures', () => {
+  const directory = mkdtempSync(path.join(tmpdir(), 'testgen-ci-summary-'));
+  const target = path.join(directory, 'trial-0123456789abcdef');
+  mkdirSync(target);
+  const revision = 'a'.repeat(40);
+  const runtime = {
+    ...trial('refusal', 1).profile,
+    claude_code: '2.1.285',
+    node: '24.22.1',
+    npm: '11.19.1',
+    platform: 'linux',
+    host: {
+      os_release: '6.11.0-1018-azure',
+      image: 'ubuntu24',
+      image_version: '20261105.1.0',
+    },
+    testgen_revision: revision,
+    dataset_sha256: 'b'.repeat(64),
+    model_requested: 'claude-sonnet-5-5',
+    model_resolved: 'claude-sonnet-5-5',
+    total_cost_usd: 0.2,
+    private_notes: 'PRIVATE-EVIDENCE',
+  };
+  runtime.agent_limits.model = 'claude-sonnet-5-5';
+  const result = {
+    ok: true,
+    case_id: 'semantic-order-not-inserted',
+    trial_id: path.basename(target),
+    result: { status: 'passed', score: { status: 'passed' }, runtime },
+    cleanup: { status: 'passed' },
+    diagnostics: { transcript: 'PRIVATE-EVIDENCE' },
+  };
+  const summarize = (exitCode) => {
+    writeFileSync(path.join(target, 'result.json'), JSON.stringify(result));
+    return spawnSync(
+      process.execPath,
+      [
+        path.resolve(__dirname, '../scripts/eval/public-summary.cjs'),
+        directory,
+        'healer-defect-refusal',
+        String(exitCode),
+      ],
+      {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          GITHUB_SHA: revision,
+          EVALUATION_MODEL: 'claude-sonnet-5-5',
+          EVALUATION_NODE: '24.22.1',
+          EVALUATION_NPM: '11.19.1',
+          EVALUATION_CLAUDE_CODE: '2.1.285',
+          EVALUATION_PLAYWRIGHT: '1.62.1',
+          EVALUATION_PLAYWRIGHT_CLI: '0.1.19',
+        },
+      },
+    );
+  };
+  try {
+    const passed = summarize(0);
+    assert.equal(passed.status, 0, passed.stderr);
+    const summary = JSON.parse(passed.stdout);
+    assert.equal(summary.status, 'passed');
+    assert.equal(summary.completed_trials, 1);
+    assert.equal(summary.model_resolved, 'claude-sonnet-5-5');
+    assert.equal(summary.browsers.exploration.version, '156.0.2.0');
+    assert.doesNotMatch(
+      passed.stdout,
+      /PRIVATE-EVIDENCE|private_notes|diagnostics/u,
+    );
+    runtime.model_resolved = 'claude-sonnet-5';
+    const wrongModel = summarize(0);
+    assert.equal(wrongModel.status, 1);
+    assert.equal(
+      JSON.parse(wrongModel.stdout).model_resolved,
+      'claude-sonnet-5',
+    );
+    runtime.model_resolved = 'claude-sonnet-5-5';
+    runtime.node = '24.13.0';
+    const wrongRuntime = summarize(0);
+    assert.equal(wrongRuntime.status, 1);
+    assert.equal(JSON.parse(wrongRuntime.stdout).runtime.node, '24.13.0');
+    runtime.node = '24.22.1';
+    const recordedHost = runtime.host;
+    const canary = 'sk-ant-api03-PRIVACY-CANARY-NOT-A-REAL-KEY';
+    for (const field of Object.keys(recordedHost)) {
+      runtime.host = { ...recordedHost, [field]: canary };
+      const rejected = summarize(0);
+      assert.ok(!rejected.stdout.includes(canary), field);
+      assert.equal(rejected.status, 1, field);
+      assert.equal(JSON.parse(rejected.stdout).host[field], null, field);
+      assert.equal(rejected.stderr, '');
+    }
+    runtime.host = { ...recordedHost, image: null, image_version: null };
+    assert.equal(summarize(0).status, 1);
+    runtime.host = recordedHost;
+    assert.equal(summarize(1).status, 1);
+    result.cleanup.status = 'failed';
+    result.cleanup.temporary_root = 'PRIVATE-EVIDENCE';
+    result.cleanup.server_pid = 12345;
+    result.cleanup.process_pid = 67890;
+    const failed = summarize(0);
+    assert.equal(failed.status, 1);
+    assert.equal(JSON.parse(failed.stdout).status, 'failed');
+    assert.equal(failed.stderr, '');
+    assert.doesNotMatch(
+      failed.stdout,
+      /PRIVATE-EVIDENCE|temporary_root|server_pid|process_pid/u,
+    );
+    result.cleanup.status = 'passed';
+    runtime.claude_code = { private_notes: 'PRIVATE-EVIDENCE' };
+    const malformed = summarize(0);
+    assert.equal(malformed.status, 1);
+    assert.equal(malformed.stderr, '');
+    assert.equal(JSON.parse(malformed.stdout).status, 'failed');
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 const replacement = {
@@ -435,6 +575,41 @@ test('scoring CLI fails critical integrity even for a complete cohort', () => {
   }
 });
 
+test('keeps dataset identity identical across path separator styles', () => {
+  const { hashFiles } = require('../scripts/eval/runtime.cjs');
+  const repository = path.resolve(__dirname, '..');
+  assert.equal(
+    hashFiles(repository, [
+      'scripts/process.cjs',
+      'scripts/eval/agent-evidence.cjs',
+    ]),
+    hashFiles(repository, [
+      'scripts/process.cjs',
+      'scripts\\eval\\agent-evidence.cjs',
+    ]),
+  );
+  const filename = path.resolve(__dirname, '../scripts/score-outcomes.cjs');
+  const source = readFileSync(filename, 'utf8');
+  const digest = (style) => {
+    const scorer = { exports: {} };
+    const simulatedPath = {
+      ...path,
+      join(first, ...parts) {
+        return path.isAbsolute(first)
+          ? path.join(first, ...parts.map((part) => part.replaceAll('\\', '/')))
+          : style.join(first, ...parts);
+      },
+    };
+    runInNewContext(source, {
+      __dirname: path.dirname(filename),
+      require: (name) => (name === 'node:path' ? simulatedPath : require(name)),
+      module: scorer,
+    });
+    return scorer.exports.datasetDigest();
+  };
+  assert.equal(digest(path.win32), digest(path.posix));
+});
+
 test('changes dataset identity when Windows evaluation cleanup changes', () => {
   const directory = mkdtempSync(path.join(tmpdir(), 'testgen-dataset-'));
   const repository = path.resolve(__dirname, '..');
@@ -484,6 +659,40 @@ test('refuses incompatible comparisons and catches a green candidate with weak a
     assertion_specificity: 0,
   };
   assert.equal(baseline.profiles.refusal.agent_limits?.max_budget_usd, 2);
+  const missingBrowser = attempts.map((value) => ({
+    ...value,
+    profile: { ...value.profile, browsers: {} },
+  }));
+  assert.equal(
+    summarizeOutcomeTrials(definitions, missingBrowser, 'dataset', 'revision')
+      .status,
+    'incomplete',
+  );
+  const changedBrowser = attempts.map((value) => ({
+    ...value,
+    profile: {
+      ...value.profile,
+      browsers: {
+        ...value.profile.browsers,
+        exploration: {
+          ...value.profile.browsers.exploration,
+          version: '157.0.0.0',
+        },
+      },
+    },
+  }));
+  assert.equal(
+    compareOutcomeSummaries(
+      baseline,
+      summarizeOutcomeTrials(
+        definitions,
+        changedBrowser,
+        'dataset',
+        'revision',
+      ),
+    ).status,
+    'incompatible',
+  );
   const changedLimits = attempts.map((value) => ({
     ...value,
     profile: {
@@ -591,6 +800,7 @@ test('requires independent execution and criterion review for a generated candid
         status: 'checkpoint',
         dataset_sha256: 'dataset',
         candidate_sha256: 'abc',
+        runtime: trial('generation', 1).profile,
         cleanup: { status: 'passed' },
       }),
     );
@@ -655,6 +865,14 @@ test('requires independent execution and criterion review for a generated candid
       }),
     );
     assert.equal(readTrial(directory, definition).complete, true);
+    assert.deepEqual(
+      readTrial(directory, definition).profile.browsers,
+      trial('generation', 1).profile.browsers,
+    );
+    assert.deepEqual(
+      readTrial(directory, definition).profile.host,
+      trial('generation', 1).profile.host,
+    );
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -716,6 +934,86 @@ test('accepts an independently verified selector repair', () => {
     healer_attempts: 2,
     assertions_unchanged: true,
   });
+});
+
+test('retains rejected trace evidence and propagates unverified teardown', async (t) => {
+  const repository = mkdtempSync(path.join(tmpdir(), 'testgen-repair-trace-'));
+  t.after(() => rmSync(repository, { force: true, recursive: true }));
+  const runId = 'tg-0123456789abcdef01234567';
+  const runDirectory = path.join(repository, '.playwright-cli/testgen', runId);
+  const evidenceDirectory = path.join(repository, 'evidence');
+  mkdirSync(runDirectory, { recursive: true });
+  mkdirSync(evidenceDirectory);
+  writeFileSync(path.join(runDirectory, 'healer-trace.json'), '{invalid');
+  const rejected = await validateRepairTrace(
+    path.resolve(__dirname, '..'),
+    repository,
+    runId,
+    evidenceDirectory,
+  );
+  assert.equal(rejected.trace, null);
+  assert.equal(rejected.validation_error.reason, 'trace-invalid');
+  assert.deepEqual(rejected.validation_error.details, [
+    'run-policy-unavailable',
+  ]);
+  assert.equal(
+    readFileSync(path.join(evidenceDirectory, 'healer-trace.json'), 'utf8'),
+    '{invalid',
+  );
+  await assert.rejects(
+    validateRepairTrace(
+      path.join(repository, 'missing-plugin'),
+      repository,
+      runId,
+      evidenceDirectory,
+    ),
+    /artifact-validator-execution-failed/u,
+  );
+
+  const { EvaluationError } = require('../scripts/process.cjs');
+  const cleanupError = new EvaluationError('process-tree-cleanup-failed');
+  cleanupError.cleanup_pid = 12345;
+  t.mock.method(
+    require('../scripts/eval/runtime.cjs'),
+    'validateArtifact',
+    async () => {
+      throw cleanupError;
+    },
+  );
+  const modulePath = require.resolve('../scripts/run-selector-repair-eval.cjs');
+  const previous = require.cache[modulePath];
+  delete require.cache[modulePath];
+  t.after(() => {
+    require.cache[modulePath] = previous;
+  });
+  const reloaded = require(modulePath);
+  await assert.rejects(
+    reloaded.validateRepairTrace(
+      path.resolve(__dirname, '..'),
+      repository,
+      runId,
+      evidenceDirectory,
+    ),
+    (error) => error === cleanupError,
+  );
+  const elsewhere = path.join(repository, 'elsewhere');
+  mkdirSync(elsewhere);
+  writeFileSync(path.join(elsewhere, 'healer-trace.json'), 'private-canary');
+  rmSync(runDirectory, { force: true, recursive: true });
+  symlinkSync(elsewhere, runDirectory, 'junction');
+  await assert.rejects(
+    validateRepairTrace(
+      path.resolve(__dirname, '..'),
+      repository,
+      runId,
+      evidenceDirectory,
+    ),
+    /trace-evidence-unavailable/u,
+  );
+  assert.equal(
+    readFileSync(path.join(evidenceDirectory, 'healer-trace.json'), 'utf8'),
+    '{invalid',
+  );
 });
 
 test('rejects weakened assertions, product changes, and ungoverned failures', () => {

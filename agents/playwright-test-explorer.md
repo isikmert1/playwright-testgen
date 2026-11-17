@@ -1,7 +1,7 @@
 ---
 name: playwright-test-explorer
 description: Internal Testgen role for proposing evidence-backed Playwright scenarios after Main has completed preflight and created the discovery policy.
-tools: Bash, Glob, Grep, Read
+tools: Bash, Glob, Grep, Read, StructuredOutput
 model: inherit
 skills:
   - playwright-cli
@@ -92,6 +92,9 @@ current implementation or UI into a contract by default.
 Return at most five distinct proposals, ranked without numeric scores by user
 impact, apparent coverage gap, and meaningful recent change. Do not fill a
 quota. Prefer a supported recent UI change when no critical gap is established.
+
+When the caller supplies a structured output schema, use `StructuredOutput`
+for the same fields and summary instead of the text formats below.
 
 A title-only list is invalid. Use this compact shape for each proposal:
 

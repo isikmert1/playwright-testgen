@@ -56,8 +56,7 @@ async function command(commandName, args, options = {}) {
     timeout_ms: options.timeout_ms ?? LIFECYCLE_COMMAND_TIMEOUT_MS,
     verify_process_tree: true,
   });
-  if (result.tree_cleanup_failed)
-    fail('process-tree-cleanup-failed', [result.tree_cleanup_reason]);
+  assertProcessStopped(result);
   if (result.cancelled) fail('evaluation-cancelled');
   if (result.timed_out) fail('lifecycle-command-timeout');
   if (
@@ -67,6 +66,19 @@ async function command(commandName, args, options = {}) {
   )
     fail(options.error ?? 'prerequisite-unavailable');
   return result.output.trim();
+}
+
+function assertProcessStopped(result) {
+  if (!result.tree_cleanup_failed) return;
+  const error = new EvaluationError('process-tree-cleanup-failed', [
+    result.tree_cleanup_reason ?? 'cleanup-unverified',
+  ]);
+  if (
+    Number.isSafeInteger(result.tree_cleanup_pid) &&
+    result.tree_cleanup_pid > 0
+  )
+    error.cleanup_pid = result.tree_cleanup_pid;
+  throw error;
 }
 
 function processExists(pid) {
@@ -234,6 +246,9 @@ function runBounded(commandName, args, options) {
     const finish = (status, signal, spawnError = null) => {
       if (settled) return;
       settled = true;
+      // Failed tree verification must not leave the owned root running.
+      if (treeCleanupFailed && process.platform === 'win32')
+        child.kill('SIGKILL');
       clearTimeout(timer);
       if (stopTimer != null) clearTimeout(stopTimer);
       options.signal?.removeEventListener('abort', cancel);
@@ -250,6 +265,7 @@ function runBounded(commandName, args, options) {
         timed_out: timedOut,
         tree_cleanup_failed: treeCleanupFailed,
         tree_cleanup_reason: treeCleanupReason,
+        ...(treeCleanupFailed ? { tree_cleanup_pid: child.pid } : {}),
       });
     };
     const ensureStopped = () => {
@@ -342,6 +358,7 @@ function lifecycleCancellation() {
 }
 
 module.exports = {
+  assertProcessStopped,
   EvaluationError,
   LIFECYCLE_COMMAND_TIMEOUT_MS,
   SAFE_ERROR_CODE,
