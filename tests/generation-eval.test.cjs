@@ -229,6 +229,11 @@ test('cleanup removes only owned scratch after resources are released', async (t
   let uninstalls = 0;
   t.mock.method(
     require('../scripts/process.cjs'),
+    'executable',
+    (name) => name,
+  );
+  t.mock.method(
+    require('../scripts/process.cjs'),
     'stopProcessTree',
     async () => stopped,
   );
