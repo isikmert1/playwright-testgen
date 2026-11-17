@@ -445,6 +445,7 @@ function checkpointEvidence(
   definition,
   snapshot,
   final = false,
+  agents = new Map(),
 ) {
   const blocks = parsed.tool_blocks ?? [];
   const results = new Map(
@@ -453,15 +454,36 @@ function checkpointEvidence(
   const delegations = blocks.filter((block) =>
     ['Agent', 'Task'].includes(block.name),
   );
-  const role = (block, name) =>
-    typeof block.input?.subagent_type === 'string' &&
-    block.input.subagent_type.split(':').at(-1) === name;
+  for (const block of delegations) {
+    const result = results.get(block.id);
+    if (result?.is_error === false && typeof result.agent_id === 'string')
+      agents.set(result.agent_id, block);
+  }
+  delegations.push(
+    ...blocks.filter(
+      (block) => block.name === 'SendMessage' && agents.has(block.input?.to),
+    ),
+  );
+  const role = (block, name) => {
+    const delegation =
+      block.name === 'SendMessage' ? agents.get(block.input.to) : block;
+    return (
+      typeof delegation.input?.subagent_type === 'string' &&
+      delegation.input.subagent_type.split(':').at(-1) === name
+    );
+  };
   const authors = delegations.filter(
     (block) =>
       role(block, 'playwright-test-author') &&
-      results.get(block.id)?.is_error === false,
+      results.get(block.id)?.is_error === false &&
+      (block.name !== 'SendMessage' ||
+        results.get(block.id)?.resumed_agent_id === block.input.to),
   );
   const authorIds = new Set(authors.map((block) => block.id));
+  for (const block of authors) {
+    if (block.name === 'SendMessage')
+      authorIds.add(agents.get(block.input.to).id);
+  }
   const owned = (block) => authorIds.has(block.parent_tool_use_id);
   const completed = (block) => results.get(block.id)?.is_error === false;
   const specWrites = blocks.filter(
@@ -654,6 +676,7 @@ async function runCheckpoint(
   result.case_sha256 = hashFile(casePath);
   result.runner_sha256 = hashFile(__filename);
   let sessionId = null;
+  const agents = new Map();
   const browserSessions = new Map();
   async function exchange(prompt) {
     const limits = nextExchangeLimits(
@@ -769,6 +792,8 @@ async function runCheckpoint(
       state.repository,
       definition,
       before,
+      false,
+      agents,
     );
     reviewCheckpoint(before, firstEvidence);
     const revisedExchange = await exchange(`adjust\n${definition.adjustment}`);
@@ -778,6 +803,8 @@ async function runCheckpoint(
       state.repository,
       definition,
       after,
+      false,
+      agents,
     );
     reviewCheckpoint(after, revisedEvidence, {
       ...before,
@@ -792,6 +819,7 @@ async function runCheckpoint(
       definition,
       after,
       true,
+      agents,
     );
     if (
       [

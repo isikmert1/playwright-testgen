@@ -274,6 +274,7 @@ test('deterministic checkpoint replay resumes twice and gates skip on the revise
   let omitRevisionCheckpoint = false;
   let executeBeforeApproval = false;
   let staleMainValidation = false;
+  let resumedAgent = 'fixture-author';
   async function invoke(args) {
     calls += 1;
     budgets.push(args[args.indexOf('--max-budget-usd') + 1]);
@@ -315,6 +316,7 @@ test('deterministic checkpoint replay resumes twice and gates skip on the revise
           lint: { ...handoff.lint, status: calls === 1 ? 'pass' : 'fixed' },
         }),
       );
+      const delegationId = calls === 1 ? 'author' : 'resume-author';
       records.push({
         type: 'assistant',
         message: {
@@ -322,11 +324,32 @@ test('deterministic checkpoint replay resumes twice and gates skip on the revise
           content: [
             {
               type: 'tool_use',
-              id: 'author',
-              name: 'Agent',
-              input: {
-                subagent_type: 'playwright-testgen:playwright-test-author',
-              },
+              id: delegationId,
+              name: calls === 1 ? 'Agent' : 'SendMessage',
+              input:
+                calls === 1
+                  ? {
+                      subagent_type:
+                        'playwright-testgen:playwright-test-author',
+                    }
+                  : { to: resumedAgent, type: 'message' },
+            },
+          ],
+        },
+      });
+      records.push({
+        type: 'user',
+        tool_use_result:
+          calls === 1
+            ? { agentId: 'fixture-author' }
+            : { success: true, resumedAgentId: resumedAgent },
+        message: {
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: delegationId,
+              is_error: false,
+              content: 'completed',
             },
           ],
         },
@@ -360,12 +383,6 @@ test('deterministic checkpoint replay resumes twice and gates skip on the revise
               is_error: false,
               content: 'completed',
             })),
-            {
-              type: 'tool_result',
-              tool_use_id: 'author',
-              is_error: false,
-              content: 'completed',
-            },
           ],
         },
       });
@@ -469,6 +486,14 @@ test('deterministic checkpoint replay resumes twice and gates skip on the revise
   await assert.rejects(
     runCheckpoint(context, definition, invoke),
     /main-handoff-validation-unverified/u,
+  );
+  assert.equal(calls, 2);
+  calls = 0;
+  staleMainValidation = false;
+  resumedAgent = 'unknown-agent';
+  await assert.rejects(
+    runCheckpoint(context, definition, invoke),
+    /checkpoint-role-boundary-violated/u,
   );
   assert.equal(calls, 2);
 });

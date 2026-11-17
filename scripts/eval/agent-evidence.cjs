@@ -226,10 +226,21 @@ function parseAgentStream(output, context = {}) {
           block?.type === 'tool_result' &&
           typeof block.tool_use_id === 'string'
         ) {
+          const identity =
+            context.include_private_evidence === true
+              ? record.tool_use_result
+              : null;
           toolResults.push({
             tool_use_id: block.tool_use_id,
             is_error: block.is_error === true,
             execution: classifyToolResult(block),
+            ...(typeof identity?.agentId === 'string'
+              ? { agent_id: identity.agentId }
+              : {}),
+            ...(identity?.success === true &&
+            typeof identity.resumedAgentId === 'string'
+              ? { resumed_agent_id: identity.resumedAgentId }
+              : {}),
           });
         }
       }
