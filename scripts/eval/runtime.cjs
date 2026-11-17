@@ -639,25 +639,29 @@ async function validateArtifact(
   assertProcessStopped(result);
   if (result.cancelled) fail('evaluation-cancelled');
   if (result.timed_out) fail('lifecycle-command-timeout');
-  if (result.status !== 0) {
-    let details = [];
-    try {
-      const report = JSON.parse(result.error_output.trim());
-      if (
-        report.valid === false &&
-        report.type === type &&
-        Array.isArray(report.errors)
-      )
-        details = report.errors;
-    } catch {
-      details = [];
-    }
-    throw new EvaluationError(`${type}-invalid`, details);
-  }
   if (result.output_overflow || result.spawn_error != null)
-    fail(`${type}-invalid`);
-  const report = readJsonOutput(result.output.trim(), `${type}-invalid`);
-  if (report.valid !== true) fail(`${type}-invalid`);
+    fail('artifact-validator-execution-failed');
+  let report;
+  try {
+    report = JSON.parse(
+      (result.status === 0 ? result.output : result.error_output).trim(),
+    );
+  } catch {
+    fail(
+      result.status === 0
+        ? 'artifact-validator-report-invalid'
+        : 'artifact-validator-execution-failed',
+    );
+  }
+  if (
+    report?.type !== type ||
+    typeof report.valid !== 'boolean' ||
+    (report.valid === false && !Array.isArray(report.errors))
+  )
+    fail('artifact-validator-report-invalid');
+  if (report.valid === false)
+    throw new EvaluationError(`${type}-invalid`, report.errors);
+  if (result.status !== 0) fail('artifact-validator-execution-failed');
 }
 
 function startServer(state, origin, signal) {
@@ -782,6 +786,9 @@ async function verifyInstalledHook(
   agentType = 'playwright-test-healer',
 ) {
   const toolUseId = `hook-preflight-${randomBytes(8).toString('hex')}`;
+  const expectedDecision = agentType.endsWith('playwright-test-explorer')
+    ? 'deny'
+    : 'allow';
   const payload = {
     agent_type: agentType,
     cwd: repository,
@@ -815,7 +822,7 @@ async function verifyInstalledHook(
     error: 'installed-hook-unavailable',
   });
   const response = readJsonOutput(output, 'installed-hook-unavailable');
-  if (response?.hookSpecificOutput?.permissionDecision !== 'allow')
+  if (response?.hookSpecificOutput?.permissionDecision !== expectedDecision)
     fail('installed-hook-unavailable');
   const record = readHookAudit(auditPath).find(
     (entry) => entry.tool_use_id === toolUseId,
@@ -824,7 +831,7 @@ async function verifyInstalledHook(
     record?.agent_type !==
       (agentType === 'playwright-test-healer' ? agentType : 'other') ||
     record.tool_name !== payload.tool_name ||
-    record.decision !== 'allow' ||
+    record.decision !== expectedDecision ||
     record.operation !== 'other' ||
     record.hook_sha256 !== hashFile(hookPath)
   )

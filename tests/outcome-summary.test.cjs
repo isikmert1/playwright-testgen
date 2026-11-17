@@ -6,6 +6,7 @@ const {
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } = require('node:fs');
 const { tmpdir } = require('node:os');
@@ -24,7 +25,10 @@ const {
 } = require('../scripts/score-outcomes.cjs');
 
 const { scoreSelectorRepair } = require('../scripts/score-selector-repair.cjs');
-const { selectorFailure } = require('../scripts/run-selector-repair-eval.cjs');
+const {
+  selectorFailure,
+  validateRepairTrace,
+} = require('../scripts/run-selector-repair-eval.cjs');
 
 const definitions = [
   { case_id: 'generation', kind: 'generation', planned_trials: 2 },
@@ -889,6 +893,86 @@ test('accepts an independently verified selector repair', () => {
     healer_attempts: 2,
     assertions_unchanged: true,
   });
+});
+
+test('retains rejected trace evidence and propagates unverified teardown', async (t) => {
+  const repository = mkdtempSync(path.join(tmpdir(), 'testgen-repair-trace-'));
+  t.after(() => rmSync(repository, { force: true, recursive: true }));
+  const runId = 'tg-0123456789abcdef01234567';
+  const runDirectory = path.join(repository, '.playwright-cli/testgen', runId);
+  const evidenceDirectory = path.join(repository, 'evidence');
+  mkdirSync(runDirectory, { recursive: true });
+  mkdirSync(evidenceDirectory);
+  writeFileSync(path.join(runDirectory, 'healer-trace.json'), '{invalid');
+  const rejected = await validateRepairTrace(
+    path.resolve(__dirname, '..'),
+    repository,
+    runId,
+    evidenceDirectory,
+  );
+  assert.equal(rejected.trace, null);
+  assert.equal(rejected.validation_error.reason, 'trace-invalid');
+  assert.deepEqual(rejected.validation_error.details, [
+    'run-policy-unavailable',
+  ]);
+  assert.equal(
+    readFileSync(path.join(evidenceDirectory, 'healer-trace.json'), 'utf8'),
+    '{invalid',
+  );
+  await assert.rejects(
+    validateRepairTrace(
+      path.join(repository, 'missing-plugin'),
+      repository,
+      runId,
+      evidenceDirectory,
+    ),
+    /artifact-validator-execution-failed/u,
+  );
+
+  const { EvaluationError } = require('../scripts/process.cjs');
+  const cleanupError = new EvaluationError('process-tree-cleanup-failed');
+  cleanupError.cleanup_pid = 12345;
+  t.mock.method(
+    require('../scripts/eval/runtime.cjs'),
+    'validateArtifact',
+    async () => {
+      throw cleanupError;
+    },
+  );
+  const modulePath = require.resolve('../scripts/run-selector-repair-eval.cjs');
+  const previous = require.cache[modulePath];
+  delete require.cache[modulePath];
+  t.after(() => {
+    require.cache[modulePath] = previous;
+  });
+  const reloaded = require(modulePath);
+  await assert.rejects(
+    reloaded.validateRepairTrace(
+      path.resolve(__dirname, '..'),
+      repository,
+      runId,
+      evidenceDirectory,
+    ),
+    (error) => error === cleanupError,
+  );
+  const elsewhere = path.join(repository, 'elsewhere');
+  mkdirSync(elsewhere);
+  writeFileSync(path.join(elsewhere, 'healer-trace.json'), 'private-canary');
+  rmSync(runDirectory, { force: true, recursive: true });
+  symlinkSync(elsewhere, runDirectory, 'junction');
+  await assert.rejects(
+    validateRepairTrace(
+      path.resolve(__dirname, '..'),
+      repository,
+      runId,
+      evidenceDirectory,
+    ),
+    /trace-evidence-unavailable/u,
+  );
+  assert.equal(
+    readFileSync(path.join(evidenceDirectory, 'healer-trace.json'), 'utf8'),
+    '{invalid',
+  );
 });
 
 test('rejects weakened assertions, product changes, and ungoverned failures', () => {

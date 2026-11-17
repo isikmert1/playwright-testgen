@@ -301,20 +301,29 @@ test('executes the installed hook and observes an explicit decision', async (t) 
     );
     writeFileSync(path.join(runDirectory, 'handoff.json'), '{}');
 
-    const result = await verifyInstalledHook(
-      installPath,
-      repository,
-      auditPath,
-    ).catch((error) => {
-      if (error.code === 'process-tree-cleanup-failed')
-        t.diagnostic(`cleanup reason: ${error.details.join(',') || 'unknown'}`);
-      throw error;
-    });
+    for (const [role, expected] of [
+      ['playwright-test-healer', 'allow'],
+      ['playwright-test-explorer', 'deny'],
+    ]) {
+      const result = await verifyInstalledHook(
+        installPath,
+        repository,
+        auditPath,
+        undefined,
+        role,
+      ).catch((error) => {
+        if (error.code === 'process-tree-cleanup-failed')
+          t.diagnostic(
+            `cleanup reason: ${error.details.join(',') || 'unknown'}`,
+          );
+        throw error;
+      });
 
-    assert.equal(result.decision, 'allow');
-    assert.equal(result.agent_type, 'playwright-test-healer');
-    assert.equal(result.tool_name, 'Bash');
-    assert.equal(result.operation, 'other');
+      assert.equal(result.decision, expected);
+      assert.equal(result.agent_type, role.endsWith('healer') ? role : 'other');
+      assert.equal(result.tool_name, 'Bash');
+      assert.equal(result.operation, 'other');
+    }
   } finally {
     rmSync(temporaryRoot, { force: true, recursive: true });
   }
