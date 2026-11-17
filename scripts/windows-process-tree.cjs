@@ -123,7 +123,7 @@ async function windowsProcessTree(rootPid, known = [], onFailure) {
     let reason = 'snapshot-spawn-failed';
     if (error.killed || error.code === 'ETIMEDOUT') reason = 'snapshot-timeout';
     else if (typeof error.code === 'number') reason = 'snapshot-command-failed';
-    onFailure?.(reason);
+    onFailure?.(reason, Number.isSafeInteger(error.code) ? error.code : null);
     return null;
   }
   const [root, descendantsText, knownText] = stdout.trim().split('|');
