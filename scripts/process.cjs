@@ -233,15 +233,14 @@ function runBounded(commandName, args, options) {
       });
       return;
     }
+    if (process.platform === 'win32' && /\.(?:cmd|bat)$/iu.test(commandName))
+      fail('batch-wrapper-unsupported');
     const child = spawn(commandName, args, {
       cwd: options.cwd,
       detached: process.platform !== 'win32',
       env: options.env,
       stdio: [options.input == null ? 'ignore' : 'pipe', 'pipe', 'pipe'],
       windowsHide: true,
-      ...(process.platform === 'win32' && /\.(?:cmd|bat)$/iu.test(commandName)
-        ? { shell: true }
-        : {}),
     });
     const finish = (status, signal, spawnError = null) => {
       if (settled) return;
