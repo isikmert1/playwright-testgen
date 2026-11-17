@@ -204,7 +204,14 @@ test('cancelled browser preflight closes its partially opened session', async (t
     repository,
     controller.signal,
   );
-  const rejected = assert.rejects(outcome, /cli-browser-unavailable/u);
+  const rejected = assert.rejects(outcome, (error) => {
+    assert.match(
+      error.message,
+      /cli-browser-unavailable/u,
+      JSON.stringify(error.details),
+    );
+    return true;
+  });
   const deadline = Date.now() + 15_000;
   while (!existsSync(resource) && Date.now() < deadline) await delay(20);
   assert.equal(existsSync(resource), true);
