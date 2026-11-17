@@ -31,14 +31,12 @@ test('Notebook details', async ({ page }) => {
   const dialog = page.getByRole('dialog', { name: 'Order details', exact: true });
   await test.step('Check Notebook details', async () => {
     await expect(dialog).toBeVisible();
-    await expect(dialog).toContainText('Notebook');
-    await expect(dialog).toContainText('2');
-    await expect(dialog).toContainText('Ready');
+    await expect(dialog.locator('#dialog-description')).toHaveText('2 × Notebook — Ready');
   });
 });`;
 const revised = spec.replace(
-  "await expect(dialog).toContainText('2');",
-  "await expect(dialog).toContainText('2');\n    const heading = dialog.getByRole('heading', { name: 'Order details', exact: true });\n    await expect(heading).toBeVisible();\n    await expect(heading).toHaveText('Order details');",
+  "await expect(dialog.locator('#dialog-description')).toHaveText('2 × Notebook — Ready');",
+  "await expect(dialog.locator('#dialog-description')).toHaveText('2 × Notebook — Ready');\n    const heading = dialog.getByRole('heading', { name: 'Order details', exact: true });\n    await expect(heading).toBeVisible();\n    await expect(heading).toHaveText('Order details');",
 );
 
 function snapshot(source, overrides = {}) {
@@ -54,7 +52,7 @@ function snapshot(source, overrides = {}) {
         id: 'notebook-details-visible',
         outcome: definition.criteria[0].outcome,
         step_title: 'Check Notebook details',
-        assertion_location: 'tests/notebook-details.spec.ts:7',
+        assertion_location: 'tests/notebook-details.spec.ts:8',
       },
     ],
     assertions: inspectAssertions(source),
@@ -89,14 +87,58 @@ test('checkpoint review proves scoped assertions independently of comments and h
     gradeCheckpoint(definition, snapshot(spec), evidence()).status,
     'passed',
   );
+  for (const wrongValue of [
+    '2 × Notebook — Not Ready',
+    '12 × Notebook — Ready (2 left)',
+  ]) {
+    assert.throws(
+      () =>
+        gradeCheckpoint(
+          definition,
+          snapshot(spec.replace('2 × Notebook — Ready', wrongValue)),
+          evidence(),
+        ),
+      /candidate-assertions-invalid/u,
+    );
+  }
+  assert.throws(
+    () =>
+      gradeCheckpoint(
+        definition,
+        snapshot(spec),
+        evidence({ main_handoff_validations: 0 }),
+      ),
+    /main-handoff-validation-unverified/u,
+  );
+  assert.throws(
+    () =>
+      gradeCheckpoint(
+        definition,
+        snapshot(spec.replace('toHaveText(', 'toContainText(')),
+        evidence(),
+      ),
+    /candidate-assertions-invalid/u,
+  );
+  const exactText = spec.replace(
+    "dialog.locator('#dialog-description')).toHaveText('2 × Notebook — Ready')",
+    "dialog.getByText('2 × Notebook — Ready', { exact: true })).toBeVisible()",
+  );
+  assert.equal(
+    gradeCheckpoint(definition, snapshot(exactText), evidence()).status,
+    'passed',
+  );
+  assert.throws(
+    () => snapshot(exactText.replace(', { exact: true }', '')),
+    /candidate-assertions-invalid/u,
+  );
   assert.throws(
     () =>
       gradeCheckpoint(
         definition,
         snapshot(
           spec.replace(
-            "await expect(dialog).toContainText('Ready');",
-            "// await expect(dialog).toContainText('Ready');",
+            "await expect(dialog.locator('#dialog-description')).toHaveText('2 × Notebook — Ready');",
+            "// await expect(dialog.locator('#dialog-description')).toHaveText('2 × Notebook — Ready');",
           ),
         ),
         evidence(),
@@ -132,8 +174,8 @@ test('checkpoint review proves scoped assertions independently of comments and h
     () =>
       inspectAssertions(
         spec.replace(
-          "await expect(dialog).toContainText('Ready');",
-          "if (false) { await expect(dialog).toContainText('Ready'); }",
+          "await expect(dialog.locator('#dialog-description')).toHaveText('2 × Notebook — Ready');",
+          "if (false) { await expect(dialog.locator('#dialog-description')).toHaveText('2 × Notebook — Ready'); }",
         ),
       ),
     /candidate-control-flow-unverified/u,
@@ -214,6 +256,7 @@ test('deterministic checkpoint replay resumes twice and gates skip on the revise
   let calls = 0;
   let omitRevisionCheckpoint = false;
   let executeBeforeApproval = false;
+  let staleMainValidation = false;
   async function invoke(args) {
     calls += 1;
     budgets.push(args[args.indexOf('--max-budget-usd') + 1]);
@@ -335,6 +378,8 @@ test('deterministic checkpoint replay resumes twice and gates skip on the revise
           ],
         },
       });
+      if (staleMainValidation && calls === 2)
+        records.splice(1, 0, ...records.splice(records.length - 2, 2));
       if (calls === 1 || !omitRevisionCheckpoint)
         records.push({
           type: 'assistant',
@@ -401,6 +446,14 @@ test('deterministic checkpoint replay resumes twice and gates skip on the revise
     /checkpoint-role-boundary-violated/u,
   );
   assert.equal(calls, 1);
+  calls = 0;
+  executeBeforeApproval = false;
+  staleMainValidation = true;
+  await assert.rejects(
+    runCheckpoint(context, definition, invoke),
+    /main-handoff-validation-unverified/u,
+  );
+  assert.equal(calls, 2);
 });
 
 test('failed Author exchange restores only its policy-owned browser session after cancellation', async (t) => {

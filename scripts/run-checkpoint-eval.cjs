@@ -145,6 +145,14 @@ function inspectAssertions(source) {
     const options = literalOptions(expression.arguments[1]);
     const role = expression.arguments[0]?.value;
     if (
+      method === 'getByText' &&
+      expression.arguments.length === 2 &&
+      typeof role === 'string' &&
+      options?.exact === true &&
+      locator(parent, bindings) === 'dialog'
+    )
+      return 'exact-text';
+    if (
       method === 'getByRole' &&
       expression.arguments.length <= 2 &&
       expression.arguments[0]?.type === 'Literal' &&
@@ -270,7 +278,10 @@ function inspectAssertions(source) {
         line: expression.loc.start.line,
         target,
         matcher: method,
-        value: argument?.value ?? null,
+        value:
+          target === 'exact-text' && method === 'toBeVisible'
+            ? resolve(expectCall.arguments[0], bindings).arguments[0].value
+            : (argument?.value ?? null),
       });
     }
   }
@@ -307,11 +318,12 @@ function gradeCheckpoint(definition, snapshot, evidence, previous = null) {
     throw new Error('checkpoint-role-boundary-violated');
   if (evidence.checkpoint_presented !== true)
     throw new Error('checkpoint-not-presented');
+  if (evidence.main_handoff_validations < 1)
+    throw new Error('main-handoff-validation-unverified');
   if (
     evidence.author_delegations !== 1 ||
     evidence.author_spec_writes < 1 ||
     evidence.author_handoff_writes < 1 ||
-    evidence.main_handoff_validations < 1 ||
     evidence.author_handoff_validations < 1
   )
     throw new Error('author-revision-unverified');
@@ -349,21 +361,18 @@ function gradeCheckpoint(definition, snapshot, evidence, previous = null) {
   const visible = assertions.some(
     (item) => item.target === 'dialog' && item.matcher === 'toBeVisible',
   );
-  const text = assertions
-    .filter(
-      (item) =>
-        ['dialog', 'description'].includes(item.target) &&
-        ['toContainText', 'toHaveText'].includes(item.matcher) &&
-        item.value != null,
-    )
-    .map((item) => item.value)
-    .join(' ');
+  const contentVerified = assertions.some(
+    (item) =>
+      ((['dialog', 'description'].includes(item.target) &&
+        item.matcher === 'toHaveText') ||
+        (item.target === 'exact-text' && item.matcher === 'toBeVisible')) &&
+      typeof item.value === 'string' &&
+      item.value.replace(/\s+/gu, ' ').trim() === '2 × Notebook — Ready',
+  );
   const location = Number(criterion.assertion_location.split(':').at(-1));
   if (
     !visible ||
-    !/\bNotebook\b/u.test(text) ||
-    !/\b2\b/u.test(text) ||
-    !/\bReady\b/u.test(text) ||
+    !contentVerified ||
     !assertions.some((item) => item.line === location)
   )
     throw new Error('candidate-assertions-invalid');
@@ -459,6 +468,17 @@ function checkpointEvidence(
       sameTarget(block.input?.file_path, definition.spec_path, repository),
   );
   const handoffPath = `.playwright-cli/testgen/${snapshot?.run_id}/handoff.json`;
+  const handoffWrites = blocks.filter(
+    (block) =>
+      ['Write', 'Edit'].includes(block.name) &&
+      sameTarget(block.input?.file_path, handoffPath, repository),
+  );
+  const candidateWrittenAt = Math.max(
+    -1,
+    ...[...specWrites, ...handoffWrites]
+      .filter(completed)
+      .map((block) => block.event_index),
+  );
   const commands = blocks.filter(
     (block) =>
       ['Bash', 'PowerShell'].includes(block.name) &&
@@ -476,6 +496,8 @@ function checkpointEvidence(
     if (
       !completed(block) ||
       !Number.isInteger(finalIndex) ||
+      (block.parent_tool_use_id == null &&
+        block.event_index <= candidateWrittenAt) ||
       block.event_index >= finalIndex
     )
       return false;
@@ -506,12 +528,8 @@ function checkpointEvidence(
     author_spec_writes: specWrites.filter(
       (block) => owned(block) && completed(block),
     ).length,
-    author_handoff_writes: blocks.filter(
-      (block) =>
-        ['Write', 'Edit'].includes(block.name) &&
-        owned(block) &&
-        completed(block) &&
-        sameTarget(block.input?.file_path, handoffPath, repository),
+    author_handoff_writes: handoffWrites.filter(
+      (block) => owned(block) && completed(block),
     ).length,
     main_spec_writes: specWrites.filter((block) => !owned(block)).length,
     handoff_validations: validation.length,
@@ -539,7 +557,6 @@ function checkpointEvidence(
     ).length,
     checkpoint_presented:
       Number.isInteger(finalIndex) &&
-      validation.some((block) => block.parent_tool_use_id == null) &&
       text.includes(definition.spec_path) &&
       definition.criteria.every((criterion) => text.includes(criterion.id)) &&
       /\blint\b/iu.test(text) &&
