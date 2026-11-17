@@ -314,7 +314,7 @@ function capturePassingRun(repository, runDirectory) {
 }
 
 function verify(repository, adapterPath, definitionDigest, options) {
-  return run(
+  const result = run(
     repository,
     [
       'verify',
@@ -333,6 +333,8 @@ function verify(repository, adapterPath, definitionDigest, options) {
     ],
     options,
   );
+  assert.notEqual(result.stdout, '', result.stderr);
+  return result;
 }
 
 test('records dirty paths without storing repository content', () => {
@@ -1093,36 +1095,40 @@ test('preserves a primary failure when cleanup also fails', () => {
   });
 });
 
-test('rechecks the active checkout even when isolation cleanup fails', () => {
-  withRepository(({ repository, runDirectory }) => {
-    const adapterPath = writeAdapter(repository, {
-      runner: [
-        "const {spawnSync}=require('node:child_process');",
-        "const {writeFileSync}=require('node:fs');",
-        "const {dirname,join}=require('node:path');",
-        "const phase=process.argv[process.argv.indexOf('--phase')+1];",
-        "if(phase==='mutant') {",
-        "  const common=spawnSync('git',['rev-parse','--path-format=absolute','--git-common-dir'],{encoding:'utf8'}).stdout.trim();",
-        "  writeFileSync(join(dirname(common),'runner-active-change.txt'),'changed');",
-        "  spawnSync('git',['worktree','lock','.']);",
-        '}',
-        "process.stdout.write(JSON.stringify({protocol_version:1,outcome:'pass',criterion_id:null}));",
-        '',
-      ].join('\n'),
-    });
-    const definitionDigest = commitAdapter(repository, adapterPath);
-    capturePassingRun(repository, runDirectory);
-
-    try {
-      const result = verify(repository, adapterPath, definitionDigest);
-
-      assert.equal(result.status, 1);
-      const output = JSON.parse(result.stdout);
-      assert.equal(output.status, 'verification-error');
-      assert.equal(output.error, 'active-checkout-changed');
-      assert.equal(output.cleanup, 'failed');
-    } finally {
-      removeDisposableWorktree(repository);
-    }
+test('rechecks the active checkout even when isolation cleanup fails', async (t) => {
+  const { repository, runDirectory } = createRepository();
+  t.after(() => rmSync(repository, { recursive: true, force: true }));
+  const adapterPath = writeAdapter(repository, {
+    runner: [
+      "const {spawnSync}=require('node:child_process');",
+      "const {writeFileSync}=require('node:fs');",
+      "const {dirname,join}=require('node:path');",
+      "const phase=process.argv[process.argv.indexOf('--phase')+1];",
+      "if(phase==='mutant') {",
+      "  const common=spawnSync('git',['rev-parse','--path-format=absolute','--git-common-dir'],{encoding:'utf8'}).stdout.trim();",
+      "  writeFileSync(join(dirname(common),'runner-active-change.txt'),'changed');",
+      "  spawnSync('git',['worktree','lock','.']);",
+      '}',
+      "process.stdout.write(JSON.stringify({protocol_version:1,outcome:'pass',criterion_id:null}));",
+      '',
+    ].join('\n'),
   });
+  const definitionDigest = commitAdapter(repository, adapterPath);
+  capturePassingRun(repository, runDirectory);
+
+  try {
+    const output = await verifyMutation({
+      repository,
+      runId,
+      adapter: path.relative(repository, adapterPath),
+      mutationId: 'disable-save',
+      criterionId: 'criterion-1',
+      approvalDigest: definitionDigest,
+    });
+    assert.equal(output.status, 'verification-error');
+    assert.equal(output.error, 'active-checkout-changed');
+    assert.equal(output.cleanup, 'failed');
+  } finally {
+    removeDisposableWorktree(repository);
+  }
 });
