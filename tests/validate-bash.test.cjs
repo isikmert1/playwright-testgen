@@ -557,6 +557,8 @@ test('keeps Explorer away from credentials and evaluation answers', () => {
   withDiscoveryRepository(({ targetRepository }) => {
     const sensitivePaths = [
       path.join(targetRepository, '.env'),
+      path.join(targetRepository, 'src', '.envrc'),
+      path.join(targetRepository, 'src', '.envrc.local'),
       path.join(targetRepository, '.npmrc'),
       path.join(targetRepository, 'client.key'),
       path.join(targetRepository, 'evals', 'case.json'),
@@ -576,6 +578,20 @@ test('keeps Explorer away from credentials and evaluation answers', () => {
         sensitivePath,
       );
     }
+    assert.equal(
+      runToolHook(
+        targetRepository,
+        'Grep',
+        {
+          path: path.join(targetRepository, 'src'),
+          pattern: 'secret',
+          head_limit: 5,
+          output_mode: 'content',
+        },
+        'playwright-test-explorer',
+      ).permissionDecision,
+      'deny',
+    );
   });
 });
 
@@ -1717,6 +1733,14 @@ test('limits governed file mutations to explicitly approved paths', () => {
         file_path: path.join(targetRepository, 'tests', 'account.spec.ts'),
       }).permissionDecision,
       'allow',
+    );
+
+    const aliasPath = path.join(targetRepository, 'unapproved-helper.ts');
+    linkSync(helperPath, aliasPath);
+    assert.equal(
+      runToolHook(targetRepository, 'Edit', { file_path: helperPath })
+        .permissionDecision,
+      'deny',
     );
 
     const denied = runToolHook(targetRepository, 'Write', {
