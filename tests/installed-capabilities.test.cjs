@@ -281,6 +281,10 @@ test('deterministic checkpoint replay resumes twice and gates skip on the revise
   let secondExchangeModel = 'claude-sonnet-5-5';
   async function invoke(args) {
     calls += 1;
+    assert.equal(
+      context.result.checkpoint_stage,
+      ['initial', 'adjust', 'skip'][calls - 1],
+    );
     const model = calls === 2 ? secondExchangeModel : 'claude-sonnet-5-5';
     budgets.push(args[args.indexOf('--max-budget-usd') + 1]);
     assert.equal(args.includes('--no-session-persistence'), false);
@@ -640,6 +644,8 @@ test('failed Author exchange restores only its policy-owned browser session afte
   ]);
   assert.equal(context.result.host_restoration.browser_session, 'passed');
   assert.equal(context.result.checkpoints.length, 0);
+  assert.equal(context.result.checkpoint_stage, 'initial');
+  assert.equal(context.result.agent_failure_reason, 'agent-cancelled');
   await assert.rejects(
     runCheckpoint(context, definition, invoke, async () => ({ status: 1 })),
     /checkpoint-agent-failed/u,

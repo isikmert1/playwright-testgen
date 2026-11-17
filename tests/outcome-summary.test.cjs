@@ -145,7 +145,7 @@ test('public CI summary excludes private evidence and preserves runner and clean
     private_notes: 'PRIVATE-EVIDENCE',
   };
   runtime.agent_limits.model = 'claude-sonnet-5-5';
-  const result = {
+  let result = {
     ok: true,
     case_id: 'semantic-order-not-inserted',
     trial_id: path.basename(target),
@@ -153,14 +153,14 @@ test('public CI summary excludes private evidence and preserves runner and clean
     cleanup: { status: 'passed' },
     diagnostics: { transcript: 'PRIVATE-EVIDENCE' },
   };
-  const summarize = (exitCode) => {
+  const summarize = (exitCode, selectedCase = 'healer-defect-refusal') => {
     writeFileSync(path.join(target, 'result.json'), JSON.stringify(result));
     return spawnSync(
       process.execPath,
       [
         path.resolve(__dirname, '../scripts/eval/public-summary.cjs'),
         directory,
-        'healer-defect-refusal',
+        selectedCase,
         String(exitCode),
       ],
       {
@@ -264,6 +264,35 @@ test('public CI summary excludes private evidence and preserves runner and clean
     assert.equal(malformed.status, 1);
     assert.equal(malformed.stderr, '');
     assert.equal(JSON.parse(malformed.stdout).status, 'failed');
+    runtime.claude_code = '2.1.285';
+    result = {
+      ...runtime,
+      case_id: 'main-adjust-skip',
+      trial_id: path.basename(target),
+      status: 'failed',
+      error: 'evaluation-failed',
+      reason: 'checkpoint-agent-failed',
+      agent_failure_reason: 'agent-turn-limit',
+      checkpoint_stage: 'adjust',
+      cleanup: { status: 'passed' },
+    };
+    const checkpointFailure = summarize(1, 'checkpoint');
+    assert.equal(checkpointFailure.status, 1);
+    const diagnostic = JSON.parse(checkpointFailure.stdout);
+    assert.equal(diagnostic.failure_reason, 'checkpoint-agent-failed');
+    assert.equal(diagnostic.agent_failure_reason, 'agent-turn-limit');
+    assert.equal(diagnostic.checkpoint_stage, 'adjust');
+    const privateReason = 'private-customer-code-do-not-publish';
+    result.reason = privateReason;
+    result.agent_failure_reason = privateReason;
+    result.checkpoint_stage = privateReason;
+    const privateFailure = summarize(1, 'checkpoint');
+    assert.equal(privateFailure.status, 1);
+    assert.ok(!privateFailure.stdout.includes(privateReason));
+    const redacted = JSON.parse(privateFailure.stdout);
+    assert.equal(redacted.failure_reason, null);
+    assert.equal(redacted.agent_failure_reason, null);
+    assert.equal(redacted.checkpoint_stage, null);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

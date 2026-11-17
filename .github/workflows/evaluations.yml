@@ -113,9 +113,11 @@ jobs:
           if [ -f "$RUNNER_TEMP/evaluation-exit" ]; then
             read -r evaluation_exit < "$RUNNER_TEMP/evaluation-exit"
           fi
+          summary_exit=0
           node scripts/eval/public-summary.cjs "$RUNNER_TEMP/testgen-evaluation" \
-            "$EVALUATION_CASE" "$evaluation_exit" > "$RUNNER_TEMP/evaluation-summary.json"
+            "$EVALUATION_CASE" "$evaluation_exit" > "$RUNNER_TEMP/evaluation-summary.json" || summary_exit=$?
           cat "$RUNNER_TEMP/evaluation-summary.json" >> "$GITHUB_STEP_SUMMARY"
+          exit "$summary_exit"
       # Artifacts from this public repository are public; never upload raw results.
       - name: Upload capability summary
         if: ${{ always() && !cancelled() && !inputs.verify_failure }}

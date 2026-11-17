@@ -10,6 +10,7 @@ const {
 const path = require('node:path');
 const { parse } = require('espree');
 const {
+  agentFailure,
   buildClaudeArguments,
   authorExecutionAttempts,
   parseAgentStream,
@@ -749,8 +750,13 @@ async function runCheckpoint(
       invocation.spawn_error != null ||
       invocation.status !== 0 ||
       parsed.result_subtype !== 'success'
-    )
+    ) {
+      result.agent_failure_reason = invocation.output_overflow
+        ? 'agent-output-overflow'
+        : agentFailure({ ...invocation, result_subtype: parsed.result_subtype })
+            .reason;
       throw new Error('checkpoint-agent-failed');
+    }
     if (resolvedModel !== definition.agent.model)
       throw new Error('checkpoint-model-mismatch');
     if (typeof parsed.session_id !== 'string' || parsed.session_id === '')
@@ -789,6 +795,7 @@ async function runCheckpoint(
   }
   let runResult;
   try {
+    result.checkpoint_stage = 'initial';
     const first = await exchange(initialPrompt(definition, context));
     const before = await checkpointSnapshot(definition, context);
     const firstEvidence = checkpointEvidence(
@@ -800,6 +807,7 @@ async function runCheckpoint(
       agents,
     );
     reviewCheckpoint(before, firstEvidence);
+    result.checkpoint_stage = 'adjust';
     const revisedExchange = await exchange(`adjust\n${definition.adjustment}`);
     const after = await checkpointSnapshot(definition, context, before.run_id);
     const revisedEvidence = checkpointEvidence(
@@ -816,6 +824,7 @@ async function runCheckpoint(
     });
     if (before.policy_sha256 !== after.policy_sha256)
       throw new Error('checkpoint-policy-changed');
+    result.checkpoint_stage = 'skip';
     const final = await exchange('skip');
     const finalEvidence = checkpointEvidence(
       final,
