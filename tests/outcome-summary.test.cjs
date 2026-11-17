@@ -130,7 +130,7 @@ test('public CI summary excludes private evidence and preserves runner and clean
     ...trial('refusal', 1).profile,
     claude_code: '2.1.285',
     node: '24.22.1',
-    npm: '11.19.1',
+    npm: '11.21.2',
     platform: 'linux',
     host: {
       os_release: '6.11.0-1018-azure',
@@ -170,7 +170,7 @@ test('public CI summary excludes private evidence and preserves runner and clean
           GITHUB_SHA: revision,
           EVALUATION_MODEL: 'claude-sonnet-5-5',
           EVALUATION_NODE: '24.22.1',
-          EVALUATION_NPM: '11.19.1',
+          EVALUATION_NPM: '11.21.2',
           EVALUATION_CLAUDE_CODE: '2.1.285',
           EVALUATION_PLAYWRIGHT: '1.62.1',
           EVALUATION_PLAYWRIGHT_CLI: '0.1.19',
@@ -190,6 +190,35 @@ test('public CI summary excludes private evidence and preserves runner and clean
       passed.stdout,
       /PRIVATE-EVIDENCE|private_notes|diagnostics/u,
     );
+    const recordedRelease = runtime.host.os_release;
+    for (const [release, digest] of [
+      [
+        '5.15.167.4-microsoft-standard-WSL2',
+        '13eaf4aa9f1c66e4c0d56485d0dc75c2747fb405b09811a6b9cb7b3da538bd6c',
+      ],
+      [
+        '5.15.167.4-microsoft-standard-WSL2-PRIVATE-EVIDENCE',
+        'e8e00a1fb6388c76c497c78a0e1b46d79648e689ea39e1338b69fc9a3c31e2ce',
+      ],
+    ]) {
+      runtime.host.os_release = release;
+      const fallback = summarize(0);
+      assert.equal(fallback.status, 0, fallback.stderr);
+      const publicHost = JSON.parse(fallback.stdout).host;
+      assert.equal(publicHost.os_release, null);
+      assert.equal(publicHost.os_release_sha256, digest);
+      assert.doesNotMatch(
+        fallback.stdout,
+        /microsoft-standard-WSL2|PRIVATE-EVIDENCE/u,
+      );
+    }
+    for (const release of [null, `5.15.167.4-${'a'.repeat(64)}`]) {
+      runtime.host.os_release = release;
+      const rejected = summarize(0);
+      assert.equal(rejected.status, 1);
+      assert.equal(JSON.parse(rejected.stdout).host.os_release_sha256, null);
+    }
+    runtime.host.os_release = recordedRelease;
     runtime.model_resolved = 'claude-sonnet-5';
     const wrongModel = summarize(0);
     assert.equal(wrongModel.status, 1);

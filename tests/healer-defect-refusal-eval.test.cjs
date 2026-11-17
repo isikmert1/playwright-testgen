@@ -7,6 +7,7 @@ const {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } = require('node:fs');
@@ -665,6 +666,57 @@ test(
       assert.equal(outcome.tree_cleanup_failed, true);
       assert.equal(outcome.child_alive, false, snapshot);
       assert.ok(outcome.elapsed < 6000, JSON.stringify(outcome));
+    }
+  },
+);
+
+test(
+  'refuses Windows batch wrappers while preserving native argument data',
+  { skip: process.platform !== 'win32' },
+  async () => {
+    const { runBounded } = modules().runner;
+    const temporaryParent = realpathSync(tmpdir());
+    const directory = mkdtempSync(path.join(temporaryParent, 'testgen-argv-'));
+    const wrapper = path.join(directory, 'legacy.cmd');
+    const options = {
+      cwd: directory,
+      env: {
+        SystemRoot: process.env.SystemRoot,
+        TESTGEN_ARG_CANARY: 'expanded',
+      },
+      timeout_ms: 2000,
+    };
+    const argv = [
+      '-p',
+      'Show "Notebook" & keep %TESTGEN_ARG_CANARY% literal.\nStop at approval.',
+      '--json-schema',
+      '{"type":"object","properties":{"path":{"type":"string"}}}',
+    ];
+    try {
+      const native = await runBounded(
+        process.execPath,
+        [
+          '-e',
+          'process.stdout.write(JSON.stringify(process.argv.slice(1)))',
+          '--',
+          ...argv,
+        ],
+        options,
+      );
+      assert.equal(native.status, 0);
+      assert.deepEqual(JSON.parse(native.output), argv);
+      writeFileSync(wrapper, '@echo off\r\n');
+      await assert.rejects(
+        runBounded(
+          wrapper,
+          ['literal & echo TESTGEN_BATCH_ARG_EXPANDED'],
+          options,
+        ),
+        /batch-wrapper-unsupported/u,
+      );
+    } finally {
+      assert.equal(path.dirname(directory), temporaryParent);
+      rmSync(directory, { recursive: true, force: true });
     }
   },
 );

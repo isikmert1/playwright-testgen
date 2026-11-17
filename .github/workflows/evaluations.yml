@@ -55,7 +55,7 @@ jobs:
     env:
       EVALUATION_MODEL: claude-sonnet-5-5
       EVALUATION_NODE: 24.22.1
-      EVALUATION_NPM: 11.19.1
+      EVALUATION_NPM: 11.21.2
       EVALUATION_CLAUDE_CODE: 2.1.285
       EVALUATION_PLAYWRIGHT: 1.62.1
       EVALUATION_PLAYWRIGHT_CLI: 0.1.19
@@ -68,8 +68,9 @@ jobs:
         with:
           node-version: ${{ env.EVALUATION_NODE }}
           cache: npm
+      - run: npm install --global "npm@$EVALUATION_NPM"
       - run: npm ci
-      - run: npm install --global "npm@$EVALUATION_NPM" "@anthropic-ai/claude-code@$EVALUATION_CLAUDE_CODE" "@playwright/cli@$EVALUATION_PLAYWRIGHT_CLI"
+      - run: npm install --global "@anthropic-ai/claude-code@$EVALUATION_CLAUDE_CODE" "@playwright/cli@$EVALUATION_PLAYWRIGHT_CLI"
       - run: claude plugin validate . --strict
       - run: claude plugin validate .claude-plugin/plugin.json --strict
       - name: Verify a failed grade blocks the job
@@ -97,7 +98,7 @@ jobs:
             *) echo '::error::Unsupported evaluation case.'; exit 1 ;;
           esac
           results="$RUNNER_TEMP/testgen-evaluation"
-          mkdir -p "$results" "$CLAUDE_CONFIG_DIR"
+          mkdir -p -m 700 "$results" "$CLAUDE_CONFIG_DIR"
           evaluation_exit=0
           npm run "$script" -- --model "$EVALUATION_MODEL" --max-budget-usd 2 \
             --results-dir "$results" > "$results/runner.log" 2>&1 || evaluation_exit=$?

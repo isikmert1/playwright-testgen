@@ -175,6 +175,8 @@ function isCredentialPath(...paths) {
         .split('/')
         .some((part) => ['.auth', '.aws'].includes(part)) ||
       basename === '.env' ||
+      basename === '.envrc' ||
+      basename.startsWith('.envrc.') ||
       basename.startsWith('.env.') ||
       basename.endsWith('.env') ||
       ['.netrc', '.npmrc', '.yarnrc', '.yarnrc.yml'].includes(basename) ||
@@ -612,7 +614,9 @@ function validateFileAccess(payload) {
     return candidates.some(
       (candidate) =>
         samePath(absolute, candidate.absolute) &&
-        (!existsSync(absolute) || samePath(canonical, candidate.canonical)),
+        (!existsSync(absolute) ||
+          (samePath(canonical, candidate.canonical) &&
+            statSync(absolute).nlink === 1)),
     );
   });
   if (!approved) {

@@ -1,3 +1,4 @@
+const { createHash } = require('node:crypto');
 const { lstatSync, readFileSync, readdirSync } = require('node:fs');
 const path = require('node:path');
 
@@ -41,6 +42,10 @@ try {
 const payload = result?.result ?? result;
 const runtime = payload?.runtime ?? result;
 const host = runtime?.host;
+const kernelRelease =
+  typeof host?.os_release === 'string' && host.os_release.length <= 64
+    ? text(host.os_release, /^\d+\.\d+\.\d+[a-zA-Z0-9._+-]*$/u)
+    : null;
 const browsers = runtime?.browsers;
 const limits = runtime?.agent_limits;
 const gradePassed =
@@ -91,6 +96,11 @@ const summary = {
       host?.os_release,
       /^\d{1,3}\.\d{1,3}\.\d{1,3}(?:-\d{1,5}-azure)?$/u,
     ),
+    // Preserve exact kernel identity without publishing unrecognized suffixes.
+    os_release_sha256:
+      kernelRelease != null
+        ? createHash('sha256').update(kernelRelease).digest('hex')
+        : null,
     image: text(host?.image, /^ubuntu24$/u),
     image_version: text(host?.image_version, /^\d{8}\.\d{1,5}\.\d{1,5}$/u),
   },
@@ -112,7 +122,7 @@ const provenanceComplete = [
   summary.dataset_sha256,
   summary.model_requested,
   summary.model_resolved,
-  summary.host.os_release,
+  summary.host.os_release_sha256,
   summary.host.image,
   summary.host.image_version,
   ...Object.values(summary.runtime),

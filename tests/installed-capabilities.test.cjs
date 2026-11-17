@@ -4,6 +4,7 @@ const {
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } = require('node:fs');
 const { tmpdir } = require('node:os');
@@ -854,6 +855,12 @@ test('reports dirty evaluated source before any installed-agent lifecycle work',
     );
     assert.equal(generation.error, 'testgen-repository-not-clean');
     assert.equal(generation.cleanup.status, 'passed');
+    if (process.platform !== 'win32') {
+      for (const trial of [result, generation]) {
+        const directory = path.join(resultRoot, trial.trial_id);
+        assert.equal(statSync(directory).mode & 0o077, 0);
+      }
+    }
   } finally {
     processTools.command = original;
     delete require.cache[helperPath];

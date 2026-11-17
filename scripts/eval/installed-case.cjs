@@ -118,7 +118,7 @@ async function collectInstalledCase(definition, signal, options) {
     validateResultsRoot(options.resultsRoot),
     `trial-${randomBytes(8).toString('hex')}`,
   );
-  mkdirSync(resultDirectory, { recursive: true });
+  mkdirSync(resultDirectory, { recursive: true, mode: 0o700 });
   const state = {
     repository: null,
     server: null,
