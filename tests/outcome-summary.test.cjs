@@ -6,6 +6,7 @@ const {
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } = require('node:fs');
 const { tmpdir } = require('node:os');
@@ -24,7 +25,10 @@ const {
 } = require('../scripts/score-outcomes.cjs');
 
 const { scoreSelectorRepair } = require('../scripts/score-selector-repair.cjs');
-const { selectorFailure } = require('../scripts/run-selector-repair-eval.cjs');
+const {
+  selectorFailure,
+  validateRepairTrace,
+} = require('../scripts/run-selector-repair-eval.cjs');
 
 const definitions = [
   { case_id: 'generation', kind: 'generation', planned_trials: 2 },
@@ -124,6 +128,9 @@ test('public CI summary excludes private evidence and preserves runner and clean
   const revision = 'a'.repeat(40);
   const runtime = {
     ...trial('refusal', 1).profile,
+    claude_code: '2.1.285',
+    node: '24.22.1',
+    npm: '11.19.1',
     platform: 'linux',
     host: {
       os_release: '6.11.0-1018-azure',
@@ -132,11 +139,12 @@ test('public CI summary excludes private evidence and preserves runner and clean
     },
     testgen_revision: revision,
     dataset_sha256: 'b'.repeat(64),
-    model_requested: 'claude-sonnet-5',
-    model_resolved: 'claude-sonnet-5',
+    model_requested: 'claude-sonnet-5-5',
+    model_resolved: 'claude-sonnet-5-5',
     total_cost_usd: 0.2,
     private_notes: 'PRIVATE-EVIDENCE',
   };
+  runtime.agent_limits.model = 'claude-sonnet-5-5';
   const result = {
     ok: true,
     case_id: 'semantic-order-not-inserted',
@@ -155,7 +163,19 @@ test('public CI summary excludes private evidence and preserves runner and clean
         'healer-defect-refusal',
         String(exitCode),
       ],
-      { encoding: 'utf8', env: { ...process.env, GITHUB_SHA: revision } },
+      {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          GITHUB_SHA: revision,
+          EVALUATION_MODEL: 'claude-sonnet-5-5',
+          EVALUATION_NODE: '24.22.1',
+          EVALUATION_NPM: '11.19.1',
+          EVALUATION_CLAUDE_CODE: '2.1.285',
+          EVALUATION_PLAYWRIGHT: '1.62.1',
+          EVALUATION_PLAYWRIGHT_CLI: '0.1.19',
+        },
+      },
     );
   };
   try {
@@ -164,12 +184,25 @@ test('public CI summary excludes private evidence and preserves runner and clean
     const summary = JSON.parse(passed.stdout);
     assert.equal(summary.status, 'passed');
     assert.equal(summary.completed_trials, 1);
-    assert.equal(summary.model_resolved, 'claude-sonnet-5');
+    assert.equal(summary.model_resolved, 'claude-sonnet-5-5');
     assert.equal(summary.browsers.exploration.version, '156.0.2.0');
     assert.doesNotMatch(
       passed.stdout,
       /PRIVATE-EVIDENCE|private_notes|diagnostics/u,
     );
+    runtime.model_resolved = 'claude-sonnet-5';
+    const wrongModel = summarize(0);
+    assert.equal(wrongModel.status, 1);
+    assert.equal(
+      JSON.parse(wrongModel.stdout).model_resolved,
+      'claude-sonnet-5',
+    );
+    runtime.model_resolved = 'claude-sonnet-5-5';
+    runtime.node = '24.13.0';
+    const wrongRuntime = summarize(0);
+    assert.equal(wrongRuntime.status, 1);
+    assert.equal(JSON.parse(wrongRuntime.stdout).runtime.node, '24.13.0');
+    runtime.node = '24.22.1';
     const recordedHost = runtime.host;
     const canary = 'sk-ant-api03-PRIVACY-CANARY-NOT-A-REAL-KEY';
     for (const field of Object.keys(recordedHost)) {
@@ -543,6 +576,18 @@ test('scoring CLI fails critical integrity even for a complete cohort', () => {
 });
 
 test('keeps dataset identity identical across path separator styles', () => {
+  const { hashFiles } = require('../scripts/eval/runtime.cjs');
+  const repository = path.resolve(__dirname, '..');
+  assert.equal(
+    hashFiles(repository, [
+      'scripts/process.cjs',
+      'scripts/eval/agent-evidence.cjs',
+    ]),
+    hashFiles(repository, [
+      'scripts/process.cjs',
+      'scripts\\eval\\agent-evidence.cjs',
+    ]),
+  );
   const filename = path.resolve(__dirname, '../scripts/score-outcomes.cjs');
   const source = readFileSync(filename, 'utf8');
   const digest = (style) => {
@@ -889,6 +934,86 @@ test('accepts an independently verified selector repair', () => {
     healer_attempts: 2,
     assertions_unchanged: true,
   });
+});
+
+test('retains rejected trace evidence and propagates unverified teardown', async (t) => {
+  const repository = mkdtempSync(path.join(tmpdir(), 'testgen-repair-trace-'));
+  t.after(() => rmSync(repository, { force: true, recursive: true }));
+  const runId = 'tg-0123456789abcdef01234567';
+  const runDirectory = path.join(repository, '.playwright-cli/testgen', runId);
+  const evidenceDirectory = path.join(repository, 'evidence');
+  mkdirSync(runDirectory, { recursive: true });
+  mkdirSync(evidenceDirectory);
+  writeFileSync(path.join(runDirectory, 'healer-trace.json'), '{invalid');
+  const rejected = await validateRepairTrace(
+    path.resolve(__dirname, '..'),
+    repository,
+    runId,
+    evidenceDirectory,
+  );
+  assert.equal(rejected.trace, null);
+  assert.equal(rejected.validation_error.reason, 'trace-invalid');
+  assert.deepEqual(rejected.validation_error.details, [
+    'run-policy-unavailable',
+  ]);
+  assert.equal(
+    readFileSync(path.join(evidenceDirectory, 'healer-trace.json'), 'utf8'),
+    '{invalid',
+  );
+  await assert.rejects(
+    validateRepairTrace(
+      path.join(repository, 'missing-plugin'),
+      repository,
+      runId,
+      evidenceDirectory,
+    ),
+    /artifact-validator-execution-failed/u,
+  );
+
+  const { EvaluationError } = require('../scripts/process.cjs');
+  const cleanupError = new EvaluationError('process-tree-cleanup-failed');
+  cleanupError.cleanup_pid = 12345;
+  t.mock.method(
+    require('../scripts/eval/runtime.cjs'),
+    'validateArtifact',
+    async () => {
+      throw cleanupError;
+    },
+  );
+  const modulePath = require.resolve('../scripts/run-selector-repair-eval.cjs');
+  const previous = require.cache[modulePath];
+  delete require.cache[modulePath];
+  t.after(() => {
+    require.cache[modulePath] = previous;
+  });
+  const reloaded = require(modulePath);
+  await assert.rejects(
+    reloaded.validateRepairTrace(
+      path.resolve(__dirname, '..'),
+      repository,
+      runId,
+      evidenceDirectory,
+    ),
+    (error) => error === cleanupError,
+  );
+  const elsewhere = path.join(repository, 'elsewhere');
+  mkdirSync(elsewhere);
+  writeFileSync(path.join(elsewhere, 'healer-trace.json'), 'private-canary');
+  rmSync(runDirectory, { force: true, recursive: true });
+  symlinkSync(elsewhere, runDirectory, 'junction');
+  await assert.rejects(
+    validateRepairTrace(
+      path.resolve(__dirname, '..'),
+      repository,
+      runId,
+      evidenceDirectory,
+    ),
+    /trace-evidence-unavailable/u,
+  );
+  assert.equal(
+    readFileSync(path.join(evidenceDirectory, 'healer-trace.json'), 'utf8'),
+    '{invalid',
+  );
 });
 
 test('rejects weakened assertions, product changes, and ungoverned failures', () => {

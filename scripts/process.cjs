@@ -246,6 +246,9 @@ function runBounded(commandName, args, options) {
     const finish = (status, signal, spawnError = null) => {
       if (settled) return;
       settled = true;
+      // Failed tree verification must not leave the owned root running.
+      if (treeCleanupFailed && process.platform === 'win32')
+        child.kill('SIGKILL');
       clearTimeout(timer);
       if (stopTimer != null) clearTimeout(stopTimer);
       options.signal?.removeEventListener('abort', cancel);

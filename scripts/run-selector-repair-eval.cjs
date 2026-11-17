@@ -4,23 +4,27 @@ const { createHash, randomBytes } = require('node:crypto');
 const {
   copyFileSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   writeFileSync,
 } = require('node:fs');
 const { tmpdir } = require('node:os');
 const path = require('node:path');
-const { exactPlaywrightFilter } = require('../hooks/run-policy.cjs');
+const { exactPlaywrightFilter, samePath } = require('../hooks/run-policy.cjs');
 const {
   command,
   executable,
   runBounded,
   assertProcessStopped,
+  fail,
   lifecycleCancellation,
 } = require('./process.cjs');
 const {
   buildClaudeArguments,
+  evaluationFailure,
   parseAgentStream,
 } = require('./eval/agent-evidence.cjs');
 const {
@@ -112,6 +116,54 @@ function approvedSpec(args, definition) {
   )
     throw new Error('spec-approval-mismatch');
   return args[1];
+}
+
+async function validateRepairTrace(
+  installPath,
+  repository,
+  runId,
+  resultDirectory,
+  signal,
+) {
+  const tracePath = path.join(
+    repository,
+    '.playwright-cli/testgen',
+    runId,
+    'healer-trace.json',
+  );
+  if (existsSync(tracePath)) {
+    const stat = lstatSync(tracePath);
+    if (
+      !stat.isFile() ||
+      stat.nlink !== 1 ||
+      stat.size > 512 * 1024 ||
+      !samePath(
+        realpathSync(tracePath),
+        path.join(
+          realpathSync(repository),
+          '.playwright-cli/testgen',
+          runId,
+          'healer-trace.json',
+        ),
+      )
+    )
+      fail('trace-evidence-unavailable');
+    copyFileSync(tracePath, path.join(resultDirectory, 'healer-trace.json'));
+  }
+  try {
+    await validateArtifact(
+      installPath,
+      repository,
+      'trace',
+      runId,
+      tracePath,
+      signal,
+    );
+  } catch (error) {
+    if (error.code !== 'trace-invalid') throw error;
+    return { trace: null, validation_error: evaluationFailure(error) };
+  }
+  return { trace: readJson(tracePath), validation_error: null };
 }
 
 async function evaluateRepair(definition, approvedDigest, signal) {
@@ -385,23 +437,15 @@ async function evaluateRepair(definition, approvedDigest, signal) {
       result.hook_errors !== 0
     )
       throw new Error('healer-run-failed');
-    const tracePath = path.join(runDirectory, 'healer-trace.json');
-    let traceValid = true;
-    try {
-      await validateArtifact(
-        installed.installPath,
-        state.repository,
-        'trace',
-        runId,
-        tracePath,
-        signal,
-      );
-    } catch {
-      traceValid = false;
-    }
-    const trace = traceValid ? readJson(tracePath) : null;
-    if (traceValid)
-      copyFileSync(tracePath, path.join(resultDirectory, 'healer-trace.json'));
+    const { trace, validation_error } = await validateRepairTrace(
+      installed.installPath,
+      state.repository,
+      runId,
+      resultDirectory,
+      signal,
+    );
+    if (validation_error != null)
+      result.trace_validation_error = validation_error;
     copyFileSync(
       specPath,
       path.join(resultDirectory, 'repaired-order.spec.ts'),
@@ -439,7 +483,7 @@ async function evaluateRepair(definition, approvedDigest, signal) {
         baseline: baseline.outcome,
         variant_precheck: precheck.outcome,
         selector_failure: result.selector_failure,
-        trace_valid: traceValid,
+        trace_valid: trace != null,
         trace,
         spec_path: definition.spec_path,
         before,
@@ -498,4 +542,5 @@ module.exports = {
   expectedSelectorRepair,
   evaluateRepair,
   selectorFailure,
+  validateRepairTrace,
 };

@@ -31,14 +31,12 @@ test('Notebook details', async ({ page }) => {
   const dialog = page.getByRole('dialog', { name: 'Order details', exact: true });
   await test.step('Check Notebook details', async () => {
     await expect(dialog).toBeVisible();
-    await expect(dialog).toContainText('Notebook');
-    await expect(dialog).toContainText('2');
-    await expect(dialog).toContainText('Ready');
+    await expect(dialog.locator('#dialog-description')).toHaveText('2 × Notebook — Ready');
   });
 });`;
 const revised = spec.replace(
-  "await expect(dialog).toContainText('2');",
-  "await expect(dialog).toContainText('2');\n    const heading = dialog.getByRole('heading', { name: 'Order details', exact: true });\n    await expect(heading).toBeVisible();\n    await expect(heading).toHaveText('Order details');",
+  "await expect(dialog.locator('#dialog-description')).toHaveText('2 × Notebook — Ready');",
+  "await expect(dialog.locator('#dialog-description')).toHaveText('2 × Notebook — Ready');\n    const heading = dialog.getByRole('heading', { name: 'Order details', exact: true });\n    await expect(heading).toBeVisible();\n    await expect(heading).toHaveText('Order details');",
 );
 
 function snapshot(source, overrides = {}) {
@@ -54,7 +52,7 @@ function snapshot(source, overrides = {}) {
         id: 'notebook-details-visible',
         outcome: definition.criteria[0].outcome,
         step_title: 'Check Notebook details',
-        assertion_location: 'tests/notebook-details.spec.ts:7',
+        assertion_location: 'tests/notebook-details.spec.ts:8',
       },
     ],
     assertions: inspectAssertions(source),
@@ -70,6 +68,7 @@ function evidence(overrides = {}) {
     author_spec_writes: 1,
     author_handoff_writes: 1,
     main_spec_writes: 0,
+    main_handoff_writes: 0,
     handoff_validations: 1,
     main_handoff_validations: 1,
     author_handoff_validations: 1,
@@ -89,14 +88,75 @@ test('checkpoint review proves scoped assertions independently of comments and h
     gradeCheckpoint(definition, snapshot(spec), evidence()).status,
     'passed',
   );
+  for (const wrongValue of [
+    '2 × Notebook — Not Ready',
+    '12 × Notebook — Ready (2 left)',
+  ]) {
+    assert.throws(
+      () =>
+        gradeCheckpoint(
+          definition,
+          snapshot(spec.replace('2 × Notebook — Ready', wrongValue)),
+          evidence(),
+        ),
+      /candidate-assertions-invalid/u,
+    );
+  }
+  assert.throws(
+    () =>
+      gradeCheckpoint(
+        definition,
+        snapshot(spec),
+        evidence({ main_handoff_validations: 0 }),
+      ),
+    /main-handoff-validation-unverified/u,
+  );
+  assert.throws(
+    () =>
+      gradeCheckpoint(
+        definition,
+        snapshot(spec.replace('toHaveText(', 'toContainText(')),
+        evidence(),
+      ),
+    /candidate-assertions-invalid/u,
+  );
+  const exactText = spec.replace(
+    "dialog.locator('#dialog-description')).toHaveText('2 × Notebook — Ready')",
+    "dialog.getByText('2 × Notebook — Ready', { exact: true })).toBeVisible()",
+  );
+  assert.equal(
+    gradeCheckpoint(definition, snapshot(exactText), evidence()).status,
+    'passed',
+  );
+  assert.equal(
+    gradeCheckpoint(
+      definition,
+      snapshot(exactText.replace('await expect(dialog).toBeVisible();', '')),
+      evidence(),
+    ).status,
+    'passed',
+  );
+  assert.throws(
+    () =>
+      gradeCheckpoint(
+        definition,
+        snapshot(spec.replace('await expect(dialog).toBeVisible();', '')),
+        evidence(),
+      ),
+    /candidate-assertions-invalid/u,
+  );
+  assert.throws(
+    () => snapshot(exactText.replace(', { exact: true }', '')),
+    /candidate-assertions-invalid/u,
+  );
   assert.throws(
     () =>
       gradeCheckpoint(
         definition,
         snapshot(
           spec.replace(
-            "await expect(dialog).toContainText('Ready');",
-            "// await expect(dialog).toContainText('Ready');",
+            "await expect(dialog.locator('#dialog-description')).toHaveText('2 × Notebook — Ready');",
+            "// await expect(dialog.locator('#dialog-description')).toHaveText('2 × Notebook — Ready');",
           ),
         ),
         evidence(),
@@ -132,8 +192,8 @@ test('checkpoint review proves scoped assertions independently of comments and h
     () =>
       inspectAssertions(
         spec.replace(
-          "await expect(dialog).toContainText('Ready');",
-          "if (false) { await expect(dialog).toContainText('Ready'); }",
+          "await expect(dialog.locator('#dialog-description')).toHaveText('2 × Notebook — Ready');",
+          "if (false) { await expect(dialog.locator('#dialog-description')).toHaveText('2 × Notebook — Ready'); }",
         ),
       ),
     /candidate-control-flow-unverified/u,
@@ -214,8 +274,13 @@ test('deterministic checkpoint replay resumes twice and gates skip on the revise
   let calls = 0;
   let omitRevisionCheckpoint = false;
   let executeBeforeApproval = false;
+  let staleMainValidation = false;
+  let resumedAgent = 'fixture-author';
+  let mainHandoffWriteAt = 0;
+  let secondExchangeModel = 'claude-sonnet-5-5';
   async function invoke(args) {
     calls += 1;
+    const model = calls === 2 ? secondExchangeModel : 'claude-sonnet-5-5';
     budgets.push(args[args.indexOf('--max-budget-usd') + 1]);
     assert.equal(args.includes('--no-session-persistence'), false);
     if (calls > 1)
@@ -255,18 +320,40 @@ test('deterministic checkpoint replay resumes twice and gates skip on the revise
           lint: { ...handoff.lint, status: calls === 1 ? 'pass' : 'fixed' },
         }),
       );
+      const delegationId = calls === 1 ? 'author' : 'resume-author';
       records.push({
         type: 'assistant',
         message: {
-          model: 'claude-sonnet-5-5',
+          model,
           content: [
             {
               type: 'tool_use',
-              id: 'author',
-              name: 'Agent',
-              input: {
-                subagent_type: 'playwright-testgen:playwright-test-author',
-              },
+              id: delegationId,
+              name: calls === 1 ? 'Agent' : 'SendMessage',
+              input:
+                calls === 1
+                  ? {
+                      subagent_type:
+                        'playwright-testgen:playwright-test-author',
+                    }
+                  : { to: resumedAgent, type: 'message' },
+            },
+          ],
+        },
+      });
+      records.push({
+        type: 'user',
+        tool_use_result:
+          calls === 1
+            ? { agentId: 'fixture-author' }
+            : { success: true, resumedAgentId: resumedAgent },
+        message: {
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: delegationId,
+              is_error: false,
+              content: 'completed',
             },
           ],
         },
@@ -300,12 +387,6 @@ test('deterministic checkpoint replay resumes twice and gates skip on the revise
               is_error: false,
               content: 'completed',
             })),
-            {
-              type: 'tool_result',
-              tool_use_id: 'author',
-              is_error: false,
-              content: 'completed',
-            },
           ],
         },
       });
@@ -335,11 +416,13 @@ test('deterministic checkpoint replay resumes twice and gates skip on the revise
           ],
         },
       });
+      if (staleMainValidation && calls === 2)
+        records.splice(1, 0, ...records.splice(records.length - 2, 2));
       if (calls === 1 || !omitRevisionCheckpoint)
         records.push({
           type: 'assistant',
           message: {
-            model: 'claude-sonnet-5-5',
+            model,
             content: [
               {
                 type: 'text',
@@ -354,7 +437,7 @@ test('deterministic checkpoint replay resumes twice and gates skip on the revise
       records.push({
         type: 'assistant',
         message: {
-          model: 'claude-sonnet-5-5',
+          model,
           content: [
             {
               type: 'text',
@@ -363,6 +446,45 @@ test('deterministic checkpoint replay resumes twice and gates skip on the revise
           ],
         },
       });
+    }
+    if (calls === mainHandoffWriteAt) {
+      const validationIndex = records.findIndex((record) =>
+        record.message?.content?.some(
+          (block) => block.id === 'main-validation',
+        ),
+      );
+      records.splice(
+        validationIndex < 0 ? records.length - 1 : validationIndex,
+        0,
+        {
+          type: 'assistant',
+          message: {
+            content: [
+              {
+                type: 'tool_use',
+                id: 'main-handoff',
+                name: 'Write',
+                input: {
+                  file_path: `.playwright-cli/testgen/${runId}/handoff.json`,
+                  content: JSON.stringify(handoff),
+                },
+              },
+            ],
+          },
+        },
+        {
+          type: 'user',
+          message: {
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'main-handoff',
+                is_error: false,
+              },
+            ],
+          },
+        },
+      );
     }
     records.push({
       type: 'result',
@@ -401,6 +523,40 @@ test('deterministic checkpoint replay resumes twice and gates skip on the revise
     /checkpoint-role-boundary-violated/u,
   );
   assert.equal(calls, 1);
+  calls = 0;
+  executeBeforeApproval = false;
+  staleMainValidation = true;
+  await assert.rejects(
+    runCheckpoint(context, definition, invoke),
+    /main-handoff-validation-unverified/u,
+  );
+  assert.equal(calls, 2);
+  calls = 0;
+  staleMainValidation = false;
+  resumedAgent = 'unknown-agent';
+  await assert.rejects(
+    runCheckpoint(context, definition, invoke),
+    /checkpoint-role-boundary-violated/u,
+  );
+  assert.equal(calls, 2);
+  resumedAgent = 'fixture-author';
+  for (mainHandoffWriteAt of [2, 3]) {
+    calls = 0;
+    await assert.rejects(
+      runCheckpoint(context, definition, invoke),
+      /checkpoint-role-boundary-violated/u,
+    );
+    assert.equal(calls, mainHandoffWriteAt);
+  }
+  calls = 0;
+  mainHandoffWriteAt = 0;
+  secondExchangeModel = 'claude-sonnet-5';
+  await assert.rejects(
+    runCheckpoint(context, definition, invoke),
+    /checkpoint-model-mismatch/u,
+  );
+  assert.equal(calls, 2);
+  assert.equal(context.result.model_resolved, 'claude-sonnet-5');
 });
 
 test('failed Author exchange restores only its policy-owned browser session after cancellation', async (t) => {

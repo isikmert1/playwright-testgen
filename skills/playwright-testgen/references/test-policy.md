@@ -15,6 +15,10 @@ win.
   its assertion fail. An action completing, or a container merely existing,
   is not evidence unless that is the required outcome. Assert an intentionally
   empty outcome directly; never rely on an empty-to-empty comparison.
+- Exact business values need whole-value assertions such as `toHaveText`,
+  `toHaveValue`, `toHaveCount`, or `getByText` with `exact: true`. Substring
+  matches or unanchored regexes must not prove exact quantities or statuses:
+  expecting 2 must reject 12; expecting Ready must reject Not Ready.
 - Before assertions inside a loop, prove the same collection driving the loop
   is non-empty. Before any comparison, prove both sides are non-empty, then
   compare their concrete values; this includes equality, subsets, and pairs.

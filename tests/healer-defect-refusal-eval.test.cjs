@@ -301,20 +301,29 @@ test('executes the installed hook and observes an explicit decision', async (t) 
     );
     writeFileSync(path.join(runDirectory, 'handoff.json'), '{}');
 
-    const result = await verifyInstalledHook(
-      installPath,
-      repository,
-      auditPath,
-    ).catch((error) => {
-      if (error.code === 'process-tree-cleanup-failed')
-        t.diagnostic(`cleanup reason: ${error.details.join(',') || 'unknown'}`);
-      throw error;
-    });
+    for (const [role, expected] of [
+      ['playwright-test-healer', 'allow'],
+      ['playwright-test-explorer', 'deny'],
+    ]) {
+      const result = await verifyInstalledHook(
+        installPath,
+        repository,
+        auditPath,
+        undefined,
+        role,
+      ).catch((error) => {
+        if (error.code === 'process-tree-cleanup-failed')
+          t.diagnostic(
+            `cleanup reason: ${error.details.join(',') || 'unknown'}`,
+          );
+        throw error;
+      });
 
-    assert.equal(result.decision, 'allow');
-    assert.equal(result.agent_type, 'playwright-test-healer');
-    assert.equal(result.tool_name, 'Bash');
-    assert.equal(result.operation, 'other');
+      assert.equal(result.decision, expected);
+      assert.equal(result.agent_type, role.endsWith('healer') ? role : 'other');
+      assert.equal(result.tool_name, 'Bash');
+      assert.equal(result.operation, 'other');
+    }
   } finally {
     rmSync(temporaryRoot, { force: true, recursive: true });
   }
@@ -629,33 +638,34 @@ test('hard timeout terminates a non-returning process', async () => {
 });
 
 test(
-  'keeps the Windows hard timeout responsive during a stalled snapshot',
+  'keeps Windows shutdown bounded when process inspection stalls or fails',
   { skip: process.platform !== 'win32' },
   () => {
     const script = [
       "const childProcess=require('node:child_process');",
-      'const spawnSync=childProcess.spawnSync;',
       'const spawn=childProcess.spawn;',
-      'let childPid;',
-      'childProcess.spawn=(...args)=>{const child=spawn(...args);childPid=child.pid;return child};',
-      "childProcess.spawnSync=(name,args,options)=>name==='powershell.exe'?(Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,6500),{status:0,stdout:'1||'}):spawnSync(name,args,options);",
+      'let child,exited;',
+      "childProcess.spawn=(...args)=>{child=spawn(...args);exited=new Promise(resolve=>child.once('exit',resolve));return child};",
       'const execFile=childProcess.execFile;',
-      "childProcess.execFile=(name,args,options,callback)=>name==='powershell.exe'?undefined:execFile(name,args,options,callback);",
+      "childProcess.execFile=(name,args,options,callback)=>{if(name==='powershell.exe'){if(process.argv[1]==='fail')setImmediate(()=>callback(Object.assign(new Error('snapshot failed'),{code:1})));return}if(name!=='taskkill.exe')return execFile(name,args,options,callback)};",
       "const {runBounded}=require('./scripts/process.cjs');",
       'const started=Date.now();',
-      "runBounded(process.execPath,['-e','setInterval(()=>{},1000)'],{cwd:process.cwd(),env:process.env,timeout_ms:50}).then(result=>{let childAlive;try{process.kill(childPid,0);childAlive=true}catch{childAlive=false}process.stdout.write(JSON.stringify({elapsed:Date.now()-started,timed_out:result.timed_out,tree_cleanup_failed:result.tree_cleanup_failed,child_alive:childAlive}))});",
+      "runBounded(process.execPath,['-e','setInterval(()=>{},1000)'],{cwd:process.cwd(),env:process.env,timeout_ms:50}).then(async result=>{try{await Promise.race([exited,new Promise(resolve=>setTimeout(resolve,250))]);let childAlive;try{process.kill(child.pid,0);childAlive=true}catch{childAlive=false}process.stdout.write(JSON.stringify({elapsed:Date.now()-started,timed_out:result.timed_out,tree_cleanup_failed:result.tree_cleanup_failed,child_alive:childAlive}))}finally{child.kill('SIGKILL')}});",
     ].join('');
-    const result = spawnSync(process.execPath, ['-e', script], {
-      cwd: repositoryRoot,
-      encoding: 'utf8',
-      timeout: 12000,
-      windowsHide: true,
-    });
-    assert.equal(result.status, 0, result.stderr);
-    const outcome = JSON.parse(result.stdout);
-    assert.equal(outcome.timed_out, true);
-    assert.equal(outcome.child_alive, false);
-    assert.ok(outcome.elapsed < 6000, JSON.stringify(outcome));
+    for (const snapshot of ['stall', 'fail']) {
+      const result = spawnSync(process.execPath, ['-e', script, snapshot], {
+        cwd: repositoryRoot,
+        encoding: 'utf8',
+        timeout: 12000,
+        windowsHide: true,
+      });
+      assert.equal(result.status, 0, result.stderr);
+      const outcome = JSON.parse(result.stdout);
+      assert.equal(outcome.timed_out, true);
+      assert.equal(outcome.tree_cleanup_failed, true);
+      assert.equal(outcome.child_alive, false, snapshot);
+      assert.ok(outcome.elapsed < 6000, JSON.stringify(outcome));
+    }
   },
 );
 

@@ -145,6 +145,14 @@ function inspectAssertions(source) {
     const options = literalOptions(expression.arguments[1]);
     const role = expression.arguments[0]?.value;
     if (
+      method === 'getByText' &&
+      expression.arguments.length === 2 &&
+      typeof role === 'string' &&
+      options?.exact === true &&
+      locator(parent, bindings) === 'dialog'
+    )
+      return 'exact-text';
+    if (
       method === 'getByRole' &&
       expression.arguments.length <= 2 &&
       expression.arguments[0]?.type === 'Literal' &&
@@ -270,7 +278,10 @@ function inspectAssertions(source) {
         line: expression.loc.start.line,
         target,
         matcher: method,
-        value: argument?.value ?? null,
+        value:
+          target === 'exact-text' && method === 'toBeVisible'
+            ? resolve(expectCall.arguments[0], bindings).arguments[0].value
+            : (argument?.value ?? null),
       });
     }
   }
@@ -302,16 +313,18 @@ function gradeCheckpoint(definition, snapshot, evidence, previous = null) {
       'healer_delegations',
       'explorer_delegations',
       'main_spec_writes',
+      'main_handoff_writes',
     ].some((field) => evidence[field] !== 0)
   )
     throw new Error('checkpoint-role-boundary-violated');
   if (evidence.checkpoint_presented !== true)
     throw new Error('checkpoint-not-presented');
+  if (evidence.main_handoff_validations < 1)
+    throw new Error('main-handoff-validation-unverified');
   if (
     evidence.author_delegations !== 1 ||
     evidence.author_spec_writes < 1 ||
     evidence.author_handoff_writes < 1 ||
-    evidence.main_handoff_validations < 1 ||
     evidence.author_handoff_validations < 1
   )
     throw new Error('author-revision-unverified');
@@ -347,23 +360,22 @@ function gradeCheckpoint(definition, snapshot, evidence, previous = null) {
     (item) => item.step_title === criterion.step_title,
   );
   const visible = assertions.some(
-    (item) => item.target === 'dialog' && item.matcher === 'toBeVisible',
+    (item) =>
+      ['dialog', 'exact-text'].includes(item.target) &&
+      item.matcher === 'toBeVisible',
   );
-  const text = assertions
-    .filter(
-      (item) =>
-        ['dialog', 'description'].includes(item.target) &&
-        ['toContainText', 'toHaveText'].includes(item.matcher) &&
-        item.value != null,
-    )
-    .map((item) => item.value)
-    .join(' ');
+  const contentVerified = assertions.some(
+    (item) =>
+      ((['dialog', 'description'].includes(item.target) &&
+        item.matcher === 'toHaveText') ||
+        (item.target === 'exact-text' && item.matcher === 'toBeVisible')) &&
+      typeof item.value === 'string' &&
+      item.value.replace(/\s+/gu, ' ').trim() === '2 × Notebook — Ready',
+  );
   const location = Number(criterion.assertion_location.split(':').at(-1));
   if (
     !visible ||
-    !/\bNotebook\b/u.test(text) ||
-    !/\b2\b/u.test(text) ||
-    !/\bReady\b/u.test(text) ||
+    !contentVerified ||
     !assertions.some((item) => item.line === location)
   )
     throw new Error('candidate-assertions-invalid');
@@ -434,6 +446,7 @@ function checkpointEvidence(
   definition,
   snapshot,
   final = false,
+  agents = new Map(),
 ) {
   const blocks = parsed.tool_blocks ?? [];
   const results = new Map(
@@ -442,15 +455,36 @@ function checkpointEvidence(
   const delegations = blocks.filter((block) =>
     ['Agent', 'Task'].includes(block.name),
   );
-  const role = (block, name) =>
-    typeof block.input?.subagent_type === 'string' &&
-    block.input.subagent_type.split(':').at(-1) === name;
+  for (const block of delegations) {
+    const result = results.get(block.id);
+    if (result?.is_error === false && typeof result.agent_id === 'string')
+      agents.set(result.agent_id, block);
+  }
+  delegations.push(
+    ...blocks.filter(
+      (block) => block.name === 'SendMessage' && agents.has(block.input?.to),
+    ),
+  );
+  const role = (block, name) => {
+    const delegation =
+      block.name === 'SendMessage' ? agents.get(block.input.to) : block;
+    return (
+      typeof delegation.input?.subagent_type === 'string' &&
+      delegation.input.subagent_type.split(':').at(-1) === name
+    );
+  };
   const authors = delegations.filter(
     (block) =>
       role(block, 'playwright-test-author') &&
-      results.get(block.id)?.is_error === false,
+      results.get(block.id)?.is_error === false &&
+      (block.name !== 'SendMessage' ||
+        results.get(block.id)?.resumed_agent_id === block.input.to),
   );
   const authorIds = new Set(authors.map((block) => block.id));
+  for (const block of authors) {
+    if (block.name === 'SendMessage')
+      authorIds.add(agents.get(block.input.to).id);
+  }
   const owned = (block) => authorIds.has(block.parent_tool_use_id);
   const completed = (block) => results.get(block.id)?.is_error === false;
   const specWrites = blocks.filter(
@@ -459,6 +493,17 @@ function checkpointEvidence(
       sameTarget(block.input?.file_path, definition.spec_path, repository),
   );
   const handoffPath = `.playwright-cli/testgen/${snapshot?.run_id}/handoff.json`;
+  const handoffWrites = blocks.filter(
+    (block) =>
+      ['Write', 'Edit'].includes(block.name) &&
+      sameTarget(block.input?.file_path, handoffPath, repository),
+  );
+  const candidateWrittenAt = Math.max(
+    -1,
+    ...[...specWrites, ...handoffWrites]
+      .filter(completed)
+      .map((block) => block.event_index),
+  );
   const commands = blocks.filter(
     (block) =>
       ['Bash', 'PowerShell'].includes(block.name) &&
@@ -476,6 +521,8 @@ function checkpointEvidence(
     if (
       !completed(block) ||
       !Number.isInteger(finalIndex) ||
+      (block.parent_tool_use_id == null &&
+        block.event_index <= candidateWrittenAt) ||
       block.event_index >= finalIndex
     )
       return false;
@@ -506,14 +553,11 @@ function checkpointEvidence(
     author_spec_writes: specWrites.filter(
       (block) => owned(block) && completed(block),
     ).length,
-    author_handoff_writes: blocks.filter(
-      (block) =>
-        ['Write', 'Edit'].includes(block.name) &&
-        owned(block) &&
-        completed(block) &&
-        sameTarget(block.input?.file_path, handoffPath, repository),
+    author_handoff_writes: handoffWrites.filter(
+      (block) => owned(block) && completed(block),
     ).length,
     main_spec_writes: specWrites.filter((block) => !owned(block)).length,
+    main_handoff_writes: handoffWrites.filter((block) => !owned(block)).length,
     handoff_validations: validation.length,
     main_handoff_validations: validation.filter(
       (block) => block.parent_tool_use_id == null,
@@ -539,7 +583,6 @@ function checkpointEvidence(
     ).length,
     checkpoint_presented:
       Number.isInteger(finalIndex) &&
-      validation.some((block) => block.parent_tool_use_id == null) &&
       text.includes(definition.spec_path) &&
       definition.criteria.every((criterion) => text.includes(criterion.id)) &&
       /\blint\b/iu.test(text) &&
@@ -635,6 +678,7 @@ async function runCheckpoint(
   result.case_sha256 = hashFile(casePath);
   result.runner_sha256 = hashFile(__filename);
   let sessionId = null;
+  const agents = new Map();
   const browserSessions = new Map();
   async function exchange(prompt) {
     const limits = nextExchangeLimits(
@@ -707,6 +751,8 @@ async function runCheckpoint(
       parsed.result_subtype !== 'success'
     )
       throw new Error('checkpoint-agent-failed');
+    if (resolvedModel !== definition.agent.model)
+      throw new Error('checkpoint-model-mismatch');
     if (typeof parsed.session_id !== 'string' || parsed.session_id === '')
       throw new Error('checkpoint-session-unverified');
     if (sessionId != null && sessionId !== parsed.session_id)
@@ -750,6 +796,8 @@ async function runCheckpoint(
       state.repository,
       definition,
       before,
+      false,
+      agents,
     );
     reviewCheckpoint(before, firstEvidence);
     const revisedExchange = await exchange(`adjust\n${definition.adjustment}`);
@@ -759,6 +807,8 @@ async function runCheckpoint(
       state.repository,
       definition,
       after,
+      false,
+      agents,
     );
     reviewCheckpoint(after, revisedEvidence, {
       ...before,
@@ -773,6 +823,7 @@ async function runCheckpoint(
       definition,
       after,
       true,
+      agents,
     );
     if (
       [
@@ -781,6 +832,7 @@ async function runCheckpoint(
         'healer_delegations',
         'explorer_delegations',
         'main_spec_writes',
+        'main_handoff_writes',
         'author_delegations',
       ].some((field) => finalEvidence[field] !== 0)
     )

@@ -299,7 +299,8 @@ stops. Author never runs the spec.
 
 Main validates `.playwright-cli/testgen/<run_id>/handoff.json` before
 reporting it, using the exact validator command in `artifact-contract.md`,
-and presents the candidate path, covered
+in a standalone Bash call so another command cannot mask its exit status.
+Use a separate `Read` call to inspect the spec. Main presents the candidate path, covered
 criteria, meaningful assertions, lint result, assumptions, and open
 questions.
 
