@@ -282,10 +282,29 @@ test('public CI summary excludes private evidence and preserves runner and clean
     assert.equal(diagnostic.failure_reason, 'checkpoint-agent-failed');
     assert.equal(diagnostic.agent_failure_reason, 'agent-turn-limit');
     assert.equal(diagnostic.checkpoint_stage, 'adjust');
+    result.reason = 'main-handoff-validation-unverified';
+    result.agent_failure_reason = null;
+    result.checkpoints = [
+      {
+        evidence: {
+          main_handoff_validation_failure: 'shell-operators',
+          command: 'PRIVATE-EVIDENCE',
+        },
+      },
+    ];
+    const mainFailure = summarize(1, 'checkpoint');
+    assert.equal(mainFailure.status, 1);
+    assert.equal(
+      JSON.parse(mainFailure.stdout).main_handoff_validation_failure,
+      'shell-operators',
+    );
+    assert.doesNotMatch(mainFailure.stdout, /PRIVATE-EVIDENCE/u);
     const privateReason = 'private-customer-code-do-not-publish';
     result.reason = privateReason;
     result.agent_failure_reason = privateReason;
     result.checkpoint_stage = privateReason;
+    result.checkpoints[0].evidence.main_handoff_validation_failure =
+      privateReason;
     const privateFailure = summarize(1, 'checkpoint');
     assert.equal(privateFailure.status, 1);
     assert.ok(!privateFailure.stdout.includes(privateReason));
@@ -293,6 +312,9 @@ test('public CI summary excludes private evidence and preserves runner and clean
     assert.equal(redacted.failure_reason, null);
     assert.equal(redacted.agent_failure_reason, null);
     assert.equal(redacted.checkpoint_stage, null);
+    assert.equal(redacted.main_handoff_validation_failure, null);
+    result.checkpoints = {};
+    assert.equal(summarize(1, 'checkpoint').stderr, '');
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

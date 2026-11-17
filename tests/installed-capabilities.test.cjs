@@ -276,6 +276,7 @@ test('deterministic checkpoint replay resumes twice and gates skip on the revise
   let omitRevisionCheckpoint = false;
   let executeBeforeApproval = false;
   let staleMainValidation = false;
+  let mainValidationCommand = validationCommand;
   let resumedAgent = 'fixture-author';
   let mainHandoffWriteAt = 0;
   let secondExchangeModel = 'claude-sonnet-5-5';
@@ -403,7 +404,7 @@ test('deterministic checkpoint replay resumes twice and gates skip on the revise
               type: 'tool_use',
               id: 'main-validation',
               name: 'Bash',
-              input: { command: validationCommand },
+              input: { command: mainValidationCommand },
             },
           ],
         },
@@ -513,6 +514,10 @@ test('deterministic checkpoint replay resumes twice and gates skip on the revise
     context.result.checkpoints[1].candidate_sha256,
   );
   assert.equal(context.result.cost_usd, 1.2000000000000002);
+  assert.equal(
+    context.result.checkpoints[0].evidence.main_handoff_validation_failure,
+    null,
+  );
   calls = 0;
   omitRevisionCheckpoint = true;
   await assert.rejects(
@@ -536,8 +541,32 @@ test('deterministic checkpoint replay resumes twice and gates skip on the revise
     /main-handoff-validation-unverified/u,
   );
   assert.equal(calls, 2);
-  calls = 0;
+  assert.equal(
+    context.result.checkpoints.at(-1).evidence.main_handoff_validation_failure,
+    'out-of-order',
+  );
   staleMainValidation = false;
+  for (const [command, failure] of [
+    [
+      `${validationCommand}; cat tests/notebook-details.spec.ts`,
+      'shell-operators',
+    ],
+    ['ls scripts/validate-testgen-artifact.cjs', 'not-observed'],
+  ]) {
+    calls = 0;
+    mainValidationCommand = command;
+    await assert.rejects(
+      runCheckpoint(context, definition, invoke),
+      /main-handoff-validation-unverified/u,
+    );
+    assert.equal(calls, 1);
+    assert.equal(
+      context.result.checkpoints[0].evidence.main_handoff_validation_failure,
+      failure,
+    );
+  }
+  calls = 0;
+  mainValidationCommand = validationCommand;
   resumedAgent = 'unknown-agent';
   await assert.rejects(
     runCheckpoint(context, definition, invoke),
