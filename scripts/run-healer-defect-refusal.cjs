@@ -623,7 +623,7 @@ async function main() {
   if (options.archiveResults) {
     const trialId = `trial-${randomBytes(8).toString('hex')}`;
     const directory = path.join(options.resultsRoot, trialId);
-    mkdirSync(directory, { recursive: true });
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
     result.case_id = 'semantic-order-not-inserted';
     result.trial_id = trialId;
     writeFileSync(

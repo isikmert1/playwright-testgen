@@ -97,7 +97,7 @@ jobs:
             *) echo '::error::Unsupported evaluation case.'; exit 1 ;;
           esac
           results="$RUNNER_TEMP/testgen-evaluation"
-          mkdir -p "$results" "$CLAUDE_CONFIG_DIR"
+          mkdir -p -m 700 "$results" "$CLAUDE_CONFIG_DIR"
           evaluation_exit=0
           npm run "$script" -- --model "$EVALUATION_MODEL" --max-budget-usd 2 \
             --results-dir "$results" > "$results/runner.log" 2>&1 || evaluation_exit=$?

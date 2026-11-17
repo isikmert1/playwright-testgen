@@ -99,7 +99,7 @@ async function collectCandidate(definition, signal, options = {}) {
     options.resultsRoot ?? resultsRoot,
     trialId,
   );
-  mkdirSync(resultDirectory, { recursive: true });
+  mkdirSync(resultDirectory, { recursive: true, mode: 0o700 });
   const state = {
     marketplace_added: false,
     marketplace_name: null,

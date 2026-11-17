@@ -180,7 +180,7 @@ async function evaluateRepair(definition, approvedDigest, signal) {
     throw new Error('case-invalid');
   const trialId = `trial-${randomBytes(8).toString('hex')}`;
   const resultDirectory = path.join(resultsRoot, trialId);
-  mkdirSync(resultDirectory, { recursive: true });
+  mkdirSync(resultDirectory, { recursive: true, mode: 0o700 });
   const state = {
     marketplace_added: false,
     marketplace_name: null,
