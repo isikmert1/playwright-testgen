@@ -848,7 +848,12 @@ test(
       assert.equal(parent.status, 0, parent.stderr);
       assert.equal(Number.isInteger(parent.pid), true);
       assert.equal(process.kill(descendantPid, 0), true);
-      assert.equal(await stopProcessTree({ pid: parent.pid, kill() {} }), true);
+      const diagnostics = {};
+      assert.equal(
+        await stopProcessTree({ pid: parent.pid, kill() {} }, diagnostics),
+        true,
+        JSON.stringify(diagnostics),
+      );
       assert.throws(() => process.kill(descendantPid, 0));
     } finally {
       if (Number.isInteger(descendantPid) && descendantPid > 0) {

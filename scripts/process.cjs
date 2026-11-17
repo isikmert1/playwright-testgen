@@ -133,8 +133,9 @@ async function stopProcessTree(child, diagnostics = {}) {
   };
   try {
     if (process.platform === 'win32') {
-      const onSnapshotFailure = (reason) => {
+      const onSnapshotFailure = (reason, exitCode) => {
         diagnostics.reason = reason;
+        if (exitCode != null) diagnostics.snapshot_exit_code = exitCode;
       };
       const initial = await windowsProcessTree(pid, [], onSnapshotFailure);
       if (initial == null)
