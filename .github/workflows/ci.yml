@@ -11,7 +11,7 @@ jobs:
   check:
     strategy:
       matrix:
-        node: [22.13.0, 24]
+        node: [22.13.0, 26]
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
@@ -24,6 +24,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
-      - run: npm install --global @anthropic-ai/claude-code@2.1.285
+      - run: npm install --global @anthropic-ai/claude-code@2.1.327
+        env:
+          npm_config_allow_scripts: '@anthropic-ai/claude-code'
       - run: claude plugin validate . --strict
       - run: claude plugin validate .claude-plugin/plugin.json --strict

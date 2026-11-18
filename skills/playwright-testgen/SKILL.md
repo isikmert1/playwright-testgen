@@ -23,7 +23,8 @@ and `@playwright/test` runtime. The official `@playwright/cli` must be installed
 globally so its documented `playwright-cli` command is available without
 depending on the repository's
 `node_modules` layout. Never install or resolve these dependencies from this
-plugin repository. Testgen requires Node.js 22.13 or later.
+plugin repository. Testgen requires Node.js 22.13 or later and Claude Code
+2.1.295 or later so hook startup failures and timeouts block tool use.
 
 The SessionStart hook exports `PLAYWRIGHT_TESTGEN_ROOT` as the installed plugin
 directory for Bash commands. Use `$PLAYWRIGHT_TESTGEN_ROOT/scripts/...` for

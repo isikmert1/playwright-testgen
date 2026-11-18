@@ -16,7 +16,10 @@ const { release, tmpdir } = require('node:os');
 const path = require('node:path');
 const { exactPlaywrightFilter } = require('../../hooks/run-policy.cjs');
 const { currentHead } = require('../repository-snapshot.cjs');
-const { versionAtLeast } = require('../runtime-preflight.cjs');
+const {
+  MIN_CLAUDE_CODE_VERSION,
+  versionAtLeast,
+} = require('../runtime-preflight.cjs');
 const {
   EvaluationError,
   LIFECYCLE_COMMAND_TIMEOUT_MS,
@@ -488,6 +491,8 @@ async function preflight(signal, runtime) {
     signal,
   });
   runtime.claude_code = claudeCode;
+  if (!versionAtLeast(claudeCode, MIN_CLAUDE_CODE_VERSION))
+    fail('claude-code-version-unsupported');
   await command(executable('claude'), ['auth', 'status'], {
     error: 'authentication-unavailable',
     signal,

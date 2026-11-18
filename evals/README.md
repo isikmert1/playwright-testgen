@@ -35,7 +35,7 @@ and keep expected verdicts and grading controls private.
 
 ### Activation
 
-This command requires Claude Code 2.1.269 or later.
+Use Claude Code 2.1.295 or later, as required by Testgen's hook policy.
 
 ```sh
 claude plugin eval . --eval-dir evals/native --runs 1 --ablation none --concurrency 1 --model claude-sonnet-5-5 --max-cost-usd 1 --no-publish

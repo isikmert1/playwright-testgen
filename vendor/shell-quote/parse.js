@@ -8,18 +8,20 @@
  * 	ParseEntry,
  * } from './parse' */
 
-// '<(' is process substitution operator and
+// '<(' and '>(' are process substitution operators and
 // can be parsed the same as control operator
 var CONTROL = /** @type {const} */ ('(?:') + /** @type {const} */ ([
 	'\\|\\|',
-	'\\&\\&',
-	';;',
-	'\\|\\&',
+	'\\&(?:\\&|>>?)', // `&&`, `&>`, and `&>>`
+	';;\\&?', // `;;` and `;;&`
+	'[;|]\\&', // `;&` and `|&`
 	'\\<\\(',
 	'\\<\\<\\<',
+	'\\<\\<-',
+	'\\<\\<(?!\\()', // `<<(` stays `<` and `<(`, as zsh reads it; other shells reject it
 	'>>',
-	'>\\&',
-	'<\\&',
+	'>[&|(]', // `>&`, `>|`, and `>(`
+	'<[&>]', // `<&` and `<>`
 	'[&;()|<>]'
 ]).join(/** @type {const} */ ('|')) + /** @type {const} */ (')');
 var controlRE = new RegExp('^' + CONTROL + '$');

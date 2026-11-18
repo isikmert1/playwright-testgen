@@ -54,11 +54,11 @@ jobs:
     timeout-minutes: 20
     env:
       EVALUATION_MODEL: claude-sonnet-5-5
-      EVALUATION_NODE: 24.22.1
-      EVALUATION_NPM: 11.21.2
-      EVALUATION_CLAUDE_CODE: 2.1.285
-      EVALUATION_PLAYWRIGHT: 1.62.1
-      EVALUATION_PLAYWRIGHT_CLI: 0.1.19
+      EVALUATION_NODE: 26.13.1
+      EVALUATION_NPM: 12.2.3
+      EVALUATION_CLAUDE_CODE: 2.1.327
+      EVALUATION_PLAYWRIGHT: 1.65.1
+      EVALUATION_PLAYWRIGHT_CLI: 0.1.24
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -70,7 +70,7 @@ jobs:
           cache: npm
       - run: npm install --global "npm@$EVALUATION_NPM"
       - run: npm ci
-      - run: npm install --global "@anthropic-ai/claude-code@$EVALUATION_CLAUDE_CODE" "@playwright/cli@$EVALUATION_PLAYWRIGHT_CLI"
+      - run: npm install --global --allow-scripts=@anthropic-ai/claude-code "@anthropic-ai/claude-code@$EVALUATION_CLAUDE_CODE" "@playwright/cli@$EVALUATION_PLAYWRIGHT_CLI"
       - run: claude plugin validate . --strict
       - run: claude plugin validate .claude-plugin/plugin.json --strict
       - name: Verify a failed grade blocks the job
