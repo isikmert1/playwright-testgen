@@ -323,6 +323,8 @@ test('public CI summary excludes private evidence and preserves runner and clean
       failures: [
         'behavioral-test-body-unverified',
         'covered-behavior-unrecognized',
+        'unsupported-coverage-unverified',
+        'unsupported-questions-invalid',
         privateReason,
       ],
       cleanup: { status: 'passed' },
@@ -332,6 +334,8 @@ test('public CI summary excludes private evidence and preserves runner and clean
     assert.deepEqual(JSON.parse(discoveryFailure.stdout).grading_failures, [
       'behavioral-test-body-unverified',
       'covered-behavior-unrecognized',
+      'unsupported-coverage-unverified',
+      'unsupported-questions-invalid',
     ]);
     assert.ok(!discoveryFailure.stdout.includes(privateReason));
     result.failures = {};

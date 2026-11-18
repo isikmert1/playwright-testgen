@@ -62,8 +62,10 @@ const failureReasons = new Set([
   'source-test-read-limit',
   'stream-invalid',
   'unauthorized-command-attempt',
+  'unsupported-coverage-unverified',
   'unsupported-intent-not-abstained',
   'unsupported-proposal',
+  'unsupported-questions-invalid',
   'write-or-delegation-attempt',
 ]);
 const [directory, selectedCase, exitText] = process.argv.slice(2);
