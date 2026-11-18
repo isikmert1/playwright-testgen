@@ -791,14 +791,19 @@ test('requires a behavioral test body rather than title-only coverage claims', (
   );
 });
 
-test('rejects invented cancellation intent', () => {
+test('keeps coverage distinct from unsupported intent and questions', () => {
   const { response, stream } = fixture();
-  response.scope[1].expected_behavior = 'intended';
-  assert.ok(
-    grade(stream(undefined, response)).failures.includes(
-      'unsupported-intent-not-abstained',
-    ),
-  );
+  response.scope[1].coverage = 'candidate-gap';
+  assert.equal(grade(stream(undefined, response)).status, 'passed');
+  for (const [field, value, reason] of [
+    ['coverage', 'apparently-covered', 'unsupported-coverage-unverified'],
+    ['expected_behavior', 'intended', 'unsupported-intent-not-abstained'],
+    ['questions', [], 'unsupported-questions-invalid'],
+  ]) {
+    const invalid = structuredClone(response);
+    invalid.scope[1][field] = value;
+    assert.deepEqual(grade(stream(undefined, invalid)).failures, [reason]);
+  }
 });
 
 test('rejects test execution, writes, delegation, and a changed target', () => {
