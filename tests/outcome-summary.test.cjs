@@ -315,6 +315,30 @@ test('public CI summary excludes private evidence and preserves runner and clean
     assert.equal(redacted.main_handoff_validation_failure, null);
     result.checkpoints = {};
     assert.equal(summarize(1, 'checkpoint').stderr, '');
+    result = {
+      ...runtime,
+      case_id: 'discovery-covered-and-unsupported',
+      trial_id: path.basename(target),
+      status: 'failed',
+      failures: [
+        'behavioral-test-body-unverified',
+        'covered-behavior-unrecognized',
+        privateReason,
+      ],
+      cleanup: { status: 'passed' },
+    };
+    const discoveryFailure = summarize(1, 'discovery');
+    assert.equal(discoveryFailure.status, 1);
+    assert.deepEqual(JSON.parse(discoveryFailure.stdout).grading_failures, [
+      'behavioral-test-body-unverified',
+      'covered-behavior-unrecognized',
+    ]);
+    assert.ok(!discoveryFailure.stdout.includes(privateReason));
+    result.failures = {};
+    assert.deepEqual(
+      JSON.parse(summarize(1, 'discovery').stdout).grading_failures,
+      [],
+    );
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

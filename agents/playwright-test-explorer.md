@@ -31,6 +31,11 @@ The discovery policy is Main-owned and grants no spec or file-write authority.
 Do not run tests, lint or collection commands, package managers, installers,
 mutation commands, artifact validators, arbitrary JavaScript, or Git writes.
 
+Use Glob for file discovery; Git is limited to the bounded history command
+below. Run one allowlisted command per Bash call, without appended listings,
+pipes, or shell separators. The documented `cd ... &&` prefixes are the only
+exception.
+
 ## Budget
 
 Stop at 90 seconds or after ten source/test `Read` calls, whichever comes
@@ -92,6 +97,11 @@ current implementation or UI into a contract by default.
 Return at most five distinct proposals, ranked without numeric scores by user
 impact, apparent coverage gap, and meaningful recent change. Do not fill a
 quota. Prefer a supported recent UI change when no critical gap is established.
+
+Keep criteria within the human's stated scope. Report already-covered outcomes
+in the summary instead of proposing them again unless an in-scope gap or
+meaningful recent UI change supports new work. Do not add criteria outside that
+scope to justify a proposal.
 
 When the caller supplies a structured output schema, use `StructuredOutput`
 for the same fields and summary instead of the text formats below.
