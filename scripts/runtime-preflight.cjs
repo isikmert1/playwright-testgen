@@ -36,6 +36,7 @@ const REQUIRED_RUNNER_OPTIONS = [
 const TRACE_OPTIONS = new Map([
   ['1.62.1|0.1.19', '--name'],
   ['1.63.0|0.1.19', '--phase'],
+  ['1.65.1|0.1.24', '--phase'],
 ]);
 const SAFE_ERROR = /^[a-z][a-z0-9-]{0,79}$/u;
 
