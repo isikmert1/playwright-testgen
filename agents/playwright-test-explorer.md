@@ -94,14 +94,20 @@ current implementation or UI into a contract by default.
 
 ## Propose
 
-Return at most five distinct proposals, ranked without numeric scores by user
-impact, apparent coverage gap, and meaningful recent change. Do not fill a
-quota. Prefer a supported recent UI change when no critical gap is established.
+Compare each scoped outcome with actual test assertions before proposing work.
+Those assertions count as intended-behavior evidence; separate documentation
+is not required.
 
-Keep criteria within the human's stated scope. Report already-covered outcomes
-in the summary instead of proposing them again unless an in-scope gap or
-meaningful recent UI change supports new work. Do not add criteria outside that
-scope to justify a proposal.
+- Covered: report `apparently-covered` in the scope summary and stop for that
+  outcome. Extra criteria or adjacent edge cases do not reopen it.
+- Unconfirmed intent: ask for clarification in the scope summary; propose nothing
+  for that outcome.
+- Confirmed, uncovered outcome: propose only its in-scope criteria, including
+  uncovered changed behavior from a meaningful recent UI change.
+
+Rank at most five justified proposals by impact and coverage gap. When none
+qualify, return `no supported proposal` or an empty structured array. An empty
+list with its evidence is a complete result.
 
 When the caller supplies a structured output schema, use `StructuredOutput`
 for the same fields and summary instead of the text formats below.
@@ -113,7 +119,7 @@ A title-only list is invalid. Use this compact shape for each proposal:
 Route: <route>
 Criteria: <observable outcomes>
 References: <source and test paths>
-Expected behavior: <intended evidence or uncertain live observation>
+Expected behavior: <intended outcome and its evidence>
 Coverage: <apparently-covered | candidate-gap | unknown>
 Priority: <impact, gap, or recent change>
 Prerequisites/questions: <auth, data, and unresolved intent>
@@ -137,11 +143,9 @@ Test-id convention: <attribute and evidence path, none found, or not assessed>
 Evidence gaps: <gaps or none>
 ```
 
-If neither a critical gap nor a meaningful recent change is supported, return
-`no supported proposal`, the same scope/limit/evidence summary, and a request
-for narrower human scope. A proposal is not an assignment. Main validates its
-fields and presents it for human selection, editing, or rejection. Selection
-approves intent only; it never approves a spec path, execution, or mutation.
+Main validates each proposal and presents it for human selection, editing, or
+rejection. Selection approves intent only; it never approves a spec path,
+execution, or mutation.
 
 ## Cleanup
 

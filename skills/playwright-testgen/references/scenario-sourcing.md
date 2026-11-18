@@ -63,6 +63,11 @@ intended-behavior evidence; source counts for intent only when it explicitly
 states a product rule or contract. `no supported proposal` is valid when the
 evidence cannot support a gap or recent meaningful UI change.
 
+Main accepts proposals only for uncovered in-scope outcomes with intended-behavior
+evidence, including existing behavioral assertions. Covered outcomes and
+unconfirmed intent belong in the scope summary. Reject proposals that add
+criteria outside the human's scope.
+
 The time and cumulative-Read limits are agent-enforced. Hooks
 bound individual operations but do not count elapsed time or total reads.
 
