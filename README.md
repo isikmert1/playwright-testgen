@@ -97,6 +97,7 @@ application, browser, and authentication readiness for each run.
 
 ## Prerequisites
 
+- Claude Code 2.1.295 or later so hook failures block the pending tool call.
 - Node.js 22.13 or later and npm available to Claude Code.
 - A project with local `playwright` and `@playwright/test` packages.
 - The official `@playwright/cli` installed globally, plus its skill

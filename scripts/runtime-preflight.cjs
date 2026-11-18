@@ -14,8 +14,10 @@ const { createRequire } = require('node:module');
 const { tmpdir } = require('node:os');
 const path = require('node:path');
 const { isInside } = require('./artifact-validation-common.cjs');
+const { executable: resolveExecutable } = require('./process.cjs');
 const { hasDefaultConfig, selectedConfigPath } = require('./profile-repo.cjs');
 
+const MIN_CLAUDE_CODE_VERSION = '2.1.295';
 const REQUIRED_CLI_COMMANDS = [
   'attach',
   'find',
@@ -225,6 +227,17 @@ function inspectHook(pluginRoot, repository) {
 function runtimePreflight(options) {
   if (!versionAtLeast(process.versions.node, '22.13.0'))
     fail('node-version-unsupported');
+  let claude;
+  try {
+    claude = resolveExecutable('claude');
+  } catch {
+    fail('claude-code-unavailable');
+  }
+  const claudeCode = run(claude, ['--version'], {
+    error: 'claude-code-unavailable',
+  });
+  if (!versionAtLeast(claudeCode, MIN_CLAUDE_CODE_VERSION))
+    fail('claude-code-version-unsupported');
   const repository = realpathSync(path.resolve(options.repository));
   const gitHead = run('git', ['rev-parse', '--verify', 'HEAD'], {
     cwd: repository,
@@ -454,4 +467,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { versionAtLeast };
+module.exports = { MIN_CLAUDE_CODE_VERSION, versionAtLeast };

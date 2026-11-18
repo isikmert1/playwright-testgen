@@ -26,6 +26,7 @@ function writeJson(filename, value) {
 }
 
 function createRepository({
+  claudeVersion = '2.1.295',
   cliVersion = '0.1.19',
   commit = true,
   nested = false,
@@ -109,6 +110,15 @@ function createRepository({
       "else console.log('attach find generate-locator requests state-load state-save');",
     ].join('\n'),
   );
+  const tools = path.join(repository, '.testgen-preflight-bin');
+  mkdirSync(tools);
+  writeFileSync(
+    path.join(tools, process.platform === 'win32' ? 'claude.cmd' : 'claude'),
+    process.platform === 'win32'
+      ? `@echo off\r\necho ${claudeVersion} (Claude Code)\r\n`
+      : `#!/bin/sh\necho '${claudeVersion} (Claude Code)'\n`,
+    { mode: 0o755 },
+  );
   return { cli, fixtureRoot, repository };
 }
 
@@ -116,13 +126,34 @@ function runPreflight(repository, cli, selection = ['--configless']) {
   const result = spawnSync(
     process.execPath,
     [preflight, '--repo', repository, '--playwright-cli', cli, ...selection],
-    { encoding: 'utf8' },
+    {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        PATH: [
+          path.join(repository, '.testgen-preflight-bin'),
+          process.env.PATH ?? '',
+        ].join(path.delimiter),
+        // Keep an installed native Claude from overriding the fixture shim.
+        PATHEXT: '.CMD',
+      },
+    },
   );
   return {
     ...result,
     report: JSON.parse(result.stdout),
   };
 }
+
+test('rejects Claude Code without blocking hook failure support', () => {
+  for (const claudeVersion of ['2.1.285', '2.1.294']) {
+    withRepository({ claudeVersion }, ({ cli, repository }) => {
+      const { status, report } = runPreflight(repository, cli);
+      assert.equal(status, 1);
+      assert.equal(report.error, 'claude-code-version-unsupported');
+    });
+  }
+});
 
 test('binds a hoisted runtime to the selected package and config', () => {
   withRepository({}, ({ cli, repository }) => {
