@@ -26,6 +26,11 @@ depending on the repository's
 plugin repository. Testgen requires Node.js 22.13 or later and Claude Code
 2.1.295 or later so hook startup failures and timeouts block tool use.
 
+Native `Glob` and `Grep` must be available. On macOS, Linux, and WSL, enable
+them with the explicit `--tools` startup list in the project README. If either
+is absent, stop and ask for a fresh session using that list;
+do not replace native searches with shell commands.
+
 The SessionStart hook exports `PLAYWRIGHT_TESTGEN_ROOT` as the installed plugin
 directory for Bash commands. Use `$PLAYWRIGHT_TESTGEN_ROOT/scripts/...` for
 every bundled script without printing, resolving, or probing the variable. If a

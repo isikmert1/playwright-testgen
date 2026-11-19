@@ -110,6 +110,15 @@ application, browser, and authentication readiness for each run.
 
   Setup checks the installed version and required capabilities before use.
 
+### Native search tools
+
+On macOS, Linux, and WSL, start a dedicated Testgen session with its built-in
+tools explicitly enabled. These hosts omit native file search by default:
+
+```sh
+claude --tools Agent,AskUserQuestion,Bash,Edit,Glob,Grep,Read,SendMessage,Skill,TaskStop,Write
+```
+
 ## Local validation
 
 ```sh
