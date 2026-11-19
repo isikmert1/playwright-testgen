@@ -37,6 +37,32 @@ approved spec, using its existing configuration, fixtures, and test layout.
   approval, apply a criterion-linked product change in a disposable Git worktree
   and check whether the test catches it. Unavailable checks remain unverified.
 
+## See the workflow
+
+Review a candidate, ask Author for another assertion, and review the revised
+spec before choosing whether to run it.
+
+<picture>
+  <source media="(prefers-reduced-motion: reduce)" srcset="docs/images/review-checkpoint.png">
+  <img src="docs/images/review-workflow.gif" alt="Claude Code walkthrough: generated spec, adjustment, revised assertions, and skip" width="100%">
+</picture>
+
+This walkthrough reviews a saved Claude Code session on a sample app. The
+adjustment and skip replies are scripted; the generated test is not executed.
+
+<details>
+<summary>View the checkpoint and revised spec</summary>
+
+**Review and adjust**
+
+![The run, adjust, and skip checkpoint with an adjustment sent to Author](docs/images/review-checkpoint.png)
+
+**Revised candidate**
+
+![The generated spec with the requested dialog heading assertions](docs/images/generated-spec.png)
+
+</details>
+
 ## Prerequisites
 
 - Claude Code **2.1.295+** and Node.js **22.13+**, with npm available to Claude.
