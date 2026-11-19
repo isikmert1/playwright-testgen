@@ -47,7 +47,7 @@ function main() {
     payload = JSON.parse(readFileSync(0, 'utf8'));
   } catch {
     process.stdout.write(
-      `${JSON.stringify(deny('Hook input is invalid. Retry through a normal governed tool call; if it repeats, return the hook failure to Main.'))}\n`,
+      `${JSON.stringify(deny('Hook input is invalid. Retry through a normal governed tool call; if it repeats, return the hook failure to Coordinator.'))}\n`,
     );
     return;
   }

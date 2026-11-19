@@ -53,7 +53,7 @@ can exceed it.
 - `npm run eval:discovery` checks that installed Explorer recognizes existing
   order-submission coverage and abstains on unsupported bulk cancellation.
   The grade uses actual source reads and browser cleanup.
-- `npm run eval:checkpoint` checks that Main resumes the same session, has
+- `npm run eval:checkpoint` checks that Coordinator resumes the same session, has
   Author revise and validate the candidate under the original criteria, returns
   to approval, and honors skip. The spec must stay unexecuted. The grader
   verifies direct Playwright assertions for the requested change.

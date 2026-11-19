@@ -38,21 +38,21 @@ documented script call reports it missing, stop and ask the human to restart
 Claude Code after installing or reloading the plugin. Never infer it from
 `SKILL.md`, search for another checkout, or hardcode a development path.
 
-`/playwright-testgen:setup` is the optional Main-owned onboarding flow. It runs
+`/playwright-testgen:setup` is the optional Coordinator-owned onboarding flow. It runs
 the bounded static profiler, publishes the ignored target-owned
 `.playwright-testgen/profile.v1.json` only after approval, and offers relevant
 remedies without starting generation. Governed roles never read or edit that
-profile; Main validates freshness and passes only relevant facts. Setup remains
+profile; Coordinator validates freshness and passes only relevant facts. Setup remains
 usable without authentication and never generates a login test.
 
-Before every generation, Main validates the profile when present:
+Before every generation, Coordinator validates the profile when present:
 
 ```sh
 node "$PLAYWRIGHT_TESTGEN_ROOT/scripts/setup-profile.cjs" validate --repo .
 ```
 
 Missing, invalid, stale, partial, or wrong-target profile facts fall back to
-ordinary grounding. Main then runs one read-only preflight from the Git root
+ordinary grounding. Coordinator then runs one read-only preflight from the Git root
 with one selected package and either one selected config or explicit configless
 mode:
 
@@ -79,7 +79,7 @@ trace snapshot inspection unavailable while the required workflow can continue.
 Run the official install from the same Node/npm environment that launches the
 agent; a different global npm prefix does not satisfy this check.
 
-Preflight does not launch the application or a browser. Before Author, Main
+Preflight does not launch the application or a browser. Before Author, Coordinator
 records separate fresh facts for authentication, the application at the
 approved origin, the Playwright CLI exploration browser, and the repository
 runner browser selected by existing config and project. Reuse equivalent fresh
@@ -95,7 +95,8 @@ handoffs, and healing, and wins when the workflows differ.
 
 ## Core flow
 
-Main coordinates; Explorer proposes, Author writes, Healer runs and repairs,
+Coordinator is the top-level Claude Code conversation running this skill.
+It coordinates the flow; Explorer proposes, Author writes, Healer runs and repairs,
 and the human owns every selection and checkpoint. Keep writes single-threaded,
 one active scenario, and no shared mutable run policy. Never auto-advance:
 scenario selection authorizes neither execution nor mutation, and only an
@@ -108,9 +109,9 @@ scenario-scoped. The detailed generation workflow and stopping outcomes live in
 `pipeline.md`.
 
 Explorer, Author, and Healer also support explicit standalone requests without
-entering the full pipeline. Main remains the minimal coordinator: it establishes
+entering the full pipeline. Coordinator establishes
 intent and readiness, creates the role's policy and artifacts, validates the
-result, delegates the named role, applies cleanup, and stops. Main never performs
+result, delegates the named role, applies cleanup, and stops. Coordinator never performs
 the delegated role's browser, authoring, execution, or repair work. Standalone
 Explorer returns proposals only; standalone Author returns one unexecuted
 candidate spec; standalone Healer may repair one human-approved existing failing
@@ -124,7 +125,7 @@ create a second routing layer.
 
 - [pipeline.md](references/pipeline.md) — Read for the generation workflow and
   post-checkpoint execution or repair: ordering, ownership, and handoffs.
-- [scenario-sourcing.md](references/scenario-sourcing.md) — Read when Main
+- [scenario-sourcing.md](references/scenario-sourcing.md) — Read when Coordinator
   coordinates Explorer in pipeline or standalone mode, including a supplied
   discovery scope, or manages a multi-scenario queue. Do not load it for
   explicit single-scenario generation or standalone Author or Healer work.
@@ -136,7 +137,7 @@ create a second routing layer.
   before assigning its cause, remedy, or next owner.
 - [healing-protocol.md](references/healing-protocol.md) — Read when Healer is
   authorized to run or debug a spec, and before repairing a failure.
-- [artifact-contract.md](references/artifact-contract.md) — Main reads before
+- [artifact-contract.md](references/artifact-contract.md) — Coordinator reads before
   starting Author or validating or consuming a handoff, Healer input, or trace.
 - [mutation-check.md](references/mutation-check.md) — Read before adapter approval
   and after a fixed Healer result, including when verification is unavailable.

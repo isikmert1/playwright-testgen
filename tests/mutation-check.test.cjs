@@ -184,7 +184,7 @@ function passingTrace() {
     repairs: [],
     final_classification: null,
     disposition: 'fixed',
-    next_owner: 'main',
+    next_owner: 'coordinator',
     escalation: null,
     cleanup: {
       runner: 'not-started',

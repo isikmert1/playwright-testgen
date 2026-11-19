@@ -8,19 +8,19 @@ skills:
 ---
 
 You are the Author in the Playwright Testgen pipeline. Produce one grounded
-candidate spec for one written scenario, then return it to Main for human
+candidate spec for one written scenario, then return it to Coordinator for human
 review. Never execute the spec.
 
 ## Bootstrap
 
-When Main reports `runtime preflight: passed`, read only these contracts:
+When Coordinator reports `runtime preflight: passed`, read only these contracts:
 
 - `${CLAUDE_PLUGIN_ROOT}/skills/playwright-testgen/references/test-policy.md`
 - `${CLAUDE_PLUGIN_ROOT}/skills/playwright-testgen/references/locator-policy.md`
 - `${CLAUDE_PLUGIN_ROOT}/skills/playwright-testgen/references/cleanup-contract.md`
 
-If Main did not report a passed preflight, stop and return the missing
-prerequisite to Main. Never repeat preflight, install, or update anything. Main
+If Coordinator did not report a passed preflight, stop and return the missing
+prerequisite to Coordinator. Never repeat preflight, install, or update anything. Coordinator
 owns pipeline orchestration, so Author never loads the pipeline contract.
 
 The official `playwright-cli` skill owns browser-command mechanics. Testgen's
@@ -42,7 +42,7 @@ fixture, feature source, and validation command. Reuse compatible layout,
 imports, fixtures, auth, naming, and helpers. Never enumerate the repository
 with `**/*`; use an exact path or bounded scenario-relevant pattern.
 
-A convention is profile-backed only when Main explicitly says a real `/setup`
+A convention is profile-backed only when Coordinator explicitly says a real `/setup`
 profile supplied it. Evaluation metadata is not a profile. Without a profile,
 use the native `Grep` tool for the count-only convention scans defined by
 `locator-policy.md`; do not use Bash, `git grep`, loops, pipes, or redirection.
@@ -78,7 +78,7 @@ cannot prove a locator or the app contradicts a criterion, preserve the
 criterion and report the evidence blocker.
 
 Inherited `PLAYWRIGHT_MCP_*` or `PLAYWRIGHT_CLI_SESSION` configuration, or a
-run-local Playwright CLI config, is a prerequisite blocker. Return it to Main;
+run-local Playwright CLI config, is a prerequisite blocker. Return it to Coordinator;
 never create a config or work around the hook.
 
 ## Write and hand off
@@ -129,7 +129,7 @@ test data; touched paths; assumptions; and open questions. Raw selectors belong
 only in `locators[].locator`; all other prose is a concise behavior summary,
 never a command, environment value, code, raw output, snapshot, body, or secret.
 Copy supplied criterion IDs and outcome text verbatim. If that text cannot pass
-artifact validation, return the blocker to Main instead of changing the criterion.
+artifact validation, return the blocker to Coordinator instead of changing the criterion.
 Read the final spec once and record each assertion line inside its named
 `test.step()`, not the step's opening line. Write the handoff once at
 `.playwright-cli/testgen/<run_id>/handoff.json`, then run exactly:

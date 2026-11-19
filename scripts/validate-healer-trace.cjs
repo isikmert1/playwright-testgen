@@ -299,7 +299,7 @@ function validateDisposition(artifact, healerInput, errors) {
   if (
     artifact.disposition === 'fixed' &&
     (artifact.next_owner !==
-      (healerInput?.mode === 'standalone' ? 'human' : 'main') ||
+      (healerInput?.mode === 'standalone' ? 'human' : 'coordinator') ||
       artifact.escalation !== null)
   )
     errors.push('trace-invalid-fixed-disposition');
@@ -424,7 +424,9 @@ function validateTrace(artifact, repository, healerInput, errors) {
   if (!DISPOSITIONS.has(artifact.disposition))
     errors.push('trace-invalid-disposition');
   if (
-    !['main', 'human', 'author', 'product-owner'].includes(artifact.next_owner)
+    !['coordinator', 'human', 'author', 'product-owner'].includes(
+      artifact.next_owner,
+    )
   )
     errors.push('trace-invalid-next-owner');
   if (artifact.escalation !== null && !isText(artifact.escalation, 200))

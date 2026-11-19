@@ -3,7 +3,7 @@ description: Inspect and prepare one repository for Playwright Testgen
 disable-model-invocation: true
 ---
 
-Use the `playwright-testgen` skill. Main owns this setup flow; do not delegate
+Use the `playwright-testgen` skill. Coordinator owns this setup flow; do not delegate
 profiling, installation, profile writes, or authentication capture to Explorer,
 Author, or Healer.
 
@@ -84,7 +84,7 @@ freshly before a scenario runs.
 Publish only after approved runtime remedies have finished and been checked;
 otherwise package or skill changes may immediately stale the new profile. The
 only profile path is `.playwright-testgen/profile.v1.json`. It is an untracked,
-Git-ignored, maximum-64-KiB `repository-profile.v1` document owned by Main.
+Git-ignored, maximum-64-KiB `repository-profile.v1` document owned by Coordinator.
 Explain the destination and ask once to create or refresh the profile and,
 when needed, add that exact ignore rule. Do not blanket-ignore the directory.
 Installation, authentication, and unrelated edits require separate approval.

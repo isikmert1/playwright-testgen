@@ -21,7 +21,7 @@ const { parseAgentStream } = require('../scripts/eval/agent-evidence.cjs');
 
 const definition = JSON.parse(
   readFileSync(
-    path.join(__dirname, '../evals/cases/main-adjust-skip/case.json'),
+    path.join(__dirname, '../evals/cases/coordinator-adjust-skip/case.json'),
     'utf8',
   ),
 );
@@ -68,10 +68,10 @@ function evidence(overrides = {}) {
     author_delegations: 1,
     author_spec_writes: 1,
     author_handoff_writes: 1,
-    main_spec_writes: 0,
-    main_handoff_writes: 0,
+    coordinator_spec_writes: 0,
+    coordinator_handoff_writes: 0,
     handoff_validations: 1,
-    main_handoff_validations: 1,
+    coordinator_handoff_validations: 1,
     author_handoff_validations: 1,
     browser_sessions_opened: 1,
     browser_sessions_closed: 1,
@@ -108,9 +108,9 @@ test('checkpoint review proves scoped assertions independently of comments and h
       gradeCheckpoint(
         definition,
         snapshot(spec),
-        evidence({ main_handoff_validations: 0 }),
+        evidence({ coordinator_handoff_validations: 0 }),
       ),
-    /main-handoff-validation-unverified/u,
+    /coordinator-handoff-validation-unverified/u,
   );
   assert.throws(
     () =>
@@ -275,10 +275,10 @@ test('deterministic checkpoint replay resumes twice and gates skip on the revise
   let calls = 0;
   let omitRevisionCheckpoint = false;
   let executeBeforeApproval = false;
-  let staleMainValidation = false;
-  let mainValidationCommand = validationCommand;
+  let staleCoordinatorValidation = false;
+  let coordinatorValidationCommand = validationCommand;
   let resumedAgent = 'fixture-author';
-  let mainHandoffWriteAt = 0;
+  let coordinatorHandoffWriteAt = 0;
   let secondExchangeModel = 'claude-sonnet-5-5';
   async function invoke(args) {
     calls += 1;
@@ -402,9 +402,9 @@ test('deterministic checkpoint replay resumes twice and gates skip on the revise
           content: [
             {
               type: 'tool_use',
-              id: 'main-validation',
+              id: 'coordinator-validation',
               name: 'Bash',
-              input: { command: mainValidationCommand },
+              input: { command: coordinatorValidationCommand },
             },
           ],
         },
@@ -415,14 +415,14 @@ test('deterministic checkpoint replay resumes twice and gates skip on the revise
           content: [
             {
               type: 'tool_result',
-              tool_use_id: 'main-validation',
+              tool_use_id: 'coordinator-validation',
               is_error: false,
               content: 'completed',
             },
           ],
         },
       });
-      if (staleMainValidation && calls === 2)
+      if (staleCoordinatorValidation && calls === 2)
         records.splice(1, 0, ...records.splice(records.length - 2, 2));
       if (calls === 1 || !omitRevisionCheckpoint)
         records.push({
@@ -453,10 +453,10 @@ test('deterministic checkpoint replay resumes twice and gates skip on the revise
         },
       });
     }
-    if (calls === mainHandoffWriteAt) {
+    if (calls === coordinatorHandoffWriteAt) {
       const validationIndex = records.findIndex((record) =>
         record.message?.content?.some(
-          (block) => block.id === 'main-validation',
+          (block) => block.id === 'coordinator-validation',
         ),
       );
       records.splice(
@@ -468,7 +468,7 @@ test('deterministic checkpoint replay resumes twice and gates skip on the revise
             content: [
               {
                 type: 'tool_use',
-                id: 'main-handoff',
+                id: 'coordinator-handoff',
                 name: 'Write',
                 input: {
                   file_path: `.playwright-cli/testgen/${runId}/handoff.json`,
@@ -484,7 +484,7 @@ test('deterministic checkpoint replay resumes twice and gates skip on the revise
             content: [
               {
                 type: 'tool_result',
-                tool_use_id: 'main-handoff',
+                tool_use_id: 'coordinator-handoff',
                 is_error: false,
               },
             ],
@@ -515,7 +515,8 @@ test('deterministic checkpoint replay resumes twice and gates skip on the revise
   );
   assert.equal(context.result.cost_usd, 1.2000000000000002);
   assert.equal(
-    context.result.checkpoints[0].evidence.main_handoff_validation_failure,
+    context.result.checkpoints[0].evidence
+      .coordinator_handoff_validation_failure,
     null,
   );
   calls = 0;
@@ -535,17 +536,18 @@ test('deterministic checkpoint replay resumes twice and gates skip on the revise
   assert.equal(calls, 1);
   calls = 0;
   executeBeforeApproval = false;
-  staleMainValidation = true;
+  staleCoordinatorValidation = true;
   await assert.rejects(
     runCheckpoint(context, definition, invoke),
-    /main-handoff-validation-unverified/u,
+    /coordinator-handoff-validation-unverified/u,
   );
   assert.equal(calls, 2);
   assert.equal(
-    context.result.checkpoints.at(-1).evidence.main_handoff_validation_failure,
+    context.result.checkpoints.at(-1).evidence
+      .coordinator_handoff_validation_failure,
     'out-of-order',
   );
-  staleMainValidation = false;
+  staleCoordinatorValidation = false;
   for (const [command, failure] of [
     [
       `${validationCommand}; cat tests/notebook-details.spec.ts`,
@@ -554,19 +556,20 @@ test('deterministic checkpoint replay resumes twice and gates skip on the revise
     ['ls scripts/validate-testgen-artifact.cjs', 'not-observed'],
   ]) {
     calls = 0;
-    mainValidationCommand = command;
+    coordinatorValidationCommand = command;
     await assert.rejects(
       runCheckpoint(context, definition, invoke),
-      /main-handoff-validation-unverified/u,
+      /coordinator-handoff-validation-unverified/u,
     );
     assert.equal(calls, 1);
     assert.equal(
-      context.result.checkpoints[0].evidence.main_handoff_validation_failure,
+      context.result.checkpoints[0].evidence
+        .coordinator_handoff_validation_failure,
       failure,
     );
   }
   calls = 0;
-  mainValidationCommand = validationCommand;
+  coordinatorValidationCommand = validationCommand;
   resumedAgent = 'unknown-agent';
   await assert.rejects(
     runCheckpoint(context, definition, invoke),
@@ -574,16 +577,16 @@ test('deterministic checkpoint replay resumes twice and gates skip on the revise
   );
   assert.equal(calls, 2);
   resumedAgent = 'fixture-author';
-  for (mainHandoffWriteAt of [2, 3]) {
+  for (coordinatorHandoffWriteAt of [2, 3]) {
     calls = 0;
     await assert.rejects(
       runCheckpoint(context, definition, invoke),
       /checkpoint-role-boundary-violated/u,
     );
-    assert.equal(calls, mainHandoffWriteAt);
+    assert.equal(calls, coordinatorHandoffWriteAt);
   }
   calls = 0;
-  mainHandoffWriteAt = 0;
+  coordinatorHandoffWriteAt = 0;
   secondExchangeModel = 'claude-sonnet-5';
   await assert.rejects(
     runCheckpoint(context, definition, invoke),

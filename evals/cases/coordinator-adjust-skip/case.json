@@ -1,6 +1,6 @@
 {
   "schema_version": "installed-capability-case.v1",
-  "case_id": "main-adjust-skip",
+  "case_id": "coordinator-adjust-skip",
   "kind": "checkpoint",
   "target_id": "semantic-only",
   "target_path": "evals/targets/semantic-only/repository",
@@ -18,10 +18,10 @@
   "checkpoint": "adjust-then-skip",
   "planned_trials": 1,
   "retries": 0,
-  "evidence_level": "installed-main-checkpoint",
+  "evidence_level": "installed-coordinator-checkpoint",
   "max_exchanges": 3,
   "agent": {
-    "name": "main",
+    "name": "coordinator",
     "model": "claude-sonnet-5-5",
     "timeout_ms": 600000,
     "max_turns": 40,

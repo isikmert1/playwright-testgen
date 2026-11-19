@@ -107,7 +107,7 @@ function validateAuthorCollection(cwd, assignments, args, toolInput) {
 
   if (policy == null) {
     return deny(
-      "Author may only collect the exact policy-approved spec with --list and every Main-approved project or config option. Use Main's approved spec filter unchanged.",
+      "Author may only collect the exact policy-approved spec with --list and every Coordinator-approved project or config option. Use Coordinator's approved spec filter unchanged.",
     );
   }
 
@@ -295,7 +295,7 @@ function validateCommand(payload) {
   }
   if (payload.tool_input.dangerouslyDisableSandbox === true) {
     return deny(
-      'Governed Testgen commands must remain sandboxed. Retry without dangerouslyDisableSandbox or return the sandbox prerequisite to Main.',
+      'Governed Testgen commands must remain sandboxed. Retry without dangerouslyDisableSandbox or return the sandbox prerequisite to Coordinator.',
     );
   }
   if (

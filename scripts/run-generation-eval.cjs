@@ -73,7 +73,7 @@ function authorPrompt(definition, runtime) {
     `origin: ${runtime.origin}`,
     runtime.setup_facts == null
       ? 'The application, CLI browser, and runner browser are ready. No authentication is needed. No setup profile exists; discover locator conventions from the source as instructed. There are no existing Playwright tests in this target.'
-      : `The application, CLI browser, and runner browser are ready. No authentication is needed. Main validated its repository profile and supplied these navigation facts: ${JSON.stringify(runtime.setup_facts)}. The profile is Main-owned; use only the supplied facts.`,
+      : `The application, CLI browser, and runner browser are ready. No authentication is needed. Coordinator validated its repository profile and supplied these navigation facts: ${JSON.stringify(runtime.setup_facts)}. The profile is Coordinator-owned; use only the supplied facts.`,
     'Each Bash call starts at the repository root. Write and validate one candidate spec and its handoff, close your owned browser session, then stop before test execution. The human has not approved running the candidate.',
   ].join('\n');
 }
