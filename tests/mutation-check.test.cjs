@@ -134,7 +134,7 @@ function withRepository(callback) {
   try {
     callback(target);
   } finally {
-    rmSync(target.repository, { force: true, recursive: true });
+    rmSync(target.repository, { force: true, maxRetries: 3, recursive: true });
   }
 }
 
