@@ -281,5 +281,4 @@ and the [graded Healer result](../docs/validation/healer-defect-refusal-eval.md)
 
 Treat these as observations for the cases and profiles recorded. Reliability
 and comparative claims require matched tasks, equivalent budgets, and repeated
-trials that account for failures and incomplete attempts. See
-[the project's measurement criteria](../README.md#evidence-and-comparative-claims).
+trials that account for failures and incomplete attempts.

@@ -1,116 +1,65 @@
-# playwright-testgen
+<p align="center">
+  <picture>
+    <source media="(prefers-reduced-motion: reduce)" srcset=".claude-plugin/icon.png">
+    <img src="docs/images/mascot.gif" alt="Testgen mascot: a crab holding Playwright masks" width="160">
+  </picture>
+</p>
 
-> Status: in progress.
+<h1 align="center">Playwright Testgen</h1>
 
-Playwright Testgen is a Claude Code plugin that uses the
-[official Playwright CLI](https://github.com/microsoft/playwright-cli) to
-discover useful scenarios or turn one written scenario into a grounded,
-reviewable Playwright end-to-end test. It explores the running application
-before choosing locators, executes only after human approval, and repairs test
-problems without hiding product failures.
+<p align="center">Grounded Playwright tests. Human review before execution.</p>
 
-## Why Testgen
+<p align="center">
+  <a href="https://github.com/isikmert1/playwright-testgen/actions/workflows/ci.yml?query=branch%3Amain"><img src="https://github.com/isikmert1/playwright-testgen/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI on main"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="License: Apache-2.0"></a>
+  <a href="https://nodejs.org/"><img src="https://img.shields.io/badge/node-%3E%3D22.13-339933" alt="Node.js 22.13 or later"></a>
+</p>
 
-Generated tests can look convincing while using guessed selectors, checking
-the wrong outcome, or passing without exercising the behavior they claim to
-cover. Testgen separates authorship from execution and keeps browser evidence,
-written intent, and meaningful assertions connected throughout the run.
+Turn a written scenario into a reviewable Playwright end-to-end test, or discover
+scenarios worth covering. Testgen is a [Claude Code](https://code.claude.com/)
+plugin built on the [official Playwright CLI](https://github.com/microsoft/playwright-cli)
+for browser exploration. Your project's own Playwright runner executes the
+approved spec, using its existing configuration, fixtures, and test layout.
 
-## Evidence and comparative claims
+## What Testgen adds
 
-Testgen aims to reduce misleading green tests and repairs that hide product
-defects. Comparative gains in test quality, reliability, cost, or speed have
-not been established.
-
-Public comparisons will use matched tasks, pinned model and tool versions,
-equivalent resource budgets, clean target state, and repeated trials. Testgen
-will be compared against separate Claude Code workflows using the official
-Playwright CLI skill, Playwright's test agents, and Playwright MCP.
-
-We will measure:
-
-- Useful-test success: passing healthy behavior and detecting relevant seeded
-  defects, with independent assertion review.
-- Correct repairs and defect refusal, repeated-run stability, and unsafe changes.
-- Setup effort, actual human interventions, tokens, reported model cost, and
-  elapsed time, including cost and time per useful test.
-
-Reports must include failed and incomplete attempts, variation across trials,
-and grading and coverage limits. A green test alone does not establish useful
-coverage. See [Evaluations](evals/README.md) for current checks and evidence limits.
-
-## How it works
-
-1. Testgen checks the project's existing Playwright runtime and running app.
-2. When no scenario was supplied, Explorer performs bounded, read-only source,
-   test, history, and live-page discovery and offers up to five evidence-backed
-   proposals for human selection.
-3. Author grounds one selected or supplied scenario in source and the live UI,
-   writes one candidate spec, runs the project's lint or collection validation,
-   and stops without executing it.
-4. At a human checkpoint, the reviewer chooses whether to run, revise, or keep
-   the spec unverified.
-5. Healer runs only the approved spec, makes bounded evidence-backed test
-   repairs, preserves the approved criteria and assertions, and refuses to
-   rewrite them around product defects.
-6. When an approved adapter exists, the optional mutation check applies its
-   approved criterion-linked mutation in a disposable Git worktree and checks
-   that the test catches it. Missing coverage is reported as unverified, never silently
-   counted as success.
-
-Testgen follows the project's package manager, Playwright configuration,
-fixtures, test layout, and locator conventions. It does not replace or rewrite
-the project's Playwright configuration or CI. Its hooks constrain the delegated
-Explorer, Author, and Healer workflows; they are guardrails, not an
-operating-system sandbox.
-
-See [Architecture](docs/architecture.md) for component ownership, runtime
-boundaries, and artifact lifecycle.
-
-## Use
-
-- `/playwright-testgen:setup` checks and prepares the target repository; see
-  [Setup after installation](#setup-after-installation).
-- `/playwright-testgen:testgen` discovers scenarios, waits for one or more
-  selections, then processes them sequentially.
-- `/playwright-testgen:testgen "<scenario>"` skips discovery and starts from
-  that written intent.
-- A natural-language request may run Explorer, Author, or Healer alone. A
-  standalone Healer can repair one existing human-approved failing spec and
-  stops without starting generation or mutation verification.
-
-### Setup after installation
-
-From the repository you want to test, run `/playwright-testgen:setup` after
-installing the plugin. It selects one Playwright package and config (or
-configless mode), checks the local packages, global CLI, project-local CLI skill
-and browser, and explains missing prerequisites. When authentication matters,
-it checks for an existing fixture or state and can offer human-operated capture.
-Setup asks before installing anything, writing an ignore rule or profile, or
-capturing login state; it does not generate or run tests.
-
-Setup may create the optional, Git-ignored
-`.playwright-testgen/profile.v1.json` to reuse bounded repository facts. A
-missing or stale profile falls back to normal grounding. Run setup again when
-your Playwright or authentication setup changes. Generation still rechecks live
-application, browser, and authentication readiness for each run.
+- **Grounding and discovery.** Connect source, existing tests, and live UI to
+  proposed scenarios, locators, and assertions.
+- **Intent across handoffs.** Carry written criteria through validated handoffs
+  for the active scenario and approved spec.
+- **A review checkpoint.** Choose `run`, `adjust`, or `skip` for each candidate
+  before test execution.
+- **Scoped roles.** Separate discovery, writing, and execution, with tool access
+  by role and hook checks on run-specific paths, browser origins, and commands.
+- **Bounded repair.** Limit repair attempts, preserve approved intent, and report
+  product or environment problems separately from test defects.
+- **Optional mutation verification.** With a compatible adapter and separate
+  approval, apply a criterion-linked product change in a disposable Git worktree
+  and check whether the test catches it. Unavailable checks remain unverified.
 
 ## Prerequisites
 
-- Claude Code 2.1.295 or later so hook failures block the pending tool call.
-- Node.js 22.13 or later and npm available to Claude Code.
-- A project with local `playwright` and `@playwright/test` packages.
-- The official `@playwright/cli` installed globally, plus its skill
-  installed from that project:
+- Claude Code **2.1.295+** and Node.js **22.13+**, with npm available to Claude.
+- Git and an application repository with at least one commit.
+- Matching local `playwright` and `@playwright/test` packages in the target
+  project, plus the browser required by its Playwright configuration.
 
-  ```sh
-  npm install -g @playwright/cli@latest
-  playwright-cli install --skills
-  ```
+## Install
 
-  Setup checks the installed version and required capabilities before use.
+From the Git root of the application you want to test, install the official
+browser CLI and its project-local skill, then add Testgen's marketplace:
 
-### Native search tools
+```sh
+npm install -g @playwright/cli@latest
+playwright-cli install --skills
+claude plugin marketplace add isikmert1/playwright-testgen
+claude plugin install playwright-testgen@playwright-testgen
+```
+
+The plugin installs at user scope by default. See
+[Claude Code's installation guide](https://code.claude.com/docs/en/discover-plugins)
+for other scopes. Start a fresh Claude Code session from the application's Git
+root so Testgen's startup hook loads.
 
 On macOS, Linux, and WSL, start a dedicated Testgen session with its built-in
 tools explicitly enabled. These hosts omit native file search by default:
@@ -119,26 +68,116 @@ tools explicitly enabled. These hosts omit native file search by default:
 claude --tools Agent,AskUserQuestion,Bash,Edit,Glob,Grep,Read,SendMessage,Skill,TaskStop,Write
 ```
 
-## Local validation
+## Quick start
 
-```sh
-npm ci
-npm run check
-claude plugin validate .
+**1. Check your project.** In Claude Code, run:
+
+```text
+/playwright-testgen:setup
 ```
 
-Installed-agent evaluations consume Claude Code usage. See the
-[evaluation guide](evals/README.md) for commands, targets, grading, and cleanup.
-Historical results are in the [workflow validation](docs/validation/installed-workflow.md)
-and [Healer defect-refusal](docs/validation/healer-defect-refusal-eval.md) records.
+Setup selects the target Playwright package and configuration, checks runtime
+and browser prerequisites, and inspects existing test layout, fixtures, and
+locator conventions. It respects the project's package manager and asks when
+package or configuration choices are ambiguous. It asks before installing
+dependencies, saving a local profile, or capturing authentication. It does not
+generate or execute tests.
 
-## Local marketplace installation
+**2. Describe one scenario.** Start your app with its usual command and describe
+the behavior to check. Provide the app URL if it is not already clear from the
+selected configuration or your current session; Testgen asks when it needs one.
+For example, on a sign-in form:
 
-```sh
-claude plugin marketplace add ./
-claude plugin install playwright-testgen@playwright-testgen
+```text
+/playwright-testgen:testgen "Enter a valid synthetic password, clear and blur Username, and verify the required-field message and a disabled Sign In button."
 ```
+
+Testgen explores the relevant source and live UI, writes one candidate spec, and
+reports its lint or Playwright collection result for review.
+
+**3. Review the candidate.** At the checkpoint, choose:
+
+| Choice   | What happens                                                      |
+| -------- | ----------------------------------------------------------------- |
+| `run`    | Run the approved spec and diagnose failures with focused repairs. |
+| `adjust` | Return your feedback to Author and review the revised candidate.  |
+| `skip`   | Keep the generated spec without executing it; mark it unverified. |
+
+The `run` option requires validation to pass.
+
+## Usage
+
+### Discover scenarios
+
+If you are unsure what to test, run the command without a scenario:
+
+```text
+/playwright-testgen:testgen
+```
+
+Explorer uses source, existing tests, recent Git history, and the live UI to
+propose useful scenarios. Each proposal includes evidence for the expected
+behavior, source/test references, and any prerequisites or open questions.
+Review up to five proposals, edit or narrow them as needed, and select one or
+more. Testgen processes your selections one at a time, with a separate candidate
+review before each test can run.
+
+### Use a role on its own
+
+You can also make an explicit natural-language request in Claude Code:
+
+| Role     | Example request                                            |
+| -------- | ---------------------------------------------------------- |
+| Explorer | `Use Testgen Explorer to find account settings scenarios.` |
+| Author   | `Use Testgen Author to draft a display-name update test.`  |
+| Healer   | `Use Testgen Healer to repair tests/account.spec.ts.`      |
+
+Explorer returns proposals. Author returns an unexecuted candidate. Healer works
+on one existing failing spec after its intent and execution scope are approved.
+Each standalone request stops when that role's work is finished.
+
+## How it works
+
+```mermaid
+flowchart TD
+    A[Choose a scenario] --> B[Inspect source and app]
+    B --> C{Review candidate}
+    C -->|adjust| B
+    C -->|skip| D[Keep unverified]
+    C -->|run| E[Execute and diagnose]
+```
+
+Coordinator, the top-level Claude Code conversation, checks readiness and manages
+handoffs, approvals, and cleanup.
+Explorer proposes scenarios, Author writes the candidate, and Healer executes
+the approved spec. Product and environment failures are valid stopping outcomes;
+the workflow does not require every run to end with a passing test.
+
+## Project and authentication setup
+
+Setup can remember repository and testing facts locally; the saved profile does
+not store the app URL. Rerun setup when your Playwright or authentication setup
+changes. Generation still rechecks the running app and browsers for each scenario.
+
+For authenticated scenarios, Testgen can reuse a compatible project fixture or
+an approved storage-state file, or offer a browser where you sign in yourself.
+Authentication state stays outside model context. Human-assisted capture prepares
+local state; CI authentication needs a project-owned mechanism.
+
+Testgen works within the existing test setup. Generation does not install
+dependencies or rewrite Playwright configuration or CI. Its hooks constrain the
+delegated agents; they are guardrails, not an operating-system sandbox.
+
+## Contributing
+
+Reproducible real-project scenarios, small sample apps, and difficult generation
+or repair examples are welcome. Use public or permission-cleared code, synthetic
+data, and sanitized results. See [Contributing](CONTRIBUTING.md) for how to share
+an example, report a bug, or check a code change.
+
+See [Architecture](docs/architecture.md) for component ownership and runtime
+boundaries, and [Evaluations](evals/README.md) for installed-plugin checks.
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE).
+[Apache-2.0](LICENSE).
