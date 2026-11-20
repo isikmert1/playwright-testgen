@@ -340,7 +340,7 @@ function validateRoleArtifactWrite(payload, policies, absolute, canonical) {
       } catch (error) {
         if (error.code !== 'ENOENT') {
           return deny(
-            'The declared role-owned artifact could not be inspected. Return to Main to repair its draft.',
+            'The declared role-owned artifact could not be inspected. Return to Coordinator to repair its draft.',
           );
         }
       }
@@ -350,19 +350,19 @@ function validateRoleArtifactWrite(payload, policies, absolute, canonical) {
       ) {
         return deny(
           filename === 'healer-trace.json'
-            ? 'The declared healer-trace.json draft must be a regular file no larger than 64 KiB without symlinks or hardlinks. Return to Main to replace its invalid draft.'
-            : 'The declared handoff.json draft must be a regular file without symlinks or hardlinks. Return to Main to replace its invalid draft.',
+            ? 'The declared healer-trace.json draft must be a regular file no larger than 64 KiB without symlinks or hardlinks. Return to Coordinator to replace its invalid draft.'
+            : 'The declared handoff.json draft must be a regular file without symlinks or hardlinks. Return to Coordinator to replace its invalid draft.',
         );
       }
       if (filename === 'healer-trace.json') {
         if (artifactStats == null) {
           return deny(
-            'The declared healer-trace.json draft is unavailable. Return to Main instead of creating another trace path.',
+            'The declared healer-trace.json draft is unavailable. Return to Coordinator instead of creating another trace path.',
           );
         }
         if (artifactStats.size > 64 * 1024) {
           return deny(
-            'The declared healer-trace.json draft must be a regular file no larger than 64 KiB. Return to Main instead of reading or replacing it.',
+            'The declared healer-trace.json draft must be a regular file no larger than 64 KiB. Return to Coordinator instead of reading or replacing it.',
           );
         }
         if (payload.tool_name !== 'Write') {
@@ -420,7 +420,7 @@ function validateFileAccess(payload) {
 
   if (isRepositoryProfile(absolute, canonical)) {
     return deny(
-      'The repository profile is Main-owned navigation evidence; governed roles receive only relevant validated facts.',
+      'The repository profile is Coordinator-owned navigation evidence; governed roles receive only relevant validated facts.',
     );
   }
 
@@ -453,17 +453,17 @@ function validateFileAccess(payload) {
   const normalized = normalizePath(canonical);
   if (discovered.invalid) {
     return deny(
-      'A discovered Testgen run policy is invalid. Return to Main to repair or remove the invalid command-policy.json before governed access continues.',
+      'A discovered Testgen run policy is invalid. Return to Coordinator to repair or remove the invalid command-policy.json before governed access continues.',
     );
   }
   if (nearbyPolicies.length === 0) {
     return deny(
-      'No valid Testgen run policy authorizes this access. Return to Main so it can create command-policy.json before dispatching a governed agent.',
+      'No valid Testgen run policy authorizes this access. Return to Coordinator so it can create command-policy.json before dispatching a governed agent.',
     );
   }
   if (aliasesRepositoryProfile(nearbyPolicies, absolute, canonical)) {
     return deny(
-      'The repository profile is Main-owned navigation evidence; governed roles receive only relevant validated facts.',
+      'The repository profile is Coordinator-owned navigation evidence; governed roles receive only relevant validated facts.',
     );
   }
   if (
@@ -562,14 +562,14 @@ function validateFileAccess(payload) {
     );
   }
 
-  const mainOwnedFiles = [
+  const coordinatorOwnedFiles = [
     'command-policy.json',
     'change-manifest.json',
     'healer-input.json',
     'mutation-recovery.json',
     'vacuity-report.json',
   ];
-  const namesRunOwned = mainOwnedFiles.some(
+  const namesRunOwned = coordinatorOwnedFiles.some(
     (filename) =>
       (samePath(path.basename(lexical), filename) &&
         runIdFromOwnedPath(lexical) != null) ||
@@ -578,12 +578,12 @@ function validateFileAccess(payload) {
   );
   if (namesRunOwned) {
     return deny(
-      'This run artifact is Main-owned and immutable to Author and Healer. Return the update to Main instead of editing it.',
+      'This run artifact is Coordinator-owned and immutable to Author and Healer. Return the update to Coordinator instead of editing it.',
     );
   }
 
-  for (const filename of mainOwnedFiles) {
-    const aliasesMainOwned = generationPolicies.some((policy) => {
+  for (const filename of coordinatorOwnedFiles) {
+    const aliasesCoordinatorOwned = generationPolicies.some((policy) => {
       const expected = path.join(policy.runDirectory, filename);
       const canonicalExpected = path.join(
         policy.canonicalRunDirectory,
@@ -596,9 +596,9 @@ function validateFileAccess(payload) {
         sameFile(expected, canonical)
       );
     });
-    if (aliasesMainOwned) {
+    if (aliasesCoordinatorOwned) {
       return deny(
-        'This run artifact is Main-owned and immutable to Author and Healer. Return the update to Main instead of editing it.',
+        'This run artifact is Coordinator-owned and immutable to Author and Healer. Return the update to Coordinator instead of editing it.',
       );
     }
   }
@@ -621,7 +621,7 @@ function validateFileAccess(payload) {
   });
   if (!approved) {
     return deny(
-      'This mutation is outside the approved write paths. Edit or create only approved_spec or an exact existing helper/test-id path recorded by Main in allowed_write_paths.',
+      'This mutation is outside the approved write paths. Edit or create only approved_spec or an exact existing helper/test-id path recorded by Coordinator in allowed_write_paths.',
     );
   }
 
@@ -649,14 +649,14 @@ function validateGrepAccess(payload) {
 
   if (isRepositoryProfile(absolute, canonical)) {
     return deny(
-      'The repository profile is Main-owned navigation evidence; governed roles receive only relevant validated facts.',
+      'The repository profile is Coordinator-owned navigation evidence; governed roles receive only relevant validated facts.',
     );
   }
 
   const discovered = policiesNear(payload.cwd, absolute, canonical);
   if (discovered.invalid) {
     return deny(
-      'A discovered Testgen run policy is invalid. Return to Main to repair or remove the invalid command-policy.json before governed access continues.',
+      'A discovered Testgen run policy is invalid. Return to Coordinator to repair or remove the invalid command-policy.json before governed access continues.',
     );
   }
   const policies = discovered.policies.filter(
@@ -685,7 +685,7 @@ function validateGrepAccess(payload) {
       ))
   ) {
     return deny(
-      'The repository profile is Main-owned navigation evidence; scope search away from it.',
+      'The repository profile is Coordinator-owned navigation evidence; scope search away from it.',
     );
   }
   const linkedStateCouldBeInSearch =
@@ -791,7 +791,7 @@ function validateGlobAccess(payload) {
   const discovered = policiesNear(payload.cwd, absolute, canonical);
   if (discovered.invalid) {
     return deny(
-      'A discovered Testgen run policy is invalid. Return to Main to repair or remove the invalid command-policy.json before governed access continues.',
+      'A discovered Testgen run policy is invalid. Return to Coordinator to repair or remove the invalid command-policy.json before governed access continues.',
     );
   }
   const matches = discovered.policies.filter(
@@ -806,7 +806,7 @@ function validateGlobAccess(payload) {
     searchIncludesRepositoryProfile(policy, absolute, canonical)
   ) {
     return deny(
-      'The repository profile is Main-owned navigation evidence; scope search away from it.',
+      'The repository profile is Coordinator-owned navigation evidence; scope search away from it.',
     );
   }
   const linkedStateCouldBeInSearch = discovered.policies.some((candidate) =>

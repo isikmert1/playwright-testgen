@@ -41,7 +41,7 @@ Never skip a stronger verified rung because a weaker selector is shorter.
 
 A profile-backed convention comes only from an actual repository `/setup`
 profile.
-Evaluation metadata and Main's source guess are not profile input. Without a
+Evaluation metadata and Coordinator's source guess are not profile input. Without a
 profile, Author uses the native `Grep` tool for up to four count-only scans,
 one exact attribute spelling per call: `data-testid`, `data-test`, `data-cy`,
 and `test-id`. Search only bounded application-source, test, and selected
@@ -63,7 +63,7 @@ No conclusive result is valid: skip rung 3 and continue to scoped CSS. Never
 invent a convention.
 
 Adding a test-id to product source is allowed only when the repository already
-uses that convention, only within the feature under test, and Main pre-approved
+uses that convention, only within the feature under test, and Coordinator pre-approved
 the exact existing source file in `allowed_write_paths`. Report the source edit
 explicitly; it is never the default response to ambiguity. A path discovered
 after dispatch requires approval and redispatch.

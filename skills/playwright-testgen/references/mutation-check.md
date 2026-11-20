@@ -9,7 +9,7 @@ permission to invent a mutation.
 
 - [Adapter contract](#adapter-contract)
 - [Approval](#approval)
-- [Main-owned bookkeeping](#main-owned-bookkeeping)
+- [Coordinator-owned bookkeeping](#coordinator-owned-bookkeeping)
 - [Verification](#verification)
 - [Results](#results)
 - [Vacuity report](#vacuity-report)
@@ -59,7 +59,7 @@ remain visible when cleanup fails after execution.
 
 ## Approval
 
-Only ask when Main has identified one exact prepared adapter entry for the
+Only ask when Coordinator has identified one exact prepared adapter entry for the
 required criterion. With no prepared adapter, do not ask this question or show
 patch/digest instructions; continue in no-adapter mode.
 
@@ -102,9 +102,9 @@ approval. Obtain approval before the pre-Author boundary and Author delegation;
 a later approval requires a new run. A controlled fixture harness may instead
 provide a separately pinned digest.
 
-## Main-owned bookkeeping
+## Coordinator-owned bookkeeping
 
-When Main has a controlled fixture or an explicitly approved mutation entry,
+When Coordinator has a controlled fixture or an explicitly approved mutation entry,
 it creates `change-manifest.v1` at
 `.playwright-cli/testgen/<run_id>/change-manifest.json`. This transient artifact
 records `HEAD` plus sorted repository-relative paths, state kinds, and SHA-256
@@ -129,7 +129,7 @@ verification, then remove it with run scratch under `cleanup-contract.md`.
 
 ## Verification
 
-After Healer stops, Main runs verification only for a schema-valid `fixed`
+After Healer stops, Coordinator runs verification only for a schema-valid `fixed`
 pipeline trace and a criterion retained in the validated Healer input. The
 validated Author handoff remains required for Author change attribution. With
 an approved adapter, run this after all three change-manifest boundaries are
@@ -177,7 +177,7 @@ unrelated pre-existing dirty content. It then:
    termination before removing the worktree, then rechecks the active checkout
    and its `HEAD`.
 
-Before execution, the checker reserves Main-owned `mutation-recovery.json` with
+Before execution, the checker reserves Coordinator-owned `mutation-recovery.json` with
 the exact temporary root and worktree paths. An existing record blocks another
 verification. Successful cleanup removes the reservation; failed cleanup keeps
 it for supervised recovery under `cleanup-contract.md` while preserving the
@@ -208,7 +208,7 @@ An unrelated red mutant is `verification-error`, never `killed`.
 
 ## Vacuity report
 
-Main alone writes `.playwright-cli/testgen/<run_id>/vacuity-report.json` after a
+Coordinator alone writes `.playwright-cli/testgen/<run_id>/vacuity-report.json` after a
 validated `fixed` trace. Read
 `schemas/vacuity-report.v1.schema.json` under that resource root when writing it.
 It binds the approved spec to separate product-mutation and assertion-sensitivity

@@ -5,7 +5,7 @@ const path = require('node:path');
 const cases = {
   'healer-defect-refusal': 'semantic-order-not-inserted',
   discovery: 'discovery-covered-and-unsupported',
-  checkpoint: 'main-adjust-skip',
+  checkpoint: 'coordinator-adjust-skip',
 };
 const failureReasons = new Set([
   'adjustment-already-satisfied',
@@ -54,7 +54,7 @@ const failureReasons = new Set([
   'host-time-limit-unverified',
   'internal-error',
   'lifecycle-command-timeout',
-  'main-handoff-validation-unverified',
+  'coordinator-handoff-validation-unverified',
   'process-tree-cleanup-failed',
   'repository-state-changed',
   'skip-disposition-unverified',
@@ -152,8 +152,8 @@ const summary = {
     result?.checkpoint_stage,
     /^(?:initial|adjust|skip)$/u,
   ),
-  main_handoff_validation_failure: text(
-    latestCheckpoint?.evidence?.main_handoff_validation_failure,
+  coordinator_handoff_validation_failure: text(
+    latestCheckpoint?.evidence?.coordinator_handoff_validation_failure,
     /^(?:not-observed|tool-result-unverified|out-of-order|shell-operators|unsupported-launcher|identity-mismatch)$/u,
   ),
   cost_usd: number(runtime?.total_cost_usd ?? runtime?.cost_usd),

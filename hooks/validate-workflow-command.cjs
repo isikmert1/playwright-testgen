@@ -84,7 +84,7 @@ function requirePolicy(cwd, runId, kind = 'generation') {
   if (policy?.kind === kind) return { policy };
   return {
     result: deny(
-      'Run policy is missing or invalid. Return to Main so it can create the run-owned command-policy.json with the supplied target origin.',
+      'Run policy is missing or invalid. Return to Coordinator so it can create the run-owned command-policy.json with the supplied target origin.',
     ),
   };
 }
@@ -125,7 +125,7 @@ function validateNavigation(subcommand, args, policy) {
   if (subcommand === 'goto') {
     if (args.length !== 1) {
       return deny(
-        'goto requires one approved absolute URL. Use the target URL supplied by Main.',
+        'goto requires one approved absolute URL. Use the target URL supplied by Coordinator.',
       );
     }
     [target] = args;
@@ -248,7 +248,7 @@ function validateCliArguments({
       )
     ) {
       return deny(
-        "state-load requires one exact Main-approved state path inside the repository. Ask Main to add the existing run-relative path to allowed_state_paths, or use the repository's normal unauthenticated setup.",
+        "state-load requires one exact Coordinator-approved state path inside the repository. Ask Coordinator to add the existing run-relative path to allowed_state_paths, or use the repository's normal unauthenticated setup.",
       );
     }
   }
@@ -264,7 +264,7 @@ function validateCli(cwd, assignments, rawArgs, agentType) {
   ) {
     if (explorer) {
       return deny(
-        "Explorer uses Main's passed runtime-preflight result and does not repeat CLI checks.",
+        "Explorer uses Coordinator's passed runtime-preflight result and does not repeat CLI checks.",
       );
     }
     if (assignments.length !== 0) {
@@ -339,7 +339,7 @@ function validateCli(cwd, assignments, rawArgs, agentType) {
   }
   if (existsSync(path.join(cwd, '.playwright', 'cli.config.json'))) {
     return deny(
-      'The isolated run directory contains a Playwright CLI config. Return to Main to remove that run-owned config before browser work; never load repository or user CLI configuration implicitly.',
+      'The isolated run directory contains a Playwright CLI config. Return to Coordinator to remove that run-owned config before browser work; never load repository or user CLI configuration implicitly.',
     );
   }
 
@@ -374,7 +374,7 @@ function validateCli(cwd, assignments, rawArgs, agentType) {
     !loaded.policy.allowedBrowserActions.includes(subcommand)
   ) {
     return deny(
-      'Explorer browser actions default to navigation and inspection. This state-changing command requires Main to record the human-approved action in allowed_browser_actions.',
+      'Explorer browser actions default to navigation and inspection. This state-changing command requires Coordinator to record the human-approved action in allowed_browser_actions.',
     );
   }
 
@@ -486,7 +486,7 @@ function validatePlaywright(cwd, assignments, args, toolInput) {
   const spec = args[1];
   if (spec == null || spec.startsWith('-')) {
     return deny(
-      "The runner requires the exact approved spec filter. Use Main's anchored filter before the attempt flags.",
+      "The runner requires the exact approved spec filter. Use Coordinator's anchored filter before the attempt flags.",
     );
   }
   if (spec !== loaded.policy.approvedSpecFilter) {
@@ -497,12 +497,12 @@ function validatePlaywright(cwd, assignments, args, toolInput) {
   try {
     if (!statSync(loaded.policy.approvedSpec).isFile()) {
       return deny(
-        'The approved runner target must be one existing spec file. Return to Main if the reviewed spec path is missing or names a directory.',
+        'The approved runner target must be one existing spec file. Return to Coordinator if the reviewed spec path is missing or names a directory.',
       );
     }
   } catch {
     return deny(
-      'The approved runner target must be one existing spec file. Return to Main if the reviewed spec path is missing or names a directory.',
+      'The approved runner target must be one existing spec file. Return to Coordinator if the reviewed spec path is missing or names a directory.',
     );
   }
   if (args.slice(2).some((value) => !value.startsWith('-'))) {
@@ -529,7 +529,7 @@ function validatePlaywright(cwd, assignments, args, toolInput) {
     )
   ) {
     return deny(
-      'The runner must include every required project/config option recorded by Main exactly once, plus only the attempt flags and optional --debug=cli.',
+      'The runner must include every required project/config option recorded by Coordinator exactly once, plus only the attempt flags and optional --debug=cli.',
     );
   }
 
@@ -683,12 +683,12 @@ function validateCleanup(cwd, args, agentType = '') {
       : normalizePath(path.relative(loaded.policy.runDirectory, target));
   if (relative === '') {
     return deny(
-      'The full run directory is Main-owned. Remove only the generated exploration or attempt child; Main removes the full run directory after the result is accepted.',
+      'The full run directory is Coordinator-owned. Remove only the generated exploration or attempt child; Coordinator removes the full run directory after the result is accepted.',
     );
   }
   if (explorer && relative !== '.playwright-cli') {
     return deny(
-      'Explorer cleanup may remove only its generated .playwright-cli browser scratch. Main owns the discovery run directory.',
+      'Explorer cleanup may remove only its generated .playwright-cli browser scratch. Coordinator owns the discovery run directory.',
     );
   }
   if (

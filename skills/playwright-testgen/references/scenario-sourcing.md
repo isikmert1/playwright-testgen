@@ -11,7 +11,7 @@ one-scenario ordered flow in `pipeline.md`.
 
 ## Discovery
 
-When Main coordinates Explorer in the full pipeline or through an explicit
+When Coordinator coordinates Explorer in the full pipeline or through an explicit
 standalone request, it first completes runtime and application/browser
 readiness checks, creates a discovery ID with the normal run-ID script, and
 writes `.playwright-cli/testgen/<discovery_id>/command-policy.json` with only:
@@ -43,7 +43,7 @@ scope and reset or cleanup method. It may then contain only the action names
 root. Explorer source reads, bounded searches, and history start from that exact
 package; `.` means the root package.
 
-Main delegates `playwright-testgen:playwright-test-explorer` with the passed
+Coordinator delegates `playwright-testgen:playwright-test-explorer` with the passed
 preflight fact, discovery ID, repository root, selected package/config mode,
 relevant fresh profile facts, approved origin, application and
 exploration-browser readiness, auth/data facts, exact approved state paths, and
@@ -53,7 +53,7 @@ answers, seeded bugs, mutation metadata, or expected classifications.
 
 Explorer reads at most ten source/test files or works for 90 seconds, reads no
 more than the latest twenty commits, and returns at most five proposals plus its
-inspected scope and limits. Main rejects output that exceeds those bounds or
+inspected scope and limits. Coordinator rejects output that exceeds those bounds or
 omits a proposal's local ID, route, user goal, observable criteria, source/test
 references, labeled expected-behavior evidence, coverage status, priority
 reason, or auth/data prerequisites and unresolved questions. Coverage status is
@@ -63,7 +63,7 @@ intended-behavior evidence; source counts for intent only when it explicitly
 states a product rule or contract. `no supported proposal` is valid when the
 evidence cannot support a gap or recent meaningful UI change.
 
-Main accepts proposals only for uncovered in-scope outcomes with intended-behavior
+Coordinator accepts proposals only for uncovered in-scope outcomes with intended-behavior
 evidence, including existing behavioral assertions. Covered outcomes and
 unconfirmed intent belong in the scope summary. Reject proposals that add
 criteria outside the human's scope.
@@ -72,15 +72,15 @@ The time and cumulative-Read limits are agent-enforced. Hooks
 bound individual operations but do not count elapsed time or total reads.
 
 The result is transient untrusted proposal text, not a persisted artifact or an
-Author assignment. The human may select, edit, reject, or narrow it. Main closes
+Author assignment. The human may select, edit, reject, or narrow it. Coordinator closes
 Explorer's scope and removes the exact discovery directory under
 `cleanup-contract.md`; a cleanup failure stops this route. In the full pipeline,
-Main creates a fresh generation run only after one or more scenario intents are
+Coordinator creates a fresh generation run only after one or more scenario intents are
 approved. Selection never approves a spec path, execution, or mutation.
 Standalone Explorer validates and reports the proposals, performs discovery
 cleanup, and stops before scenario selection.
 
-When presenting valid proposals, Main shows each complete compact proposal,
+When presenting valid proposals, Coordinator shows each complete compact proposal,
 including its source/test references, expected-behavior evidence label, coverage,
 and prerequisites or questions. Do not replace them with a title-only or lossy
 summary. Explorer's observed test-id convention is reporting evidence only; it
@@ -92,12 +92,12 @@ unverified.
 
 ## Sequential queue
 
-When the human selects multiple Explorer proposals, Main keeps their order in a
+When the human selects multiple Explorer proposals, Coordinator keeps their order in a
 transient queue around the existing one-scenario flow. It does not create a
 scheduler, run Authors or Healers in parallel, or share a mutable run policy.
 Only one scenario is active at a time.
 
-Before Author writes anything, Main compares the selected proposal IDs and
+Before Author writes anything, Coordinator compares the selected proposal IDs and
 intents for duplicate scenarios, proposes every spec path using the detected
 Playwright layout (or a descriptive TypeScript layout when none exists), and
 resolves path collisions with existing files and other queued items. Never

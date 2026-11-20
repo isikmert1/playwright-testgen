@@ -26,10 +26,13 @@ const { parse: parseShell } = require('shell-quote');
 const { loadPolicy } = require('../hooks/run-policy.cjs');
 
 const root = path.resolve(__dirname, '..');
-const casePath = path.join(root, 'evals/cases/main-adjust-skip/case.json');
+const casePath = path.join(
+  root,
+  'evals/cases/coordinator-adjust-skip/case.json',
+);
 const resultsRoot = path.join(
   root,
-  'evals/capabilities/results/main-adjust-skip',
+  'evals/capabilities/results/coordinator-adjust-skip',
 );
 
 function sha256(value) {
@@ -313,15 +316,15 @@ function gradeCheckpoint(definition, snapshot, evidence, previous = null) {
       'mutation_attempts',
       'healer_delegations',
       'explorer_delegations',
-      'main_spec_writes',
-      'main_handoff_writes',
+      'coordinator_spec_writes',
+      'coordinator_handoff_writes',
     ].some((field) => evidence[field] !== 0)
   )
     throw new Error('checkpoint-role-boundary-violated');
   if (evidence.checkpoint_presented !== true)
     throw new Error('checkpoint-not-presented');
-  if (evidence.main_handoff_validations < 1)
-    throw new Error('main-handoff-validation-unverified');
+  if (evidence.coordinator_handoff_validations < 1)
+    throw new Error('coordinator-handoff-validation-unverified');
   if (
     evidence.author_delegations !== 1 ||
     evidence.author_spec_writes < 1 ||
@@ -520,7 +523,7 @@ function checkpointEvidence(
     .join('\n');
   const validatorScript =
     /(?:^|[\\/])scripts[\\/]validate-testgen-artifact\.cjs$/u;
-  let mainValidationFailure = 'not-observed';
+  let coordinatorValidationFailure = 'not-observed';
   const validation = commands.filter((block) => {
     const reject = (reason) => {
       if (
@@ -537,7 +540,7 @@ function checkpointEvidence(
           /(?:^|[\\/])node(?:\.exe)?$/u.test(invocation[0] ?? '') &&
           validatorScript.test(invocation[1] ?? '')
         )
-          mainValidationFailure = reason;
+          coordinatorValidationFailure = reason;
       }
       return false;
     };
@@ -562,7 +565,7 @@ function checkpointEvidence(
       return reject('identity-mismatch');
     return true;
   });
-  const mainValidations = validation.filter(
+  const coordinatorValidations = validation.filter(
     (block) => block.parent_tool_use_id == null,
   ).length;
   const browserCommand = (block, action) =>
@@ -584,12 +587,13 @@ function checkpointEvidence(
     author_handoff_writes: handoffWrites.filter(
       (block) => owned(block) && completed(block),
     ).length,
-    main_spec_writes: specWrites.filter((block) => !owned(block)).length,
-    main_handoff_writes: handoffWrites.filter((block) => !owned(block)).length,
+    coordinator_spec_writes: specWrites.filter((block) => !owned(block)).length,
+    coordinator_handoff_writes: handoffWrites.filter((block) => !owned(block))
+      .length,
     handoff_validations: validation.length,
-    main_handoff_validations: mainValidations,
-    main_handoff_validation_failure:
-      mainValidations > 0 ? null : mainValidationFailure,
+    coordinator_handoff_validations: coordinatorValidations,
+    coordinator_handoff_validation_failure:
+      coordinatorValidations > 0 ? null : coordinatorValidationFailure,
     author_handoff_validations: validation.filter(owned).length,
     browser_sessions_opened: commands.filter((block) =>
       browserCommand(block, 'open'),
@@ -679,7 +683,7 @@ async function checkpointSnapshot(definition, context, runId = null) {
 function initialPrompt(definition, context) {
   return [
     `/playwright-testgen:testgen ${definition.scenario}`,
-    `Use the installed Main pipeline in this disposable repository: ${context.state.repository}.`,
+    `Use the installed Coordinator pipeline in this disposable repository: ${context.state.repository}.`,
     `Selected package: .; selected config: playwright.config.cjs; approved origin: ${context.origin ?? 'http://127.0.0.1:4173'}.`,
     'The application, Playwright CLI exploration browser, and configured repository runner browser have fresh evaluator readiness checks. No authentication is needed. Use the installed runtime preflight normally.',
     `Use scenario_ref: ${definition.scenario_ref}; proposed spec path: ${definition.spec_path}.`,
@@ -867,8 +871,8 @@ async function runCheckpoint(
         'mutation_attempts',
         'healer_delegations',
         'explorer_delegations',
-        'main_spec_writes',
-        'main_handoff_writes',
+        'coordinator_spec_writes',
+        'coordinator_handoff_writes',
         'author_delegations',
       ].some((field) => finalEvidence[field] !== 0)
     )
@@ -968,7 +972,7 @@ async function main() {
         role: 'playwright-test-author',
         datasetDigest: () => {
           const files = [
-            'evals/cases/main-adjust-skip/case.json',
+            'evals/cases/coordinator-adjust-skip/case.json',
             'scripts/run-checkpoint-eval.cjs',
             'scripts/run-generation-eval.cjs',
             'scripts/eval/installed-case.cjs',

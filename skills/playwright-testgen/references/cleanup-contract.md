@@ -15,22 +15,22 @@ resource when it is created so each exit can release only run-owned resources.
 - Use a named Playwright CLI session derived from the supplied `run_id` when
   the workflow opens the session: the Author session is exactly `-s=<run_id>`.
   Explorer similarly owns exactly `-s=<discovery_id>` and closes it before
-  Main removes the discovery directory.
+  Coordinator removes the discovery directory.
   For `--debug=cli`, attach only to the exact runner-emitted session and
   associate that session with the `run_id`; never derive or rename its
   identifier.
-- Main writes the transient `command-policy.json` defined by `pipeline.md`
+- Coordinator writes the transient `command-policy.json` defined by `pipeline.md`
   inside the run directory before Author starts. Keep it until the run exits
   so the shared PreToolUse hook can bind commands and navigation to that run.
-- When mutation verification is available, Main also owns the transient
+- When mutation verification is available, Coordinator also owns the transient
   `change-manifest.json` defined by `mutation-check.md`. Retain it through
   the post-Healer mutation check so the active checkout and disposable checkout
   can be compared without storing file content.
-- Main owns `vacuity-report.json`. Write and validate it only when a fixed
+- Coordinator owns `vacuity-report.json`. Write and validate it only when a fixed
   result reaches the post-Healer vacuity gate, retain it until its disposition
   is accepted, then remove it with the run directory.
 - Before disposable-worktree execution, the mutation checker reserves
-  Main-owned `mutation-recovery.json` with only the exact temporary root and
+  Coordinator-owned `mutation-recovery.json` with only the exact temporary root and
   worktree paths needed for supervised recovery. An existing record blocks
   another verification. Successful cleanup removes it; failed cleanup keeps it
   without replacing the primary verification error. It is transient run state,
@@ -84,7 +84,7 @@ durable files. From the repository, the bounded command is
 `rm -rf -- .playwright-cli/testgen/<run-id>`; do not omit the run ID or replace
 the path with a glob. `.playwright-cli/testgen/findings.md` is a durable sibling
 of run directories and cleanup preserves it on every path. Full run-directory
-removal belongs to Main after the result is accepted. Governed agents may remove
+removal belongs to Coordinator after the result is accepted. Governed agents may remove
 only the generated children described below.
 
 Setup-owned `.playwright-testgen/profile.v1.json` and every explicitly approved
@@ -116,7 +116,7 @@ Remove them after the final disposition has been reported and accepted.
 
 - **Explorer returns, blocks, errors, or exhausts its budget** — Close the exact
   Explorer session, remove only its generated `.playwright-cli` child, and let
-  Main remove the exact discovery directory. No Explorer proposal artifact is
+  Coordinator remove the exact discovery directory. No Explorer proposal artifact is
   retained.
 - **Author reaches checkpoint** — Close Author's CLI session, remove raw
   exploration evidence, and retain the validated handoff.
@@ -141,6 +141,6 @@ Remove them after the final disposition has been reported and accepted.
 
 A cleanup failure is reported separately with the exact owned resource still
 present. It never changes the test failure's classification or authorizes broad
-deletion. Main may use `mutation-recovery.json` for a supervised exact-path
+deletion. Coordinator may use `mutation-recovery.json` for a supervised exact-path
 cleanup. After confirming both recorded paths and the Git worktree registration
 are gone, remove that record before any new verification attempt.

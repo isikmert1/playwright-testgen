@@ -134,7 +134,7 @@ function withRepository(callback) {
   try {
     callback(target);
   } finally {
-    rmSync(target.repository, { force: true, recursive: true });
+    rmSync(target.repository, { force: true, maxRetries: 3, recursive: true });
   }
 }
 
@@ -184,7 +184,7 @@ function passingTrace() {
     repairs: [],
     final_classification: null,
     disposition: 'fixed',
-    next_owner: 'main',
+    next_owner: 'coordinator',
     escalation: null,
     cleanup: {
       runner: 'not-started',

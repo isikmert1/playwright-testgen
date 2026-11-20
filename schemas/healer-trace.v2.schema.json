@@ -174,7 +174,9 @@
         "unresolved-after-healing"
       ]
     },
-    "next_owner": { "enum": ["main", "human", "author", "product-owner"] },
+    "next_owner": {
+      "enum": ["coordinator", "human", "author", "product-owner"]
+    },
     "escalation": { "type": ["string", "null"], "maxLength": 200 },
     "cleanup": {
       "type": "object",

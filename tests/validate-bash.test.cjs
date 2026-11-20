@@ -179,7 +179,7 @@ test('fails closed when the hook runtime cannot load', () => {
     assert.ok(Buffer.byteLength(result.stderr, 'utf8') < 512);
     assert.ok(Date.now() - started < 4000);
 
-    const mainResult = spawnSync(process.execPath, [temporaryHook], {
+    const coordinatorResult = spawnSync(process.execPath, [temporaryHook], {
       cwd: temporaryRoot,
       encoding: 'utf8',
       input: JSON.stringify({
@@ -189,8 +189,8 @@ test('fails closed when the hook runtime cannot load', () => {
         tool_name: 'Bash',
       }),
     });
-    assert.equal(mainResult.status, 0, mainResult.stderr);
-    assert.deepEqual(JSON.parse(mainResult.stdout), {});
+    assert.equal(coordinatorResult.status, 0, coordinatorResult.stderr);
+    assert.deepEqual(JSON.parse(coordinatorResult.stdout), {});
   } finally {
     rmSync(temporaryRoot, { force: true, recursive: true });
   }
@@ -738,7 +738,7 @@ test('binds each agent role to its owned Playwright CLI session', () => {
   });
 });
 
-test('binds storage state to an exact Main-approved repository path', () => {
+test('binds storage state to an exact Coordinator-approved repository path', () => {
   withTargetRepository(({ runDirectory, targetRepository }) => {
     const stateDirectory = path.join(targetRepository, 'playwright', '.auth');
     const statePath = path.join(stateDirectory, 'user.json');
@@ -886,7 +886,7 @@ test('requires an anchored filter for the exact approved spec', () => {
   });
 });
 
-test('requires every runner option selected by Main', () => {
+test('requires every runner option selected by Coordinator', () => {
   withTargetRepository(({ runDirectory, targetRepository }) => {
     updatePolicy(runDirectory, {
       allowed_runner_options: [
@@ -1137,14 +1137,14 @@ test('allows trace inspection for the current run', () => {
   });
 });
 
-test('reserves full run removal for Main', () => {
+test('reserves full run removal for Coordinator', () => {
   withTargetRepository(({ targetRepository }) => {
     const exactRun = `.playwright-cli/testgen/${runId}`;
     const exact = runHook(targetRepository, `rm -rf -- ${exactRun}`);
     assert.equal(exact.permissionDecision, 'deny');
     assert.match(
       exact.permissionDecisionReason,
-      /Main removes the full run directory/iu,
+      /Coordinator removes the full run directory/iu,
     );
 
     const parent = runHook(
@@ -1188,12 +1188,12 @@ test('denies agent edits to the run command policy', () => {
     assert.equal(result.permissionDecision, 'deny');
     assert.match(
       result.permissionDecisionReason,
-      /return the update to Main/iu,
+      /return the update to Coordinator/iu,
     );
   });
 });
 
-test('denies governed agents from writing Main-owned result files', () => {
+test('denies governed agents from writing Coordinator-owned result files', () => {
   withTargetRepository(({ runDirectory, targetRepository }) => {
     for (const filename of ['mutation-recovery.json', 'vacuity-report.json']) {
       const reportPath = path.join(runDirectory, filename);
@@ -1210,7 +1210,7 @@ test('denies governed agents from writing Main-owned result files', () => {
         );
 
         assert.equal(result.permissionDecision, 'deny');
-        assert.match(result.permissionDecisionReason, /Main-owned/iu);
+        assert.match(result.permissionDecisionReason, /Coordinator-owned/iu);
       }
     }
   });
@@ -1333,7 +1333,7 @@ test('keeps credential hardlinks opaque without blocking regular auth source', (
   });
 });
 
-test('keeps the Main-owned repository profile opaque and immutable', () => {
+test('keeps the Coordinator-owned repository profile opaque and immutable', () => {
   withTargetRepository(({ targetRepository }) => {
     const profilePath = path.join(
       targetRepository,
@@ -1351,7 +1351,10 @@ test('keeps the Main-owned repository profile opaque and immutable', () => {
     ]) {
       const result = runToolHook(targetRepository, tool, input);
       assert.equal(result.permissionDecision, 'deny');
-      assert.match(result.permissionDecisionReason, /profile.*Main-owned/iu);
+      assert.match(
+        result.permissionDecisionReason,
+        /profile.*Coordinator-owned/iu,
+      );
     }
   });
 });

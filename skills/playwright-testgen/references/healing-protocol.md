@@ -1,7 +1,7 @@
 # Healing protocol
 
 Healer runs only after the human chooses `run`. It starts from clean context and
-reads the approved spec and validated Main-owned `healer-input.json`, not an
+reads the approved spec and validated Coordinator-owned `healer-input.json`, not an
 Author reasoning transcript. The same normalized input supports pipeline and
 standalone runs.
 
@@ -21,7 +21,7 @@ standalone runs.
   must have been validated before dispatch; later approved repairs do not erase
   that provenance. Unknown project, auth, or
   environment choices remain unknown and route to the human.
-- When Main reports `runtime preflight: passed`, do not repeat it. Use supplied
+- When Coordinator reports `runtime preflight: passed`, do not repeat it. Use supplied
   runner and application facts until current failure evidence contradicts one;
   do not probe dependency availability or inspect inactive fixture variants,
   mutation patches, or adapters.
@@ -41,14 +41,14 @@ Bash starts at the repository root: for a nested package use the validated
 PLAYWRIGHT_HTML_OPEN=never npx --no playwright test <approved-spec-filter-argument> --retries=0 --repeat-each=1 --output=<attempt-results-dir>
 ```
 
-Main supplies `<approved-spec-filter-argument>` as the shell-safe output of
+Coordinator supplies `<approved-spec-filter-argument>` as the shell-safe output of
 `print-approved-spec-filter.cjs`. Use it unchanged and do not add quotes, derive
 another filter, or add a title `--grep`. Resolve `<attempt-results-dir>`
 relative to the selected package so it names the current attempt under the
 repository-owned run directory. Do not enter the run directory to execute a
 test. A hook rejection
 before the runner process starts does not consume or reserve an attempt.
-Include every project/config option recorded by Main. Record this first attempt
+Include every project/config option recorded by Coordinator. Record this first attempt
 as `verification-run`. If it passes before any repair or debug run, report
 `fixed` without running it again.
 
@@ -89,7 +89,7 @@ diagnostic attempt:
    `PWTEST_CLI_GLOBAL_CONFIG=.` on every CLI command and never create a CLI
    config there; this suppresses automatic home/repository config-file loading.
    The hook also rejects inherited `PLAYWRIGHT_MCP_*` configuration and
-   `PLAYWRIGHT_CLI_SESSION`; return that prerequisite to Main rather than
+   `PLAYWRIGHT_CLI_SESSION`; return that prerequisite to Coordinator rather than
    working around it. Select the emitted session with `-s=<emitted-session>` on
    every inspection command; never rely on the default session. After every
    action that can navigate, verify the
@@ -121,7 +121,7 @@ diagnostic attempt:
    cd <validated-run-directory> && npx --no playwright trace close
    ```
 
-   Main supplies `<supplied-snapshot-option>` as exactly `--name` or `--phase`
+   Coordinator supplies `<supplied-snapshot-option>` as exactly `--name` or `--phase`
    from runtime preflight. When it is unavailable, do not run `trace snapshot`;
    use other current-attempt evidence. Open only one trace at a time and close
    it before cleanup.
@@ -180,8 +180,8 @@ Never:
 - modify unrelated specs, helpers, locators, assertions, or source.
 
 A focused test-id source edit is allowed only under `locator-policy.md`, must
-be pre-approved by Main as an exact `allowed_write_paths` entry, and must be
-reported. Return a newly discovered path to Main for approval and redispatch;
+be pre-approved by Coordinator as an exact `allowed_write_paths` entry, and must be
+reported. Return a newly discovered path to Coordinator for approval and redispatch;
 otherwise source changes route to Author or the product owner.
 
 ## Reporting and cleanup
@@ -189,10 +189,10 @@ otherwise source changes route to Author or the product owner.
 Report the attempt count, last signature, evidence summary, classification,
 repairs, final disposition, and required next owner using the trace schema and
 the Healer role contract. `fixed` requires a passing non-debug run in the
-approved scope after the last edit. It sets `next_owner` to `main` for a
+approved scope after the last edit. It sets `next_owner` to `coordinator` for a
 pipeline vacuity gate and `human` for a standalone run, which stops there.
 
-Assemble the complete scrubbed trace before replacing Main's declared draft.
+Assemble the complete scrubbed trace before replacing Coordinator's declared draft.
 Make one whole-file `Write`, validate once, and use validation error codes to
 rebuild and overwrite the full artifact rather than patching fields or retrying
 unchanged content.

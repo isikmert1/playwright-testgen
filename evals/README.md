@@ -35,14 +35,23 @@ and keep expected verdicts and grading controls private.
 
 ### Activation
 
-Use Claude Code 2.1.295 or later, as required by Testgen's hook policy.
+Use the Claude Code version pinned in the
+[evaluation workflow](../.github/workflows/evaluations.yml).
 
 ```sh
-claude plugin eval . --eval-dir evals/native --runs 1 --ablation none --concurrency 1 --model claude-sonnet-5-5 --max-cost-usd 1 --no-publish
+claude plugin eval . --eval-dir evals/native --runs 1 --ablation none --concurrency 1 --model claude-sonnet-5-5 --max-cost-usd 1 --no-publish --trust-plugin --keep-temp
 ```
 
-Review the three sessions in `evals/native/results/`. Expect a Skill call for
-the Playwright prompt and none for the Git and Cypress prompts. A session error
+The scoped `--trust-plugin` flag authorizes this checkout's plugin and eval
+code. Review the checkout before confirming that trust. `--keep-temp` retains
+each run's sandbox and raw trace for inspection.
+
+Review the three case results in `evals/native/results/` and the `tracePath`
+files recorded in `aggregate-result.json`. Keep the traces and retained
+sandboxes private, then remove the temporary directories after review.
+
+Expect a Skill call for the Playwright prompt and none for the Git and Cypress
+prompts. A session error
 leaves the check incomplete even if the Skill activated. These prompts measure
 routing without an application or model judges. The USD 1 ceiling uses
 list-price estimates and is checked before each session. An active session
@@ -53,7 +62,7 @@ can exceed it.
 - `npm run eval:discovery` checks that installed Explorer recognizes existing
   order-submission coverage and abstains on unsupported bulk cancellation.
   The grade uses actual source reads and browser cleanup.
-- `npm run eval:checkpoint` checks that Main resumes the same session, has
+- `npm run eval:checkpoint` checks that Coordinator resumes the same session, has
   Author revise and validate the candidate under the original criteria, returns
   to approval, and honors skip. The spec must stay unexecuted. The grader
   verifies direct Playwright assertions for the requested change.
@@ -281,5 +290,4 @@ and the [graded Healer result](../docs/validation/healer-defect-refusal-eval.md)
 
 Treat these as observations for the cases and profiles recorded. Reliability
 and comparative claims require matched tasks, equivalent budgets, and repeated
-trials that account for failures and incomplete attempts. See
-[the project's measurement criteria](../README.md#evidence-and-comparative-claims).
+trials that account for failures and incomplete attempts.

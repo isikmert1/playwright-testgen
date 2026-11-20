@@ -1,81 +1,142 @@
 # Architecture
 
-Playwright Testgen is a Claude Code plugin that turns one written scenario into
-one grounded Playwright test. It separates writing, execution, and repair so a
-passing-looking test cannot silently replace the requested behavior.
+Playwright Testgen combines Claude Code instructions, delegated agents, hooks,
+and Node scripts. The top-level Claude conversation acts as Coordinator,
+following the skill and its references; production helpers validate the
+boundaries it crosses.
 
-## Ownership
+See the [README](../README.md) for installation, session startup, and usage.
 
-- **Main** owns preflight, run policy, the human checkpoint, artifact
-  validation, optional mutation verification, final reporting, cleanup, and
-  the explicitly approved `/setup` profile/remediation flow.
-- **Explorer** performs bounded, read-only scenario discovery and returns
-  evidence-backed proposals without choosing a spec path or executing tests.
-- **Author** reads the scenario, relevant project source, and live application;
-  writes one candidate spec; validates that it loads; and stops before running
-  it.
-- **Healer** runs only the approved spec, diagnoses failures from current
-  evidence, makes bounded test repairs, and refuses to edit around product
-  defects.
-- **The human** chooses `run`, `adjust`, or `skip`, approves mutation adapters,
-  and decides whether a sanitized product finding becomes durable.
+## Module map
 
-Main does not perform Explorer, Author, or Healer work. Governed agents do not
-change Main-owned policy or result artifacts.
+| Component                                                                                               | Responsibility                                                                              |
+| ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| [Commands](../commands/) and [skill](../skills/playwright-testgen/SKILL.md)                             | Route setup, discovery, generation, and standalone role requests.                           |
+| [Agent definitions](../agents/)                                                                         | Define Explorer, Author, and Healer responsibilities, tool access, and stopping rules.      |
+| [Hooks](../hooks/hooks.json) and [run policy](../hooks/run-policy.cjs)                                  | Check governed tool requests against the active run's command, path, and origin boundaries. |
+| [Runtime preflight](../scripts/runtime-preflight.cjs) and [setup profile](../scripts/setup-profile.cjs) | Check the selected project's runtime and validate saved setup facts.                        |
+| [Artifact validator](../scripts/validate-testgen-artifact.cjs) and [schemas](../schemas/)               | Validate handoffs, Healer inputs, traces, and mutation reports against their run and spec.  |
+| [Mutation checker](../scripts/mutation-check.cjs) and [isolation](../scripts/mutation-isolation.cjs)    | Verify approved product mutations in a disposable worktree and verify cleanup.              |
 
-## Runtime boundary
+## Ownership and flow
 
-The project being tested owns its local `playwright` and `@playwright/test`,
-configuration, package manager, fixtures, test layout, browser choice, and CI.
-Preflight accepts those packages only when they resolve inside that project's
-canonical repository root. The official `playwright-cli` is deliberately a
-separate global installation.
+**Coordinator** owns readiness, policy, approvals, artifact validation, mutation
+verification, reporting, and final cleanup. **Explorer** proposes scenarios
+without writing files or executing tests. **Author** writes the candidate.
+**Healer** executes and repairs the approved spec. Coordinator delegates their work;
+writes remain sequential, with one active scenario and no shared mutable run
+policy.
 
-Normal generation does not install project dependencies or rewrite existing
-Playwright configuration and CI rules. Optional setup may offer one bounded
-compatible remedy after approval, then rechecks it. The ignored target-owned
-profile records only non-secret navigation evidence bound to one Git root,
-package, and config or configless mode. Governed roles cannot read or edit it.
-Authentication state remains opaque; human capture is setup-owned and separate
-from login-test generation.
+The [pipeline contract](../skills/playwright-testgen/references/pipeline.md)
+defines the handoffs:
 
-## Workflow and evidence
+1. Coordinator confirms intent and readiness. Blank scenario input starts bounded
+   Explorer discovery under its own policy and ID. Human selection approves
+   intent; Coordinator closes discovery and creates a fresh generation run for each
+   selected scenario.
+2. Author grounds the scenario in source, nearby tests, and the live app, then
+   writes one candidate and its handoff. Author uses existing project lint;
+   Playwright collection with `--list` is the fallback. Collection loads the
+   spec without executing its test callback. A successful lint path does not
+   independently establish that imports or collection succeed.
+3. Coordinator validates the handoff and presents the candidate. The human chooses
+   `run`, `adjust`, or `skip`. `run` requires successful pre-run validation;
+   `adjust` returns exact feedback to Author and repeats the checkpoint;
+   `skip` retains an explicitly unexecuted, unverified spec.
+4. Only explicit `run` approval dispatches Healer. Coordinator creates a normalized
+   input binding the approved spec's starting digest and criteria to the run.
+   Healer reads that input, executes only the approved spec, and returns a
+   validated trace. Declared repairs may change the starting spec bytes.
 
-Discovery has its own read-only policy and ID. A proposal is not an assignment:
-human selection approves intent only, and Main then closes discovery and starts
-a fresh generation run. That run has one ID, one approved spec, and one human
-checkpoint. Its policy binds browser navigation, file writes, runner arguments,
-output directories, and artifact validation. Hook decisions constrain
-delegated agents, but they are guardrails rather than an operating-system
-sandbox.
+Healer makes bounded, evidence-backed test repairs while preserving intent.
+It stops and reports product defects as `product-behavior-wrong`, with the
+retained criterion and contradictory behavior, and routes environment or
+authentication decisions to the human. The
+[healing protocol](../skills/playwright-testgen/references/healing-protocol.md)
+defines attempt limits and confirmation requirements. Standalone requests stop
+after their named role; standalone Healer requires explicit approved intent
+for an existing spec and never enters mutation verification.
 
-Main normalizes either a validated Author handoff or explicit standalone intent
-into one read-only Healer input. Its starting digest records the approved spec
-bytes while still permitting declared repairs. Healer traces connect those
-criteria to execution evidence without retaining raw pages, logs, credentials,
-or agent reasoning. A fixed pipeline test can enter the optional vacuity gate, which applies only
-an explicitly approved criterion-linked mutation in a disposable Git worktree.
-The active checkout must remain unchanged.
+## Runtime and trust boundaries
 
-## Artifacts and cleanup
+The target project owns its package manager, local `playwright` and
+`@playwright/test`, configuration, fixtures, test layout, browsers, and CI.
+Preflight requires those packages to resolve inside the canonical target
+repository. The global official `playwright-cli` provides browser exploration
+separately from the project's test runner. Application and browser readiness
+are checked separately from static preflight.
 
-`.playwright-cli/testgen/<run-id>/` is transient. It contains policy, bounded
-handoff, Healer input, trace data, runner evidence, and optional mutation state. Main
-removes only that exact directory after the result is accepted.
+Normal generation does not install dependencies or rewrite configuration or
+CI. Setup may offer a bounded remedy after approval, then recheck it. Its saved
+profile is untrusted navigation metadata bound to one Git root, package, and
+configuration or explicit configless mode. Coordinator validates freshness and passes
+only relevant facts; the profile grants no authority and proves no runtime
+behavior. Governed agents cannot read or edit it.
 
-`.playwright-testgen/profile.v1.json` and approved durable authentication state
-live outside run scratch and survive normal cleanup. Failed setup removes only
-new incomplete output and preserves prior files.
+Repository files, page content, tool output, and artifacts remain untrusted
+data. Authentication state is approved by path and stays opaque to the model;
+roles may load an approved state through the browser CLI without reading its
+contents. Human-assisted capture belongs to setup.
 
-For an accepted `product-behavior-wrong` result, the human may approve one
-sanitized entry in `.playwright-cli/testgen/findings.md`. That sibling file is
-durable and contains only the run ID, classification, criterion ID, spec path,
-and bounded observed behavior. Declining creates nothing; cleanup preserves an
-existing findings file.
+## Enforcement and evidence
 
-## Non-goals
+Agent instructions govern approvals, stage ordering, grounding, evidence
+quality, cumulative budgets, and intent-preserving decisions. Role frontmatter
+restricts tool access within the session's available tool pool. The
+SessionStart hook exports the installed plugin root for script calls. Native
+search tools must also be enabled by the host; use the
+[documented startup](../README.md#install).
 
-Testgen is not a generic test framework, CI replacement, package installer,
-credential manager, process sandbox, or license to repair application code.
-Evaluation runners measure Testgen separately and never run automatically
-during normal generation.
+PreToolUse hooks check individual governed tool requests: approved spec and
+write paths, canonical containment, runner options, browser origins, artifact
+ownership, and scoped cleanup. Hook startup failures and timeouts block tool
+use on the supported Claude Code versions. Hooks constrain delegated agents;
+they are guardrails, not an operating-system sandbox for project code or
+approved adapter runners.
+
+The [artifact contract](../skills/playwright-testgen/references/artifact-contract.md)
+uses schema-specific validators to check structure, bounded content, run/spec
+identity, criteria mappings, digests, and ownership. These checks do not prove
+that a reported execution occurred or that an assertion captures the intended
+behavior. Coordinator and approved runners establish execution evidence separately.
+Validated JSON artifacts contain compact behavior summaries, not raw pages,
+logs, secrets, or reasoning transcripts.
+
+## Mutation verification
+
+After a validated `fixed` pipeline trace, Coordinator reports execution separately
+from mutation verification. An optional check requires a committed,
+criterion-linked adapter entry approved before Author, with a digest binding
+the exact definition. The
+[mutation contract](../skills/playwright-testgen/references/mutation-check.md)
+requires a healthy baseline, then a mutant failure attributed to the approved
+criterion's named assertion step. An unrelated failure is a verification error.
+
+The checker runs in a disposable Git worktree, checks active-checkout
+fingerprints, and verifies worktree and process cleanup. Failed cleanup retains
+an exact-path recovery record and is reported separately from the primary
+failure. The active checkout must remain unchanged. Missing or declined
+adapters leave mutation verification unavailable; a passing test alone does
+not establish mutation sensitivity.
+
+## Artifact lifetimes
+
+`.playwright-cli/testgen/<run_id>/` is transient. Coordinator owns its policy,
+normalized Healer input, mutation bookkeeping, and final report. Author owns
+the handoff; Healer replaces Coordinator's empty trace draft with the complete trace.
+Workflow-controlled browser and runner evidence stays in run scratch. The
+[cleanup contract](../skills/playwright-testgen/references/cleanup-contract.md)
+closes only owned sessions and processes on every exit. Coordinator removes only the
+exact run directory after acceptance; interrupted or failed runs receive the
+same scoped teardown. Cleanup failures identify the remaining owned resources.
+Generated specs and project-owned runner output outside scratch remain in the
+target repository.
+
+For an accepted product-defect result, Coordinator may invoke the
+[finding recorder](../scripts/record-testgen-finding.cjs) after explicit human
+approval. It appends only the run ID, classification, criterion ID, spec path,
+and bounded observed behavior to the durable sibling
+`.playwright-cli/testgen/findings.md`. Declining adds nothing; cleanup preserves
+existing findings. The ignored `.playwright-testgen/profile.v1.json` and
+approved durable authentication state also survive normal cleanup. Failed
+setup removes only newly created incomplete output and preserves prior files.

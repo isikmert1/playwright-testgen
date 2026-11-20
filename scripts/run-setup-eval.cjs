@@ -193,7 +193,7 @@ async function setupBeforeAuthor({
     'Report your observed setup result, then stop. Do not generate or run a test.',
   ].join('\n');
   const args = buildClaudeArguments(
-    { agent: { ...definition.setup, name: 'main' } },
+    { agent: { ...definition.setup, name: 'coordinator' } },
     prompt,
   );
   args.splice(args.indexOf('--agent'), 2);
