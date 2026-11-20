@@ -166,11 +166,27 @@ Each standalone request stops when that role's work is finished.
 
 ```mermaid
 flowchart TD
-    A[Choose a scenario] --> B[Inspect source and app]
-    B --> C{Review candidate}
-    C -->|adjust| B
-    C -->|skip| D[Keep unverified]
-    C -->|run| E[Execute and diagnose]
+    Setup["Optional /setup<br/>Inspect config, fixtures, browsers and auth"]
+    Setup -->|Already ready| Ready
+    Setup --> SetupApproval["Human approval<br/>Proposed fixes, profile or auth capture"]
+    SetupApproval --> Ready["Coordinator<br/>Check project and running app"]
+    Start["/testgen<br/>Supply a scenario or ask for ideas"] --> Ready
+    Ready --> Intent{Scenario supplied?}
+    Intent -->|Yes| Author["Author<br/>Inspect source and UI, draft and validate"]
+    Intent -->|No| Explorer["Explorer<br/>Review coverage and propose scenarios"]
+    Explorer --> Select[Human selects a scenario]
+    Select --> Author
+    Author --> Review{Human reviews candidate}
+    Review -->|adjust| Author
+    Review -->|skip| Unverified[Keep the spec unexecuted]
+    Review -->|run: validation passed| Healer["Healer<br/>Execute, repair within limits, or escalate"]
+    Healer -->|Passing spec + separate approval| Mutation["Optional mutation check<br/>Does the test catch the product change?"]
+    Healer -->|No mutation check or execution blocked| Report[Report outcome and clean up]
+    Mutation --> Report
+    Unverified --> Report
+
+    classDef human fill:#fff1cc,stroke:#9a6700,color:#24292f,stroke-width:2px
+    class SetupApproval,Select,Review human
 ```
 
 Coordinator, the top-level Claude Code conversation, checks readiness and manages
