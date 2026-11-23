@@ -360,6 +360,8 @@ async function collectDiscovery(definition, signal, options) {
       'scripts/eval/installed-case.cjs',
       'scripts/eval/runtime.cjs',
       'scripts/process.cjs',
+      'scripts/windows-process-job.cs',
+      'scripts/windows-process-tree.cjs',
       'scripts/eval/agent-evidence.cjs',
       'scripts/run-generation-eval.cjs',
       'evals/targets/semantic-only/target.json',

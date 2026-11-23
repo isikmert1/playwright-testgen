@@ -417,6 +417,8 @@ async function main() {
             'scripts/eval/checkpoint-review.cjs',
             'scripts/eval/runtime.cjs',
             'scripts/process.cjs',
+            'scripts/windows-process-job.cs',
+            'scripts/windows-process-tree.cjs',
           ];
           function add(directory) {
             for (const entry of readdirSync(path.join(root, directory), {

@@ -639,34 +639,57 @@ test('hard timeout terminates a non-returning process', async () => {
 });
 
 test(
-  'keeps Windows shutdown bounded when process inspection stalls or fails',
+  'runs without PowerShell and retries a failed Windows launcher before starting the command',
   { skip: process.platform !== 'win32' },
   () => {
-    const script = [
-      "const childProcess=require('node:child_process');",
-      'const spawn=childProcess.spawn;',
-      'let child,exited;',
-      "childProcess.spawn=(...args)=>{child=spawn(...args);exited=new Promise(resolve=>child.once('exit',resolve));return child};",
-      'const execFile=childProcess.execFile;',
-      "childProcess.execFile=(name,args,options,callback)=>{if(name==='powershell.exe'){if(process.argv[1]==='fail')setImmediate(()=>callback(Object.assign(new Error('snapshot failed'),{code:1})));return}if(name!=='taskkill.exe')return execFile(name,args,options,callback)};",
-      "const {runBounded}=require('./scripts/process.cjs');",
-      'const started=Date.now();',
-      "runBounded(process.execPath,['-e','setInterval(()=>{},1000)'],{cwd:process.cwd(),env:process.env,timeout_ms:50}).then(async result=>{try{await Promise.race([exited,new Promise(resolve=>setTimeout(resolve,250))]);let childAlive;try{process.kill(child.pid,0);childAlive=true}catch{childAlive=false}process.stdout.write(JSON.stringify({elapsed:Date.now()-started,timed_out:result.timed_out,tree_cleanup_failed:result.tree_cleanup_failed,child_alive:childAlive}))}finally{child.kill('SIGKILL')}});",
-    ].join('');
-    for (const snapshot of ['stall', 'fail']) {
-      const result = spawnSync(process.execPath, ['-e', script, snapshot], {
-        cwd: repositoryRoot,
-        encoding: 'utf8',
-        timeout: 12000,
-        windowsHide: true,
+    const script = `
+      const cp = require('node:child_process');
+      const spawn = cp.spawn;
+      const execFile = cp.execFile;
+      const { basename } = require('node:path');
+      cp.execFile = (name, ...args) => {
+        if (basename(name).toLowerCase() !== 'powershell.exe') return execFile(name, ...args);
+        setImmediate(() => args.at(-1)(Object.assign(new Error('startup failed'), { code: 0xc0000142 })));
+      };
+      let launches = 0;
+      let failures = 1;
+      cp.spawn = (name, args, options) => {
+        if (basename(name) === 'testgen-windows-job.exe' && ++launches <= failures) {
+          return spawn(process.execPath, ['-e', 'process.exit(0xc0000142)'], options);
+        }
+        return spawn(name, args, options);
+      };
+      const { runBounded } = require('./scripts/process.cjs');
+      const run = () => runBounded(process.execPath, ['-e', 'process.stdout.write("ran")'], {
+        cwd: process.cwd(), timeout_ms: 1000, verify_process_tree: true,
       });
-      assert.equal(result.status, 0, result.stderr);
-      const outcome = JSON.parse(result.stdout);
-      assert.equal(outcome.timed_out, true);
-      assert.equal(outcome.tree_cleanup_failed, true);
-      assert.equal(outcome.child_alive, false, snapshot);
-      assert.ok(outcome.elapsed < 6000, JSON.stringify(outcome));
-    }
+      (async () => {
+        const recovered = await run();
+        const recoveredLaunches = launches;
+        launches = 0;
+        failures = Infinity;
+        const failed = await run();
+        console.log(JSON.stringify({ recovered, recoveredLaunches, failed, launches }));
+      })().catch((error) => { console.error(error); process.exitCode = 1; });
+    `;
+    const result = spawnSync(process.execPath, ['-e', script], {
+      cwd: repositoryRoot,
+      encoding: 'utf8',
+      timeout: 20000,
+      windowsHide: true,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const { recovered, recoveredLaunches, failed, launches } = JSON.parse(
+      result.stdout,
+    );
+    assert.equal(recoveredLaunches, 2);
+    assert.equal(recovered.status, 0);
+    assert.equal(recovered.output, 'ran');
+    assert.equal(launches, 2);
+    assert.equal(failed.output, '');
+    assert.equal(failed.spawn_error, 'windows-job-startup-failed');
+    assert.equal(failed.windows_status, 'windows-status-c0000142');
+    assert.equal(failed.tree_cleanup_failed, false);
   },
 );
 
@@ -740,22 +763,49 @@ test('cancels a bounded lifecycle command', async () => {
   }
 });
 
-test('cleans a descendant after its immediate parent exits', async () => {
+const waitingDescendant = `
+  const { existsSync } = require('node:fs');
+  const timer = setInterval(() => {
+    if (existsSync(process.argv[1])) process.exit(0);
+  }, 25);
+  setTimeout(() => clearInterval(timer), 10000).unref();
+`;
+
+async function releaseDescendant(release, pid) {
+  writeFileSync(release, '');
+  for (let attempt = 0; pid > 0 && attempt < 40; attempt++) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
+
+test('cleans a descendant after its immediate parent exits', async (t) => {
   const { runBounded } = modules().runner;
+  const directory = mkdtempSync(path.join(tmpdir(), 'testgen-orphan-'));
+  const release = path.join(directory, 'release');
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
   const script = [
     "const { spawn } = require('node:child_process');",
-    "const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });",
+    "const child = spawn(process.execPath, ['-e', ...process.argv.slice(1)], { stdio: 'ignore', windowsHide: true });",
     'process.stdout.write(String(child.pid));',
     'child.unref();',
   ].join(' ');
   let descendantPid;
   try {
-    const result = await runBounded(process.execPath, ['-e', script], {
-      cwd: repositoryRoot,
-      env: process.env,
-      timeout_ms: 2000,
-      verify_process_tree: true,
-    });
+    const result = await runBounded(
+      process.execPath,
+      ['-e', script, waitingDescendant, release],
+      {
+        cwd: repositoryRoot,
+        env: process.env,
+        timeout_ms: 2000,
+        verify_process_tree: true,
+      },
+    );
     descendantPid = Number(result.output);
     assert.equal(result.status, 0);
     assert.equal(result.tree_cleanup_failed, false);
@@ -769,13 +819,7 @@ test('cleans a descendant after its immediate parent exits', async () => {
       }
     } else assert.throws(() => process.kill(descendantPid, 0));
   } finally {
-    if (Number.isInteger(descendantPid) && descendantPid > 0) {
-      try {
-        process.kill(descendantPid, 'SIGKILL');
-      } catch {
-        // Expected when runBounded cleaned the descendant.
-      }
-    }
+    await releaseDescendant(release, descendantPid);
   }
 });
 
@@ -827,41 +871,57 @@ test(
 );
 
 test(
-  'cleans a Windows descendant whose parent is already gone',
+  'cleans or preserves Windows descendants according to command completion',
   { skip: process.platform !== 'win32' },
-  async () => {
-    const { stopProcessTree } = modules().runner;
-    const script = [
-      "const { spawn } = require('node:child_process');",
-      "const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { detached: true, stdio: 'ignore' });",
-      'process.stdout.write(String(child.pid));',
-      'child.unref();',
-    ].join(' ');
-    const parent = spawnSync(process.execPath, ['-e', script], {
-      cwd: repositoryRoot,
-      encoding: 'utf8',
-      timeout: 2000,
-      windowsHide: true,
-    });
-    const descendantPid = Number(parent.stdout);
-    try {
-      assert.equal(parent.status, 0, parent.stderr);
-      assert.equal(Number.isInteger(parent.pid), true);
-      assert.equal(process.kill(descendantPid, 0), true);
-      const diagnostics = {};
-      assert.equal(
-        await stopProcessTree({ pid: parent.pid, kill() {} }, diagnostics),
-        true,
-        JSON.stringify(diagnostics),
-      );
-      assert.throws(() => process.kill(descendantPid, 0));
-    } finally {
-      if (Number.isInteger(descendantPid) && descendantPid > 0) {
-        try {
-          process.kill(descendantPid, 'SIGKILL');
-        } catch {
-          // Expected when stopProcessTree cleaned the descendant.
-        }
+  async (t) => {
+    const { runBounded } = modules().runner;
+    const directory = mkdtempSync(path.join(tmpdir(), 'testgen-orphan-'));
+    t.after(() => rmSync(directory, { recursive: true, force: true }));
+    const intermediate = `
+      const { spawn } = require('node:child_process');
+      const child = spawn(process.execPath, ['-e', process.argv[1], process.argv[2]], {
+        detached: true, stdio: ['ignore', process.argv[3], 'ignore'], windowsHide: true,
+      });
+      child.unref();
+      process.stdout.write(String(child.pid));
+    `;
+    const root = `
+      const { spawnSync } = require('node:child_process');
+      const result = spawnSync(process.execPath, ['-e', ...process.argv.slice(1)], {
+        encoding: 'utf8', windowsHide: true,
+      });
+      process.stdout.write(result.stdout);
+      process.exitCode = result.status ?? 1;
+    `;
+    for (const [scenario, verify, inherit] of [
+      ['cleanup', true, false],
+      ['preserve', false, false],
+      ['timeout-with-open-pipe', false, true],
+    ]) {
+      const release = path.join(directory, scenario);
+      const args = inherit
+        ? [intermediate, waitingDescendant, release, 'inherit']
+        : [root, intermediate, waitingDescendant, release, 'ignore'];
+      let descendantPid;
+      try {
+        const result = await runBounded(process.execPath, ['-e', ...args], {
+          timeout_ms: inherit ? 2000 : 5000,
+          verify_process_tree: verify,
+        });
+        descendantPid = Number(result.output);
+        assert.ok(descendantPid > 0);
+        assert.equal(result.status, 0, scenario);
+        assert.equal(result.timed_out, inherit, scenario);
+        assert.equal(
+          result.tree_cleanup_failed,
+          false,
+          result.tree_cleanup_reason,
+        );
+        if (verify || inherit)
+          assert.throws(() => process.kill(descendantPid, 0));
+        else assert.equal(process.kill(descendantPid, 0), true);
+      } finally {
+        await releaseDescendant(release, descendantPid);
       }
     }
   },

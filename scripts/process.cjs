@@ -1,7 +1,8 @@
-const { execFile, spawn, spawnSync } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
+const { once } = require('node:events');
 const { readFileSync, readdirSync } = require('node:fs');
 const path = require('node:path');
-const { windowsProcessTree } = require('./windows-process-tree.cjs');
+const { startWindowsJob } = require('./windows-process-tree.cjs');
 
 const repositoryRoot = path.resolve(__dirname, '..');
 
@@ -63,8 +64,13 @@ async function command(commandName, args, options = {}) {
     result.output_overflow ||
     result.spawn_error != null ||
     result.status !== 0
-  )
-    fail(options.error ?? 'prerequisite-unavailable');
+  ) {
+    const details = [result.spawn_error, result.windows_status].filter(
+      (value) =>
+        typeof value === 'string' && /^windows-(?:job|status)-/u.test(value),
+    );
+    fail(options.error ?? 'prerequisite-unavailable', details);
+  }
   return result.output.trim();
 }
 
@@ -72,6 +78,7 @@ function assertProcessStopped(result) {
   if (!result.tree_cleanup_failed) return;
   const error = new EvaluationError('process-tree-cleanup-failed', [
     result.tree_cleanup_reason ?? 'cleanup-unverified',
+    ...(result.windows_status == null ? [] : [result.windows_status]),
   ]);
   if (
     Number.isSafeInteger(result.tree_cleanup_pid) &&
@@ -133,59 +140,13 @@ async function stopProcessTree(child, diagnostics = {}) {
   };
   try {
     if (process.platform === 'win32') {
-      const onSnapshotFailure = (reason, exitCode) => {
-        diagnostics.reason = reason;
-        if (exitCode != null) diagnostics.snapshot_exit_code = exitCode;
-      };
-      const initial = await windowsProcessTree(pid, [], onSnapshotFailure);
-      if (initial == null)
-        return failed(diagnostics.reason ?? 'snapshot-unavailable');
-      const known = new Set(initial.descendants);
-      if (!initial.root_exists && known.size === 0) return true;
-      const terminate = (target) => {
-        const result = spawnSync(
-          'taskkill.exe',
-          ['/pid', String(target), '/t', '/f'],
-          {
-            stdio: 'ignore',
-            timeout: 5000,
-            windowsHide: true,
-          },
-        );
-        if (result.error == null && result.status === 0) return true;
-        try {
-          process.kill(target, 'SIGKILL');
-          return true;
-        } catch {
-          return false;
-        }
-      };
-      let rootTerminated = !initial.root_exists;
-      if (initial.root_exists) rootTerminated = terminate(pid);
-      else for (const target of [...known].reverse()) terminate(target);
-
-      for (let attempt = 0; attempt < 3; attempt += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 100));
-        const current = await windowsProcessTree(pid, known, onSnapshotFailure);
-        if (current == null)
-          return failed(diagnostics.reason ?? 'snapshot-unavailable');
-        for (const target of current.descendants) known.add(target);
-        if (
-          !current.root_exists &&
-          current.known_running.length === 0 &&
-          current.descendants.length === 0
-        )
-          return true;
-        for (const target of [
-          ...new Set([...current.descendants, ...current.known_running]),
-        ].reverse())
-          terminate(target);
-        if (current.root_exists && !rootTerminated)
-          rootTerminated = terminate(pid);
-      }
-      return failed(
-        rootTerminated ? 'process-still-running' : 'termination-failed',
-      );
+      // The evaluator's forked HTTP fixture is a single process. Commands that
+      // can launch descendants use runBounded and are assigned to a job.
+      if (child.exitCode != null || child.signalCode != null) return true;
+      const exited = once(child, 'exit', { signal: AbortSignal.timeout(5000) });
+      child.kill('SIGKILL');
+      await exited;
+      return true;
     } else {
       try {
         process.kill(-pid, 'SIGKILL');
@@ -206,103 +167,116 @@ async function stopProcessTree(child, diagnostics = {}) {
   return failed('process-still-running');
 }
 
-function runBounded(commandName, args, options) {
+function emptyResult(options) {
+  return {
+    cancelled: options.signal?.aborted === true,
+    output: '',
+    ...(options.capture_stderr === true ? { error_output: '' } : {}),
+    output_overflow: false,
+    signal: null,
+    spawn_error: null,
+    status: null,
+    timed_out: false,
+    tree_cleanup_failed: false,
+    tree_cleanup_reason: null,
+  };
+}
+
+async function runBounded(commandName, args, options) {
+  if (options.signal?.aborted) return emptyResult(options);
+  const windows = process.platform === 'win32';
+  if (windows && /\.(?:cmd|bat)$/iu.test(commandName))
+    fail('batch-wrapper-unsupported');
+  const spawnOptions = {
+    cwd: options.cwd,
+    detached: !windows,
+    env: options.env,
+    stdio: [options.input == null ? 'ignore' : 'pipe', 'pipe', 'pipe'],
+    windowsHide: true,
+  };
+  let job;
+  if (windows) {
+    try {
+      job = await startWindowsJob(
+        commandName,
+        args,
+        spawnOptions,
+        options.verify_process_tree !== true,
+      );
+    } catch (error) {
+      if (error instanceof TypeError) throw error;
+      return {
+        ...emptyResult(options),
+        spawn_error: error.code ?? 'windows-job-startup-failed',
+        windows_status: error.nativeStatus ?? null,
+      };
+    }
+  }
+  const child = job?.child ?? spawn(commandName, args, spawnOptions);
+  const stdout = job?.stdout ?? child.stdout;
+  const stderr = job?.stderr ?? child.stderr;
+
   return new Promise((resolve) => {
-    let output = '';
-    let errorOutput = '';
+    const result = emptyResult(options);
     let outputBytes = 0;
-    let timedOut = false;
-    let cancelled = false;
-    let overflow = false;
-    let treeCleanupFailed = false;
-    let treeCleanupReason = null;
     let settled = false;
     let stopTimer = null;
     let stopping = null;
-    if (options.signal?.aborted) {
-      resolve({
-        cancelled: true,
-        output: '',
-        ...(options.capture_stderr === true ? { error_output: '' } : {}),
-        output_overflow: false,
-        signal: null,
-        spawn_error: null,
-        status: null,
-        timed_out: false,
-        tree_cleanup_failed: false,
-        tree_cleanup_reason: null,
-      });
-      return;
-    }
-    if (process.platform === 'win32' && /\.(?:cmd|bat)$/iu.test(commandName))
-      fail('batch-wrapper-unsupported');
-    const child = spawn(commandName, args, {
-      cwd: options.cwd,
-      detached: process.platform !== 'win32',
-      env: options.env,
-      stdio: [options.input == null ? 'ignore' : 'pipe', 'pipe', 'pipe'],
-      windowsHide: true,
-    });
-    const finish = (status, signal, spawnError = null) => {
+    const finish = (
+      status,
+      signal,
+      spawnError = null,
+      windowsStatus = null,
+    ) => {
       if (settled) return;
       settled = true;
-      // Failed tree verification must not leave the owned root running.
-      if (treeCleanupFailed && process.platform === 'win32')
-        child.kill('SIGKILL');
       clearTimeout(timer);
       if (stopTimer != null) clearTimeout(stopTimer);
       options.signal?.removeEventListener('abort', cancel);
+      const cleanupPid = job ? job.pid : child.pid;
       resolve({
-        cancelled,
-        output,
-        ...(options.capture_stderr === true
-          ? { error_output: errorOutput }
-          : {}),
-        output_overflow: overflow,
+        ...result,
         signal,
         spawn_error: spawnError,
         status,
-        timed_out: timedOut,
-        tree_cleanup_failed: treeCleanupFailed,
-        tree_cleanup_reason: treeCleanupReason,
-        ...(treeCleanupFailed ? { tree_cleanup_pid: child.pid } : {}),
+        ...(result.tree_cleanup_failed && cleanupPid != null
+          ? { tree_cleanup_pid: cleanupPid }
+          : {}),
+        ...(windowsStatus == null ? {} : { windows_status: windowsStatus }),
       });
     };
     const ensureStopped = () => {
       const diagnostics = {};
       stopping ??= stopProcessTree(child, diagnostics).then((stopped) => {
         if (!stopped) {
-          treeCleanupFailed = true;
-          treeCleanupReason = diagnostics.reason ?? 'cleanup-unverified';
+          result.tree_cleanup_failed = true;
+          result.tree_cleanup_reason =
+            diagnostics.reason ?? 'cleanup-unverified';
         }
       });
       return stopping;
     };
-    const terminate = () => {
-      if (stopping != null) return;
-      if (process.platform === 'win32') {
-        execFile(
-          'taskkill.exe',
-          ['/pid', String(child.pid), '/t', '/f'],
-          { timeout: 5000, windowsHide: true },
-          (error) => {
-            if (error != null) child.kill('SIGKILL');
-          },
-        );
-      }
-      void ensureStopped().then(() => finish(child.exitCode, 'terminated'));
-      stopTimer ??= setTimeout(() => {
-        treeCleanupFailed = true;
-        treeCleanupReason = 'stop-timeout';
+    const boundShutdown = () => {
+      stopTimer = setTimeout(() => {
+        result.tree_cleanup_failed = true;
+        result.tree_cleanup_reason = 'stop-timeout';
+        job?.abandon();
         finish(null, 'forced-stop');
       }, 5000);
     };
+    const terminate = () => {
+      if (stopTimer != null || stopping != null || settled) return;
+      if (job) job.stop();
+      else
+        void ensureStopped().then(() => finish(child.exitCode, 'terminated'));
+      boundShutdown();
+    };
     const cancel = () => {
-      cancelled = true;
+      result.cancelled = true;
       terminate();
     };
     const timer = setTimeout(() => {
-      timedOut = true;
+      result.timed_out = true;
       terminate();
     }, options.timeout_ms);
     options.signal?.addEventListener('abort', cancel, { once: true });
@@ -311,28 +285,34 @@ function runBounded(commandName, args, options) {
       child.stdin.on('error', () => {});
       child.stdin.end(options.input);
     }
-    child.stdout.on('data', (chunk) => {
-      outputBytes += chunk.length;
-      if (outputBytes > (options.max_output_bytes ?? MAX_OUTPUT_BYTES)) {
-        overflow = true;
-        terminate();
-        return;
-      }
-      output += chunk.toString('utf8');
-    });
-    if (options.capture_stderr === true)
-      child.stderr.on('data', (chunk) => {
+    const capture = (stream, field) => {
+      stream.on('data', (chunk) => {
         outputBytes += chunk.length;
         if (outputBytes > (options.max_output_bytes ?? MAX_OUTPUT_BYTES)) {
-          overflow = true;
+          result.output_overflow = true;
           terminate();
           return;
         }
-        errorOutput += chunk.toString('utf8');
+        result[field] += chunk.toString('utf8');
       });
-    else child.stderr.resume();
+    };
+    capture(stdout, 'output');
+    if (options.capture_stderr === true) capture(stderr, 'error_output');
+    else stderr.resume();
     child.once('error', (error) => finish(null, null, error.code ?? 'error'));
-    child.once('close', (status, signal) => {
+    child.once('close', async (status, signal) => {
+      if (job) {
+        const jobResult = await job.result(status);
+        result.tree_cleanup_reason = jobResult.tree_cleanup_reason ?? null;
+        result.tree_cleanup_failed = result.tree_cleanup_reason != null;
+        finish(
+          jobResult.status,
+          signal,
+          jobResult.spawn_error,
+          jobResult.windows_status,
+        );
+        return;
+      }
       clearTimeout(timer);
       if (options.verify_process_tree === true || stopping != null) {
         void ensureStopped().then(() => finish(status, signal));
@@ -340,6 +320,12 @@ function runBounded(commandName, args, options) {
       }
       finish(status, signal);
     });
+    if (!result.cancelled)
+      job?.start(() => {
+        clearTimeout(timer);
+        options.signal?.removeEventListener('abort', cancel);
+        boundShutdown();
+      });
   });
 }
 

@@ -64,6 +64,7 @@ function datasetDigest() {
     'scripts/score-healer-defect-refusal.cjs',
     'scripts/score-selector-repair.cjs',
     'scripts/score-outcomes.cjs',
+    'scripts/windows-process-job.cs',
     'scripts/windows-process-tree.cjs',
     'scripts/process.cjs',
   );
