@@ -1,8 +1,7 @@
-const { readFileSync, realpathSync, statSync } = require('node:fs');
+const { createHash } = require('node:crypto');
 const path = require('node:path');
 const {
   comparableRepoPath,
-  containsProhibited,
   isAttributeName,
   isFile,
   isIdentifier,
@@ -10,9 +9,9 @@ const {
   isRepoPath,
   isText,
   loadSchema,
+  readRunArtifact,
   rejectUnknown,
   requireFields,
-  samePath,
   validatePath,
   validateStringArray,
 } = require('./artifact-validation-common.cjs');
@@ -313,41 +312,30 @@ function validateHandoff(artifact, repository, errors) {
 
 function loadValidatedHandoff(repository, runPolicy, runId) {
   if (loadSchema('handoff') == null) return null;
-  const handoffPath = path.join(runPolicy.runDirectory, 'handoff.json');
   try {
-    const canonical = realpathSync(handoffPath);
-    if (
-      !samePath(
-        canonical,
-        path.join(runPolicy.canonicalRunDirectory, 'handoff.json'),
-      ) ||
-      !isFile(canonical) ||
-      statSync(canonical).size > 64 * 1024
-    )
-      return null;
-    const handoff = JSON.parse(readFileSync(canonical, 'utf8'));
-    if (!isObject(handoff) || containsProhibited(handoff)) return null;
+    const loaded = readRunArtifact(
+      repository,
+      runPolicy,
+      runId,
+      'handoff.json',
+    );
+    if (loaded == null) return null;
+    const { artifact: handoff, bytes } = loaded;
+    if (!['pass', 'fixed'].includes(handoff.lint?.status)) return null;
     const errors = [];
-    if (handoff.run_id !== runId) errors.push('run-id-mismatch');
-    if (
-      typeof handoff.spec_path !== 'string' ||
-      !samePath(
-        path.resolve(repository, handoff.spec_path),
-        runPolicy.approvedSpec,
-      )
-    )
-      errors.push('policy-spec-mismatch');
     validateHandoff(handoff, repository, errors);
-    if (!['pass', 'fixed'].includes(handoff.lint?.status))
-      errors.push('handoff-lint-not-passed');
-    return errors.length === 0 ? handoff : null;
+    if (errors.length > 0) return null;
+    return {
+      handoff,
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+    };
   } catch {
     return null;
   }
 }
 
 function loadHandoffCriteria(repository, runPolicy, runId) {
-  const handoff = loadValidatedHandoff(repository, runPolicy, runId);
+  const handoff = loadValidatedHandoff(repository, runPolicy, runId)?.handoff;
   return handoff == null
     ? null
     : new Map(

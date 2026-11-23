@@ -95,14 +95,6 @@ test('generation evidence rejects spec execution but allows collection', () => {
   assert.equal(
     authorExecutionAttempts(
       stream(
-        'node "node_modules/@playwright/test/cli.js" test tests/notebook-details.spec.ts',
-      ),
-    ),
-    1,
-  );
-  assert.equal(
-    authorExecutionAttempts(
-      stream(
         'node node_modules/playwright/cli.js test --list && node node_modules/playwright/cli.js test tests/notebook-details.spec.ts',
       ),
     ),

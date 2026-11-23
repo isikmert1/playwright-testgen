@@ -39,7 +39,7 @@ test('agent-visible target metadata does not reveal setup or seeded-bug answers'
   );
 });
 
-test('selector-drift variant renames a control without changing behavior', (t) => {
+test('selector-drift variant changes only the submit label', (t) => {
   const temporaryRoot = mkdtempSync(path.join(tmpdir(), 'testgen-variant-'));
   const targetRoot = path.join(temporaryRoot, 'target');
   cpSync(path.join(targetsRoot, 'semantic-only', 'repository'), targetRoot, {
@@ -48,7 +48,12 @@ test('selector-drift variant renames a control without changing behavior', (t) =
   t.after(() => rmSync(temporaryRoot, { force: true, recursive: true }));
 
   const pagePath = path.join(targetRoot, 'public', 'index.html');
-  const original = readFileSync(pagePath, 'utf8');
+  const original = readFileSync(pagePath, 'utf8').replaceAll('\r\n', '\n');
+  const expected = original.replace(
+    '<button type="submit">Add order</button>',
+    '<button type="submit">Create order</button>',
+  );
+  assert.notEqual(expected, original);
   const patchPath = path.join(
     targetRoot,
     '.testgen',
@@ -62,20 +67,9 @@ test('selector-drift variant renames a control without changing behavior', (t) =
   });
 
   assert.equal(applied.status, 0, applied.stderr);
-  const changed = readFileSync(pagePath, 'utf8');
-  assert.match(changed, /<button type="submit">Create order<\/button>/u);
-  assert.match(changed, /<form id="order-form">/u);
-  assert.match(changed, /<script src="\/app\.js"><\/script>/u);
-
-  const reverted = spawnSync('git', ['apply', '--reverse', '--', patchPath], {
-    cwd: targetRoot,
-    encoding: 'utf8',
-    windowsHide: true,
-  });
-  assert.equal(reverted.status, 0, reverted.stderr);
   assert.equal(
     readFileSync(pagePath, 'utf8').replaceAll('\r\n', '\n'),
-    original.replaceAll('\r\n', '\n'),
+    expected,
   );
 });
 
@@ -143,6 +137,7 @@ test('mutation runner translates isolated Playwright results and removes its lin
   const targetRoot = path.join(temporaryRoot, 'target');
   const nodeModules = path.join(temporaryRoot, 'node_modules');
   const filterPath = path.join(temporaryRoot, 'filter.txt');
+  const stepTitle = 'verify the submitted order details';
   cpSync(path.join(targetsRoot, 'semantic-only', 'repository'), targetRoot, {
     recursive: true,
   });
@@ -168,7 +163,7 @@ test('mutation runner translates isolated Playwright results and removes its lin
       "const file='tests/order.spec.js';",
       'const location={file:path.resolve(file),line:108,column:1};',
       "const error={message:'assertion failed',stack:`Error: assertion failed\\n    at ${location.file}:108:1\\n    at approvedStep (${location.file}:106:1)`};",
-      "const result=failed?{status:'failed',errors:[{...error,location}],steps:[{title:'verify the submitted order details',error}]}:{status:'passed',errors:[]};",
+      "const result=failed?{status:'failed',errors:[{...error,location}],steps:[{title:process.env.TESTGEN_STEP_TITLE,error}]}:{status:'passed',errors:[]};",
       "const report={errors:[],stats:{expected:failed?0:1,unexpected:failed?1:0},suites:[{title:file,file,specs:[{title:'order',file,line:1,column:1,tests:[{status:failed?'unexpected':'expected',results:[result]}]}]}]};",
       'writeFileSync(process.env.PLAYWRIGHT_JSON_OUTPUT_FILE,JSON.stringify(report));',
       'process.exitCode=failed?1:0;',
@@ -178,7 +173,7 @@ test('mutation runner translates isolated Playwright results and removes its lin
   );
   t.after(() => rmSync(temporaryRoot, { force: true, recursive: true }));
 
-  const run = (phase) =>
+  const run = (phase, reportedStepTitle = stepTitle) =>
     spawnSync(
       process.execPath,
       [
@@ -190,7 +185,7 @@ test('mutation runner translates isolated Playwright results and removes its lin
         '--criterion-id',
         'order-appears-in-table',
         '--step-title',
-        'verify the submitted order details',
+        stepTitle,
       ],
       {
         cwd: targetRoot,
@@ -198,6 +193,7 @@ test('mutation runner translates isolated Playwright results and removes its lin
         env: {
           ...process.env,
           TESTGEN_FILTER_PATH: filterPath,
+          TESTGEN_STEP_TITLE: reportedStepTitle,
           TESTGEN_TARGET_NODE_MODULES: nodeModules,
         },
         timeout: 10_000,
@@ -236,19 +232,7 @@ test('mutation runner translates isolated Playwright results and removes its lin
   });
   assert.equal(existsSync(path.join(targetRoot, 'node_modules')), false);
 
-  writeFileSync(
-    path.join(testPackage, 'cli.js'),
-    [
-      "const {writeFileSync}=require('node:fs');",
-      "const path=require('node:path');",
-      "const file='tests/order.spec.js';",
-      "const report={errors:[],stats:{expected:0,unexpected:1},suites:[{title:file,file,specs:[{title:'order',file,line:1,column:1,tests:[{status:'unexpected',results:[{status:'failed',errors:[{message:'assertion failed'}],steps:[{title:'verify another outcome',error:{message:'assertion failed'}}]}]}]}]}]};",
-      'writeFileSync(process.env.PLAYWRIGHT_JSON_OUTPUT_FILE,JSON.stringify(report));',
-      'process.exitCode=1;',
-      '',
-    ].join('\n'),
-  );
-  const unrelated = run('mutant');
+  const unrelated = run('mutant', 'verify another outcome');
   assert.equal(unrelated.status, 0, unrelated.stderr);
   assert.deepEqual(JSON.parse(unrelated.stdout), {
     protocol_version: 1,

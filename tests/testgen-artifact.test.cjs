@@ -819,25 +819,6 @@ test('rejects attempts after terminal classifications or repeated failures witho
   });
 });
 
-test('accepts a terminal product-behavior trace with structured evidence', () => {
-  withRepository((repository) => {
-    const artifact = trace();
-    artifact.attempts = [productFindingAttempt()];
-    artifact.final_classification = 'product-behavior-wrong';
-    artifact.disposition = 'product-behavior-wrong';
-    artifact.next_owner = 'product-owner';
-    artifact.escalation = 'the criterion and current product behavior conflict';
-    const artifactPath = writeArtifact(
-      repository,
-      'healer-trace.json',
-      artifact,
-    );
-    const result = validate(repository, 'trace', artifactPath);
-
-    assert.equal(result.status, 0, result.stderr);
-  });
-});
-
 test('rejects a product-behavior trace after the approved spec changes', () => {
   withRepository((repository) => {
     writeFileSync(

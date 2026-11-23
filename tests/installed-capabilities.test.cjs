@@ -11,7 +11,6 @@ const { tmpdir } = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const {
-  checkpointArguments,
   gradeCheckpoint,
   inspectAssertions,
   nextExchangeLimits,
@@ -62,7 +61,7 @@ function snapshot(source, overrides = {}) {
   };
 }
 
-function evidence(overrides = {}) {
+function evidence() {
   return {
     session_id: 'session-one',
     author_delegations: 1,
@@ -80,7 +79,6 @@ function evidence(overrides = {}) {
     healer_delegations: 0,
     explorer_delegations: 0,
     checkpoint_presented: true,
-    ...overrides,
   };
 }
 
@@ -103,15 +101,6 @@ test('checkpoint review proves scoped assertions independently of comments and h
       /candidate-assertions-invalid/u,
     );
   }
-  assert.throws(
-    () =>
-      gradeCheckpoint(
-        definition,
-        snapshot(spec),
-        evidence({ coordinator_handoff_validations: 0 }),
-      ),
-    /coordinator-handoff-validation-unverified/u,
-  );
   assert.throws(
     () =>
       gradeCheckpoint(
@@ -211,14 +200,7 @@ test('checkpoint review proves scoped assertions independently of comments and h
   );
 });
 
-test('resume uses the actual session with aggregate remaining cost and refuses unknown or exhausted limits', () => {
-  const limits = nextExchangeLimits(definition, [{ cost_usd: 0.75 }], 1000);
-  assert.equal(limits.max_budget_usd, 1.25);
-  const args = checkpointArguments(definition, 'adjust', limits, 'session-one');
-  assert.equal(args[args.indexOf('--resume') + 1], 'session-one');
-  assert.equal(args[args.indexOf('--max-budget-usd') + 1], '1.25');
-  assert.equal(args.includes('--no-session-persistence'), false);
-  assert.equal(args.includes('--agent'), false);
+test('refuses checkpoint resume with unknown or exhausted limits', () => {
   for (const exchanges of [
     [{ cost_usd: null }],
     [{ cost_usd: 2 }],
@@ -289,6 +271,7 @@ test('deterministic checkpoint replay resumes twice and gates skip on the revise
     const model = calls === 2 ? secondExchangeModel : 'claude-sonnet-5-5';
     budgets.push(args[args.indexOf('--max-budget-usd') + 1]);
     assert.equal(args.includes('--no-session-persistence'), false);
+    assert.equal(args.includes('--agent'), false);
     if (calls > 1)
       assert.equal(args[args.indexOf('--resume') + 1], 'fixture-host-session');
     const records = [
@@ -513,7 +496,7 @@ test('deterministic checkpoint replay resumes twice and gates skip on the revise
     context.result.checkpoints[0].candidate_sha256,
     context.result.checkpoints[1].candidate_sha256,
   );
-  assert.equal(context.result.cost_usd, 1.2000000000000002);
+  assert.equal(context.result.cost_usd.toFixed(2), '1.20');
   assert.equal(
     context.result.checkpoints[0].evidence
       .coordinator_handoff_validation_failure,

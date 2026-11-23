@@ -371,7 +371,6 @@ function loadPolicy(cwd, runId) {
     return {
       ...common,
       allowedBrowserActions: policy.allowed_browser_actions,
-      discoveryId: runId,
       kind: 'discovery',
     };
   }
