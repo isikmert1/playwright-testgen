@@ -1,9 +1,19 @@
 const { createHash } = require('node:crypto');
-const { lstatSync, readFileSync, realpathSync } = require('node:fs');
+const {
+  closeSync,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readFileSync,
+  readSync,
+  realpathSync,
+} = require('node:fs');
 const path = require('node:path');
+const { isContained } = require('../hooks/run-policy.cjs');
 
 const RUN_ID = /^tg-[a-f0-9]{24}$/u;
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$/u;
+const MAX_RUN_ARTIFACT_BYTES = 64 * 1024;
 const SCHEMAS = {
   handoff: {
     filename: 'author-handoff.v1.schema.json',
@@ -135,13 +145,7 @@ function comparableRepoPath(value) {
 }
 
 function isInside(root, candidate) {
-  const relative = path.relative(root, candidate);
-  return (
-    relative === '' ||
-    (relative !== '..' &&
-      !relative.startsWith(`..${path.sep}`) &&
-      !path.isAbsolute(relative))
-  );
+  return isContained(root, candidate, true);
 }
 
 function samePath(left, right) {
@@ -273,8 +277,54 @@ function prohibitedReasons(value, key = '') {
   return [...reasons];
 }
 
-function containsProhibited(value, key = '') {
-  return prohibitedReasons(value, key).length > 0;
+function readArtifactBytes(filename) {
+  const descriptor = openSync(filename, 'r');
+  try {
+    const stat = fstatSync(descriptor);
+    if (!stat.isFile() || stat.size > MAX_RUN_ARTIFACT_BYTES) return null;
+    const buffer = Buffer.alloc(MAX_RUN_ARTIFACT_BYTES + 1);
+    let length = 0;
+    while (length < buffer.length) {
+      const count = readSync(
+        descriptor,
+        buffer,
+        length,
+        buffer.length - length,
+      );
+      if (count === 0) break;
+      length += count;
+    }
+    return length <= MAX_RUN_ARTIFACT_BYTES ? buffer.subarray(0, length) : null;
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+function readRunArtifact(repository, runPolicy, runId, filename) {
+  const canonical = realpathSync(path.join(runPolicy.runDirectory, filename));
+  if (
+    !samePath(
+      canonical,
+      path.join(runPolicy.canonicalRunDirectory, filename),
+    ) ||
+    !isFile(canonical)
+  )
+    return null;
+  const bytes = readArtifactBytes(canonical);
+  if (bytes == null) return null;
+  const artifact = JSON.parse(bytes.toString('utf8'));
+  if (
+    !isObject(artifact) ||
+    artifact.run_id !== runId ||
+    typeof artifact.spec_path !== 'string' ||
+    !samePath(
+      path.resolve(repository, artifact.spec_path),
+      runPolicy.approvedSpec,
+    ) ||
+    prohibitedReasons(artifact).length > 0
+  )
+    return null;
+  return { artifact, bytes };
 }
 
 function validatePath(value, repository, errors, label) {
@@ -325,7 +375,6 @@ module.exports = {
   RUN_ID,
   TERMINAL_CLASSIFICATIONS,
   comparableRepoPath,
-  containsProhibited,
   isAttributeName,
   isFile,
   isIdentifier,
@@ -337,6 +386,7 @@ module.exports = {
   parseArgs,
   portable,
   prohibitedReasons,
+  readRunArtifact,
   rejectUnknown,
   report,
   requireFields,

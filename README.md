@@ -180,7 +180,7 @@ flowchart TD
     Review -->|adjust| Author
     Review -->|skip| Unverified[Keep the spec unexecuted]
     Review -->|run: validation passed| Healer["Healer<br/>Execute, repair within limits, or escalate"]
-    Healer -->|Passing spec + separate approval| Mutation["Optional mutation check<br/>Does the test catch the product change?"]
+    Healer -->|Passing spec + adapter approved before Author| Mutation["Optional mutation check<br/>Does the test catch the product change?"]
     Healer -->|No mutation check or execution blocked| Report[Report outcome and clean up]
     Mutation --> Report
     Unverified --> Report

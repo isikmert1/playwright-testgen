@@ -14,6 +14,7 @@ const {
   writeFileSync,
 } = require('node:fs');
 const path = require('node:path');
+const { isContained } = require('../hooks/run-policy.cjs');
 const {
   excluded,
   hasDefaultConfig,
@@ -38,17 +39,6 @@ class SetupError extends Error {
 
 function fail(code, reason) {
   throw new SetupError(code, reason);
-}
-
-function inside(root, candidate, allowRoot = false) {
-  const relative = path.relative(root, candidate);
-  return (
-    (allowRoot && relative === '') ||
-    (relative !== '' &&
-      relative !== '..' &&
-      !relative.startsWith(`..${path.sep}`) &&
-      !path.isAbsolute(relative))
-  );
 }
 
 function runGit(root, args, error = 'repository-unavailable') {
@@ -82,7 +72,7 @@ function relativePath(root, value, error) {
   if (typeof value !== 'string' || value.length === 0 || path.isAbsolute(value))
     fail(error);
   const absolute = path.resolve(root, value);
-  if (!inside(root, absolute)) fail(error);
+  if (!isContained(root, absolute)) fail(error);
   return path.relative(root, absolute).replaceAll('\\', '/');
 }
 
@@ -180,7 +170,7 @@ function sourceFingerprints(root, paths) {
       if (error instanceof SetupError) throw error;
       fail('profile-source-invalid');
     }
-    if (!inside(root, canonical)) fail('profile-source-invalid');
+    if (!isContained(root, canonical)) fail('profile-source-invalid');
     if (excluded(path.relative(root, canonical).replaceAll('\\', '/')))
       fail('profile-source-invalid', 'source-excluded');
     if (size > 64 * 1024) fail('profile-fingerprint-incomplete');
@@ -237,7 +227,8 @@ function validateStatePath(root, value, replace = false) {
     if (parent === ancestor) fail('state-path-invalid');
     ancestor = parent;
   }
-  if (!inside(root, realpathSync(ancestor), true)) fail('state-path-invalid');
+  if (!isContained(root, realpathSync(ancestor), true))
+    fail('state-path-invalid');
   if (existsSync(absolute)) {
     let canonical;
     try {
@@ -247,7 +238,7 @@ function validateStatePath(root, value, replace = false) {
       if (error instanceof SetupError) throw error;
       fail('state-path-invalid');
     }
-    if (!inside(root, canonical) || !replace) fail('state-path-exists');
+    if (!isContained(root, canonical) || !replace) fail('state-path-exists');
   }
   return { ok: true, path: relative, status: 'available' };
 }
@@ -547,13 +538,13 @@ function checkedProfilePath(root, createDirectory = false) {
     if (createDirectory) mkdirSync(directory, { recursive: true });
     if (
       !lstatSync(directory).isDirectory() ||
-      !inside(root, realpathSync(directory))
+      !isContained(root, realpathSync(directory))
     )
       fail('profile-path-invalid');
     try {
       if (
         !lstatSync(filename).isFile() ||
-        !inside(root, realpathSync(filename))
+        !isContained(root, realpathSync(filename))
       )
         fail('profile-path-invalid');
     } catch (error) {
@@ -579,7 +570,7 @@ function validateProfileBindings(root, profile) {
       (packagePath !== '.' &&
         packagePath.replaceAll('\\', '/') !==
           path.relative(root, packageDirectory).replaceAll('\\', '/')) ||
-      !inside(root, realpathSync(packageDirectory), true) ||
+      !isContained(root, realpathSync(packageDirectory), true) ||
       !lstatSync(packageDirectory).isDirectory() ||
       !lstatSync(path.join(packageDirectory, 'package.json')).isFile()
     )
@@ -602,7 +593,7 @@ function validateProfileBindings(root, profile) {
         !selectedConfigPath(root, config, packagePath) ||
         !Object.hasOwn(profile.freshness.sources, config) ||
         !lstatSync(path.join(root, config)).isFile() ||
-        !inside(root, realpathSync(path.join(root, config)))
+        !isContained(root, realpathSync(path.join(root, config)))
       )
         fail('profile-invalid');
     }
@@ -618,7 +609,7 @@ function validateProfileBindings(root, profile) {
       );
       if (
         !lstatSync(path.join(root, fixture)).isFile() ||
-        !inside(root, realpathSync(path.join(root, fixture)))
+        !isContained(root, realpathSync(path.join(root, fixture)))
       )
         fail('profile-invalid');
     }
@@ -747,7 +738,7 @@ function setAuthentication(options) {
     try {
       if (
         !lstatSync(absolute).isFile() ||
-        !inside(root, realpathSync(absolute))
+        !isContained(root, realpathSync(absolute))
       )
         fail('auth-path-invalid');
     } catch (error) {

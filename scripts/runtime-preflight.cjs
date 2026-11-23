@@ -100,16 +100,14 @@ function parseArguments(args) {
   return options;
 }
 
-function resolveRelative(root, value, error, allowRoot = false) {
+function resolveRelative(root, value, error) {
   if (typeof value !== 'string' || value.length === 0 || path.isAbsolute(value))
     fail(error);
   const absolute = path.resolve(root, value);
-  if (!isInside(root, absolute) && !(allowRoot && absolute === root))
-    fail(error);
+  if (!isInside(root, absolute)) fail(error);
   try {
     const canonical = realpathSync(absolute);
-    if (!isInside(root, canonical) && !(allowRoot && canonical === root))
-      fail(error);
+    if (!isInside(root, canonical)) fail(error);
     return canonical;
   } catch (caught) {
     if (caught instanceof PreflightError) throw caught;
@@ -254,7 +252,6 @@ function runtimePreflight(options) {
     repository,
     options.package,
     'package-selection-invalid',
-    true,
   );
   const manifest = path.join(packageDirectory, 'package.json');
   if (!existsSync(manifest)) fail('package-json-unavailable');

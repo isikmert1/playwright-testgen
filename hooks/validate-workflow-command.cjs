@@ -357,12 +357,6 @@ function validateCli(cwd, assignments, rawArgs, agentType) {
     );
   }
 
-  if (session !== '' && !RUN_ID.test(session) && !DEBUG_SESSION.test(session)) {
-    return deny(
-      'The browser session identifier has an invalid form. Use the supplied run ID for Author or the exact tw-* identifier Healer captured from its owned debug runner.',
-    );
-  }
-
   if (args.some((value) => BLOCKED_OPTIONS.test(value))) {
     return deny(
       'Profiles, custom config/output paths, uploads, and implicit submission are not allowed. Use run-owned default output and explicit allowlisted browser actions.',

@@ -37,14 +37,12 @@ function main() {
   }
   const runId = args[3];
   const policy = loadPolicy(repository, runId);
-  const handoff = policy && loadValidatedHandoff(repository, policy, runId);
-  if (handoff == null) {
+  const loaded = policy && loadValidatedHandoff(repository, policy, runId);
+  if (loaded == null) {
     fail('handoff-unavailable');
     return;
   }
-  const handoffBytes = readFileSync(
-    path.join(policy.runDirectory, 'handoff.json'),
-  );
+  const { handoff, sha256 } = loaded;
   const input = {
     schema_version: 'healer-input.v1',
     run_id: runId,
@@ -54,7 +52,7 @@ function main() {
     criteria: normalizedCriteria(handoff),
     source: {
       kind: 'author-handoff',
-      handoff_sha256: digest(handoffBytes),
+      handoff_sha256: sha256,
     },
   };
   const destination = path.join(policy.runDirectory, 'healer-input.json');

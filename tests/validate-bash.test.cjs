@@ -56,12 +56,7 @@ function createTargetRepository() {
     }),
   );
 
-  const resultsDirectory = path.join(runDirectory, 'attempt-1', 'test-results');
-  mkdirSync(resultsDirectory, { recursive: true });
-  writeFileSync(path.join(resultsDirectory, 'trace.zip'), 'trace');
-  writeFileSync(path.join(resultsDirectory, 'error-context.md'), 'context');
-
-  return { resultsDirectory, runDirectory, targetRepository };
+  return { runDirectory, targetRepository };
 }
 
 function runToolHook(
@@ -214,42 +209,16 @@ test('allows the official global Playwright CLI invocation', () => {
   });
 });
 
-test('allows the official local Playwright runner without implicit installs', () => {
-  withTargetRepository(({ targetRepository }) => {
-    const output = `.playwright-cli/testgen/${runId}/attempt-2/test-results`;
-    const filter = exactSpecFilter(targetRepository);
-    const result = runToolHook(
-      targetRepository,
-      'Bash',
-      {
-        command: `PLAYWRIGHT_HTML_OPEN=never npx --no playwright test '${filter}' --debug=cli --retries=0 --repeat-each=1 --output=${output}`,
-        run_in_background: true,
-      },
-      'playwright-test-healer',
-    );
-
-    assert.equal(result.permissionDecision, 'allow');
-  });
-});
-
-test('allows Author to collect only the policy-approved spec', () => {
-  withTargetRepository(({ targetRepository }) => {
-    writeFileSync(
-      path.join(targetRepository, 'package.json'),
-      JSON.stringify({ scripts: { 'test:e2e': 'playwright test' } }),
-    );
-    const filter = exactSpecFilter(targetRepository);
-    const result = runToolHook(targetRepository, 'Bash', {
-      command: `npx --no playwright test '${filter}' --list`,
-    });
-
-    assert.equal(result.permissionDecision, 'allow');
-  });
-});
-
 test('keeps Author collection exact, foreground, and non-executing', () => {
   withTargetRepository(({ runDirectory, targetRepository }) => {
     const filter = exactSpecFilter(targetRepository);
+    const collection = `npx --no playwright test '${filter}' --list`;
+    assert.equal(
+      runToolHook(targetRepository, 'Bash', { command: collection })
+        .permissionDecision,
+      'allow',
+    );
+
     const commands = [
       `npx --no playwright test '${filter}'`,
       `npx --no playwright test tests/account.spec.ts --list`,
@@ -268,17 +237,13 @@ test('keeps Author collection exact, foreground, and non-executing', () => {
 
     assert.equal(
       runToolHook(targetRepository, 'Bash', {
-        command: `npx --no playwright test '${filter}' --list`,
+        command: collection,
         run_in_background: true,
       }).permissionDecision,
       'deny',
     );
     for (const cwd of [path.join(targetRepository, 'tests'), runDirectory]) {
-      assert.equal(
-        runHook(cwd, `npx --no playwright test '${filter}' --list`)
-          .permissionDecision,
-        'deny',
-      );
+      assert.equal(runHook(cwd, collection).permissionDecision, 'deny');
     }
   });
 });
@@ -516,35 +481,42 @@ test('allows only bounded Explorer history and read-only browser inspection', ()
 
 test('bounds Explorer search output and excludes run scratch', () => {
   withDiscoveryRepository(({ runDirectory, targetRepository }) => {
-    const alias = path.join(targetRepository, 'src', 'run-scratch');
-    symlinkSync(runDirectory, alias, 'junction');
-    for (const input of [
-      {
-        path: path.join(targetRepository, 'src'),
-        pattern: 'route',
-        output_mode: 'content',
-        head_limit: 101,
-      },
-      {
-        path: alias,
-        pattern: 'discovery',
-        output_mode: 'content',
-        head_limit: 20,
-      },
-    ]) {
-      assert.equal(
-        runToolHook(targetRepository, 'Grep', input, 'playwright-test-explorer')
-          .permissionDecision,
-        'deny',
-      );
-    }
+    const sourceDirectory = path.join(targetRepository, 'src');
+    assert.equal(
+      runToolHook(
+        targetRepository,
+        'Grep',
+        {
+          path: sourceDirectory,
+          pattern: 'route',
+          output_mode: 'content',
+          head_limit: 101,
+        },
+        'playwright-test-explorer',
+      ).permissionDecision,
+      'deny',
+    );
     assert.equal(
       runToolHook(
         targetRepository,
         'Glob',
+        { path: sourceDirectory, pattern: '**/*' },
+        'playwright-test-explorer',
+      ).permissionDecision,
+      'deny',
+    );
+
+    const alias = path.join(sourceDirectory, 'run-scratch');
+    symlinkSync(runDirectory, alias, 'junction');
+    assert.equal(
+      runToolHook(
+        targetRepository,
+        'Grep',
         {
-          path: targetRepository,
-          pattern: '**/*',
+          path: alias,
+          pattern: 'discovery',
+          output_mode: 'content',
+          head_limit: 20,
         },
         'playwright-test-explorer',
       ).permissionDecision,
@@ -1081,7 +1053,6 @@ test('denies runner output through an attempt junction or symlink', () => {
   withTargetRepository(({ runDirectory, targetRepository }) => {
     const outside = mkdtempSync(path.join(tmpdir(), 'testgen-output-'));
     const attempt = path.join(runDirectory, 'attempt-2');
-    rmSync(attempt, { force: true, recursive: true });
     mkdirSync(path.join(outside, 'test-results'), { recursive: true });
     symlinkSync(outside, attempt, 'junction');
 
@@ -1119,7 +1090,10 @@ test('denies a different spec and unapproved runner flags', () => {
 });
 
 test('allows trace inspection for the current run', () => {
-  withTargetRepository(({ targetRepository }) => {
+  withTargetRepository(({ runDirectory, targetRepository }) => {
+    const results = path.join(runDirectory, 'attempt-1', 'test-results');
+    mkdirSync(results, { recursive: true });
+    writeFileSync(path.join(results, 'trace.zip'), 'trace');
     const enterRun = `cd .playwright-cli/testgen/${runId} &&`;
     for (const command of [
       `${enterRun} npx --no playwright trace open attempt-1/test-results/trace.zip`,

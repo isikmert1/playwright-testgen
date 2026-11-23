@@ -1,17 +1,16 @@
 const { createHash } = require('node:crypto');
-const { readFileSync, realpathSync, statSync } = require('node:fs');
+const { readFileSync } = require('node:fs');
 const path = require('node:path');
 const {
-  containsProhibited,
   isFile,
   isIdentifier,
   isObject,
   isText,
   loadSchema,
   portable,
+  readRunArtifact,
   rejectUnknown,
   requireFields,
-  samePath,
   validatePath,
   validateStringArray,
 } = require('./artifact-validation-common.cjs');
@@ -137,17 +136,16 @@ function validateSource(artifact, repository, runPolicy, errors) {
     errors.push('input-source-mode-mismatch');
     return;
   }
-  const handoff = loadValidatedHandoff(repository, runPolicy, artifact.run_id);
-  if (handoff == null) {
+  const loaded = loadValidatedHandoff(repository, runPolicy, artifact.run_id);
+  if (loaded == null) {
     errors.push('input-handoff-unavailable');
     return;
   }
-  const handoffPath = path.join(runPolicy.runDirectory, 'handoff.json');
-  if (digest(readFileSync(handoffPath)) !== artifact.source.handoff_sha256)
+  if (loaded.sha256 !== artifact.source.handoff_sha256)
     errors.push('input-handoff-digest-mismatch');
   if (
     JSON.stringify(artifact.criteria) !==
-    JSON.stringify(normalizedCriteria(handoff))
+    JSON.stringify(normalizedCriteria(loaded.handoff))
   )
     errors.push('input-criteria-mismatch');
 }
@@ -194,30 +192,16 @@ function validateHealerInput(
 
 function loadHealerInput(repository, runPolicy, runId) {
   if (loadSchema('input') == null) return null;
-  const inputPath = path.join(runPolicy.runDirectory, 'healer-input.json');
   try {
-    const canonical = realpathSync(inputPath);
-    if (
-      !samePath(
-        canonical,
-        path.join(runPolicy.canonicalRunDirectory, 'healer-input.json'),
-      ) ||
-      !isFile(canonical) ||
-      statSync(canonical).size > 64 * 1024
-    )
-      return null;
-    const artifact = JSON.parse(readFileSync(canonical, 'utf8'));
-    if (!isObject(artifact) || containsProhibited(artifact)) return null;
+    const loaded = readRunArtifact(
+      repository,
+      runPolicy,
+      runId,
+      'healer-input.json',
+    );
+    if (loaded == null) return null;
+    const { artifact } = loaded;
     const errors = [];
-    if (artifact.run_id !== runId) errors.push('run-id-mismatch');
-    if (
-      typeof artifact.spec_path !== 'string' ||
-      !samePath(
-        path.resolve(repository, artifact.spec_path),
-        runPolicy.approvedSpec,
-      )
-    )
-      errors.push('policy-spec-mismatch');
     validateHealerInput(artifact, repository, runPolicy, errors, false);
     return errors.length === 0 ? artifact : null;
   } catch {
@@ -227,7 +211,6 @@ function loadHealerInput(repository, runPolicy, runId) {
 
 module.exports = {
   loadHealerInput,
-  normalizeAssertionLocation,
   normalizedCriteria,
   validateHealerInput,
 };

@@ -738,8 +738,8 @@ test('changes dataset identity when Windows evaluation cleanup changes', () => {
     const before = copiedScorer.datasetDigest();
     assert.equal(before, datasetDigest());
     writeFileSync(
-      path.join(directory, 'scripts/windows-process-tree.cjs'),
-      'module.exports = { windowsProcessTree: () => null };\n',
+      path.join(directory, 'scripts/windows-process-job.cs'),
+      '// changed native launcher\n',
     );
     assert.notEqual(copiedScorer.datasetDigest(), before);
   } finally {

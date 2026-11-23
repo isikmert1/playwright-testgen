@@ -391,16 +391,8 @@ function validateRoleArtifactWrite(payload, policies, absolute, canonical) {
   return null;
 }
 
-function validateFileAccess(payload) {
-  const filePath = payload?.tool_input?.file_path;
-  if (typeof filePath !== 'string' || filePath.length === 0) {
-    return deny(
-      'The file mutation path is missing. Retry Edit or Write with the exact intended repository path.',
-    );
-  }
-
-  const absolute = path.resolve(payload.cwd, filePath);
-  const lexical = normalizePath(absolute);
+function resolveFileTarget(cwd, filePath) {
+  const absolute = path.resolve(cwd, filePath);
   let canonical = absolute;
   try {
     canonical = realpathSync(absolute);
@@ -417,6 +409,156 @@ function validateFileAccess(payload) {
       // The normal tool sandbox handles paths with no resolvable ancestor.
     }
   }
+  return { absolute, canonical };
+}
+
+function validateExplorerFileAccess(payload, policies, absolute, canonical) {
+  if (payload.tool_name !== 'Read') {
+    return deny(
+      'Explorer is read-only. It cannot create or modify repository or run files.',
+    );
+  }
+  const policy = explorerPolicy(policies, absolute, canonical);
+  if (policy == null || isExcludedDiscoveryPath(policy, absolute, canonical)) {
+    return deny(
+      'Explorer reads require one valid discovery policy and one contained source, test, or project-metadata file.',
+    );
+  }
+  try {
+    if (!statSync(absolute).isFile()) throw new Error('not a file');
+  } catch {
+    return deny('Explorer may read only an existing regular repository file.');
+  }
+  return decision('allow', 'Read is bound to the Explorer discovery policy.');
+}
+
+function validateHealerRead(policies, absolute, canonical) {
+  for (const policy of policies) {
+    if (
+      samePath(absolute, policy.approvedSpec) &&
+      samePath(canonical, policy.canonicalApprovedSpec)
+    ) {
+      return decision('allow', 'Read is bound to the approved spec.');
+    }
+
+    for (const filename of ['healer-input.json', 'healer-trace.json']) {
+      const expected = path.join(policy.runDirectory, filename);
+      if (!samePath(absolute, expected)) continue;
+      const canonicalExpected = path.join(
+        policy.canonicalRunDirectory,
+        filename,
+      );
+      if (!samePath(canonical, canonicalExpected)) {
+        return deny(
+          'The requested run-artifact read escapes its approved canonical path.',
+        );
+      }
+      return decision(
+        'allow',
+        'Read is bound to an exact Healer run artifact.',
+      );
+    }
+  }
+  return {};
+}
+
+const COORDINATOR_OWNED_FILES = [
+  'command-policy.json',
+  'change-manifest.json',
+  'healer-input.json',
+  'mutation-recovery.json',
+  'vacuity-report.json',
+];
+
+function aliasesCoordinatorArtifact(policies, absolute, canonical) {
+  return COORDINATOR_OWNED_FILES.some((filename) =>
+    policies.some((policy) => {
+      const expected = path.join(policy.runDirectory, filename);
+      const canonicalExpected = path.join(
+        policy.canonicalRunDirectory,
+        filename,
+      );
+      return (
+        samePath(absolute, expected) ||
+        samePath(canonical, canonicalExpected) ||
+        sameFile(expected, absolute) ||
+        sameFile(expected, canonical)
+      );
+    }),
+  );
+}
+
+function validateGenerationWrite(payload, policies, absolute, canonical) {
+  const artifactWrite = validateRoleArtifactWrite(
+    payload,
+    policies,
+    absolute,
+    canonical,
+  );
+  if (artifactWrite != null) return artifactWrite;
+
+  const runPaths = [absolute, canonical]
+    .map(normalizePath)
+    .filter((target) => runIdFromOwnedPath(target) != null);
+  if (
+    runPaths.some((target) =>
+      comparablePath(target).endsWith('/.playwright/cli.config.json'),
+    )
+  ) {
+    return deny(
+      'Playwright CLI configuration is disabled inside run scratch so repository and user settings cannot alter browser behavior. Use the isolated default configuration required by the workflow.',
+    );
+  }
+
+  const namesCoordinatorArtifact = COORDINATOR_OWNED_FILES.some((filename) =>
+    runPaths.some((target) => samePath(path.basename(target), filename)),
+  );
+  if (
+    namesCoordinatorArtifact ||
+    aliasesCoordinatorArtifact(policies, absolute, canonical)
+  ) {
+    return deny(
+      'This run artifact is Coordinator-owned and immutable to Author and Healer. Return the update to Coordinator instead of editing it.',
+    );
+  }
+
+  const approved = policies.some((policy) => {
+    const candidates = [
+      {
+        absolute: policy.approvedSpec,
+        canonical: policy.canonicalApprovedSpec,
+      },
+      ...policy.allowedWritePaths,
+    ];
+    return candidates.some(
+      (candidate) =>
+        samePath(absolute, candidate.absolute) &&
+        (!existsSync(absolute) ||
+          (samePath(canonical, candidate.canonical) &&
+            statSync(absolute).nlink === 1)),
+    );
+  });
+  if (!approved) {
+    return deny(
+      'This mutation is outside the approved write paths. Edit or create only approved_spec or an exact existing helper/test-id path recorded by Coordinator in allowed_write_paths.',
+    );
+  }
+
+  return decision(
+    'allow',
+    'Mutation is bound to an exact run-policy write path.',
+  );
+}
+
+function validateFileAccess(payload) {
+  const filePath = payload?.tool_input?.file_path;
+  if (typeof filePath !== 'string' || filePath.length === 0) {
+    return deny(
+      'The file mutation path is missing. Retry Edit or Write with the exact intended repository path.',
+    );
+  }
+
+  const { absolute, canonical } = resolveFileTarget(payload.cwd, filePath);
 
   if (isRepositoryProfile(absolute, canonical)) {
     return deny(
@@ -450,7 +592,6 @@ function validateFileAccess(payload) {
       : pluginRead;
   }
 
-  const normalized = normalizePath(canonical);
   if (discovered.invalid) {
     return deny(
       'A discovered Testgen run policy is invalid. Return to Coordinator to repair or remove the invalid command-policy.json before governed access continues.',
@@ -475,30 +616,13 @@ function validateFileAccess(payload) {
     );
   }
 
-  if (isExplorer(payload)) {
-    if (payload.tool_name !== 'Read') {
-      return deny(
-        'Explorer is read-only. It cannot create or modify repository or run files.',
-      );
-    }
-    const policy = explorerPolicy(nearbyPolicies, absolute, canonical);
-    if (
-      policy == null ||
-      isExcludedDiscoveryPath(policy, absolute, canonical)
-    ) {
-      return deny(
-        'Explorer reads require one valid discovery policy and one contained source, test, or project-metadata file.',
-      );
-    }
-    try {
-      if (!statSync(absolute).isFile()) throw new Error('not a file');
-    } catch {
-      return deny(
-        'Explorer may read only an existing regular repository file.',
-      );
-    }
-    return decision('allow', 'Read is bound to the Explorer discovery policy.');
-  }
+  if (isExplorer(payload))
+    return validateExplorerFileAccess(
+      payload,
+      nearbyPolicies,
+      absolute,
+      canonical,
+    );
 
   const generationPolicies = nearbyPolicies.filter(
     (policy) => policy.kind === 'generation',
@@ -509,125 +633,17 @@ function validateFileAccess(payload) {
     );
   }
 
-  if (
-    payload.tool_name === 'Read' &&
-    payload.agent_type.endsWith('playwright-test-healer')
-  ) {
-    for (const policy of generationPolicies) {
-      if (
-        samePath(absolute, policy.approvedSpec) &&
-        samePath(canonical, policy.canonicalApprovedSpec)
-      ) {
-        return decision('allow', 'Read is bound to the approved spec.');
-      }
-
-      for (const filename of ['healer-input.json', 'healer-trace.json']) {
-        const expected = path.join(policy.runDirectory, filename);
-        if (!samePath(absolute, expected)) continue;
-        const canonicalExpected = path.join(
-          policy.canonicalRunDirectory,
-          filename,
-        );
-        if (!samePath(canonical, canonicalExpected)) {
-          return deny(
-            'The requested run-artifact read escapes its approved canonical path.',
-          );
-        }
-        return decision(
-          'allow',
-          'Read is bound to an exact Healer run artifact.',
-        );
-      }
-    }
+  if (payload.tool_name === 'Read') {
+    if (payload.agent_type.endsWith('playwright-test-healer'))
+      return validateHealerRead(generationPolicies, absolute, canonical);
+    return {};
   }
 
-  if (payload.tool_name === 'Read') return {};
-
-  const artifactWrite = validateRoleArtifactWrite(
+  return validateGenerationWrite(
     payload,
     generationPolicies,
     absolute,
     canonical,
-  );
-  if (artifactWrite != null) return artifactWrite;
-
-  if (
-    (runIdFromOwnedPath(lexical) != null &&
-      comparablePath(lexical).endsWith('/.playwright/cli.config.json')) ||
-    (runIdFromOwnedPath(normalized) != null &&
-      comparablePath(normalized).endsWith('/.playwright/cli.config.json'))
-  ) {
-    return deny(
-      'Playwright CLI configuration is disabled inside run scratch so repository and user settings cannot alter browser behavior. Use the isolated default configuration required by the workflow.',
-    );
-  }
-
-  const coordinatorOwnedFiles = [
-    'command-policy.json',
-    'change-manifest.json',
-    'healer-input.json',
-    'mutation-recovery.json',
-    'vacuity-report.json',
-  ];
-  const namesRunOwned = coordinatorOwnedFiles.some(
-    (filename) =>
-      (samePath(path.basename(lexical), filename) &&
-        runIdFromOwnedPath(lexical) != null) ||
-      (samePath(path.basename(normalized), filename) &&
-        runIdFromOwnedPath(normalized) != null),
-  );
-  if (namesRunOwned) {
-    return deny(
-      'This run artifact is Coordinator-owned and immutable to Author and Healer. Return the update to Coordinator instead of editing it.',
-    );
-  }
-
-  for (const filename of coordinatorOwnedFiles) {
-    const aliasesCoordinatorOwned = generationPolicies.some((policy) => {
-      const expected = path.join(policy.runDirectory, filename);
-      const canonicalExpected = path.join(
-        policy.canonicalRunDirectory,
-        filename,
-      );
-      return (
-        samePath(absolute, expected) ||
-        samePath(canonical, canonicalExpected) ||
-        sameFile(expected, absolute) ||
-        sameFile(expected, canonical)
-      );
-    });
-    if (aliasesCoordinatorOwned) {
-      return deny(
-        'This run artifact is Coordinator-owned and immutable to Author and Healer. Return the update to Coordinator instead of editing it.',
-      );
-    }
-  }
-
-  const approved = generationPolicies.some((policy) => {
-    const candidates = [
-      {
-        absolute: policy.approvedSpec,
-        canonical: policy.canonicalApprovedSpec,
-      },
-      ...policy.allowedWritePaths,
-    ];
-    return candidates.some(
-      (candidate) =>
-        samePath(absolute, candidate.absolute) &&
-        (!existsSync(absolute) ||
-          (samePath(canonical, candidate.canonical) &&
-            statSync(absolute).nlink === 1)),
-    );
-  });
-  if (!approved) {
-    return deny(
-      'This mutation is outside the approved write paths. Edit or create only approved_spec or an exact existing helper/test-id path recorded by Coordinator in allowed_write_paths.',
-    );
-  }
-
-  return decision(
-    'allow',
-    'Mutation is bound to an exact run-policy write path.',
   );
 }
 

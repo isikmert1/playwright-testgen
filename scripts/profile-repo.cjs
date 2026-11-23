@@ -8,6 +8,7 @@ const {
   realpathSync,
 } = require('node:fs');
 const path = require('node:path');
+const { isContained } = require('../hooks/run-policy.cjs');
 
 const DEFAULT_LIMITS = Object.freeze({
   maxListedPaths: 4096,
@@ -81,16 +82,6 @@ function git(cwd, args, deadline) {
   return result.stdout;
 }
 
-function inside(root, candidate) {
-  const relative = path.relative(root, candidate);
-  return (
-    relative === '' ||
-    (relative !== '..' &&
-      !relative.startsWith('..' + path.sep) &&
-      !path.isAbsolute(relative))
-  );
-}
-
 function safeRelative(value) {
   const relative = value.replaceAll('\\', '/').replace(/\/$/u, '');
   if (
@@ -130,7 +121,7 @@ function nestedRoot(root, relative) {
   let current = root;
   for (const part of parts) {
     current = path.join(current, part);
-    if (!inside(root, current)) return null;
+    if (!isContained(root, current, true)) return null;
     if (current !== root && existsSync(path.join(current, '.git')))
       return path.relative(root, current).replaceAll('\\', '/');
   }
@@ -141,7 +132,7 @@ function ownedFile(root, relative) {
   const absolute = path.join(root, relative);
   const stat = lstatSync(absolute);
   const resolved = realpathSync(absolute);
-  if (!stat.isFile() || stat.nlink !== 1 || !inside(root, resolved))
+  if (!stat.isFile() || stat.nlink !== 1 || !isContained(root, resolved, true))
     return null;
   const resolvedRelative = path.relative(root, resolved).replaceAll('\\', '/');
   if (excluded(resolvedRelative) || nestedRoot(root, resolvedRelative) != null)
@@ -643,7 +634,7 @@ function profileRepository({
         git(cwd, ['rev-parse', '--show-cdup'], deadline).trim(),
       ),
     );
-    if (!inside(root, cwd)) fail('repository-root-invalid');
+    if (!isContained(root, cwd, true)) fail('repository-root-invalid');
   } catch (error) {
     if (Date.now() >= deadline || error.message === 'time-budget')
       fail('time-budget');

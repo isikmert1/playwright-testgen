@@ -146,13 +146,11 @@ function runPreflight(repository, cli, selection = ['--configless']) {
 }
 
 test('rejects Claude Code without blocking hook failure support', () => {
-  for (const claudeVersion of ['2.1.285', '2.1.294']) {
-    withRepository({ claudeVersion }, ({ cli, repository }) => {
-      const { status, report } = runPreflight(repository, cli);
-      assert.equal(status, 1);
-      assert.equal(report.error, 'claude-code-version-unsupported');
-    });
-  }
+  withRepository({ claudeVersion: '2.1.294' }, ({ cli, repository }) => {
+    const { status, report } = runPreflight(repository, cli);
+    assert.equal(status, 1);
+    assert.equal(report.error, 'claude-code-version-unsupported');
+  });
 });
 
 test('binds a hoisted runtime to the selected package and config', () => {

@@ -183,9 +183,10 @@ verification. Successful cleanup removes the reservation; failed cleanup keeps
 it for supervised recovery under `cleanup-contract.md` while preserving the
 primary result separately.
 
-On Windows, verified process-tree cleanup requires Windows PowerShell
-(`powershell.exe`). If termination cannot be verified, the checker retains the
-worktree and recovery record and reports failed cleanup.
+On Windows, the checker uses a Job Object to track the runner and its child
+processes. It compiles the launcher with the system .NET Framework compiler
+(`csc.exe`). If termination cannot be verified, the checker retains the worktree
+and recovery record and reports failed cleanup.
 
 The approved target runner must not detach children. It owns normal server and
 test-process shutdown; the outer checker owns the adapter timeout and

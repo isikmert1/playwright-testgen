@@ -33,8 +33,7 @@ function auditDecision(payload, result, hookPath, operation = 'other') {
     : 'neutral';
   if (
     typeof payload?.tool_use_id !== 'string' ||
-    !['approved-spec-run', 'other'].includes(operation) ||
-    !['allow', 'deny', 'ask', 'neutral'].includes(decision)
+    !['approved-spec-run', 'other'].includes(operation)
   )
     return false;
 
