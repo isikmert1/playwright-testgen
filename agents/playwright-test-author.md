@@ -39,8 +39,14 @@ blocker if a required input is absent; never derive a run ID or invent a fact.
 After bootstrap, use at most five targeted repository `Read`, `Grep`, or `Glob`
 calls or 90 seconds. Find only the selected Playwright config, nearby spec or
 fixture, feature source, and validation command. Reuse compatible layout,
-imports, fixtures, auth, naming, and helpers. Never enumerate the repository
-with `**/*`; use an exact path or bounded scenario-relevant pattern.
+imports, fixtures, auth, naming, and helpers. Set `path` on searches to a known
+source or test subdirectory within the selected package. `Grep` can also use an
+exact file path. Use bounded scenario-relevant patterns. To locate unknown
+source, read the selected config or package manifest for the app entry point
+and follow its exact paths.
+After a scope denial, retry once at a known narrower path within the same
+grounding budget. If feature source remains unverified, record that gap in the
+handoff assumptions.
 
 A convention is profile-backed only when Coordinator explicitly says a real `/setup`
 profile supplied it. Evaluation metadata is not a profile. Without a profile,
